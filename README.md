@@ -50,8 +50,13 @@ python3 -m pip install kraken Pillow PySide6 torch
 ### Windows (PowerShell oder CMD)
 
 ```powershell
-python -m pip install --upgrade pip
-python -m pip install kraken Pillow PySide6 torch
+python.exe -m pip install --upgrade pip
+```
+```
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+```
+pip install pyside6 pillow kraken shapely lxml numpy scipy
 ```
 
 ---
