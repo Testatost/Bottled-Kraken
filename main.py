@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Tuple, Dict, Callable
 
-# GUI Framework
+# GUI-Framework
 from PySide6.QtCore import Qt, QThread, Signal, QRectF, QUrl, QTimer, QSize, QPointF, QPoint, QDateTime, QLocale
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
@@ -25,23 +25,23 @@ from PySide6.QtWidgets import (
     QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit, QToolButton,
 )
 
-# PySide object validity helper
+# PySide-Helfer zur Objekt-Validitätsprüfung
 from shiboken6 import isValid
 
-# Image & PDF
+# Bild & PDF
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
 
-# Kraken & ML
+# Kraken & ML (Machine Learning)
 warnings.filterwarnings("ignore", message="Using legacy polygon extractor*", category=UserWarning)
 from kraken import blla, rpred, serialization, pageseg, binarization
 from kraken.lib import models, vgsl
 import torch
 
 # -----------------------------
-# CONSTANTS
+# KONSTANTEN
 # -----------------------------
 READING_MODES = {
     "TB_LR": 0,
@@ -84,7 +84,7 @@ THEMES = {
 ZENODO_URL = "https://zenodo.org/communities/ocr_models/records?q=&l=list&p=1&s=10&sort=mostdownloaded"
 
 # -----------------------------
-# TRANSLATIONS
+# ÜBERSETZUNGEN
 # -----------------------------
 TRANSLATIONS = {
     "de": {
@@ -568,9 +568,8 @@ TRANSLATIONS = {
 BBox = Tuple[int, int, int, int]
 Point = Tuple[float, float]
 
-
 # -----------------------------
-# DATA CLASSES
+# DATENKLASSEN
 # -----------------------------
 @dataclass
 class RecordView:
@@ -578,9 +577,7 @@ class RecordView:
     text: str
     bbox: Optional[BBox]
 
-
 UndoSnapshot = Tuple[List[Tuple[str, Optional[BBox]]], int]
-
 
 @dataclass
 class TaskItem:
@@ -591,7 +588,6 @@ class TaskItem:
     edited: bool = False
     undo_stack: List[UndoSnapshot] = field(default_factory=list)
     redo_stack: List[UndoSnapshot] = field(default_factory=list)
-
 
 @dataclass
 class OCRJob:
@@ -604,12 +600,10 @@ class OCRJob:
     export_dir: Optional[str]
     segmenter_mode: str = "blla"
 
-
 # -----------------------------
-# GEOMETRY & SORTING
+# GEOMETRIE & SORTIERUNG
 # -----------------------------
 Point = Tuple[float, float]
-
 
 def _coerce_points(obj: Any) -> List[Point]:
     if obj is None:
@@ -630,7 +624,6 @@ def _coerce_points(obj: Any) -> List[Point]:
             return pts
     return []
 
-
 def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, int, int, int]]:
     if not points:
         return None
@@ -643,7 +636,6 @@ def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, 
     if x1 <= x0 or y1 <= y0:
         return None
     return x0, y0, x1, y1
-
 
 def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
     bbox = getattr(r, "bbox", None)
@@ -674,7 +666,6 @@ def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
             return x0, y0 - vpad, x1, y1 + vpad
     return None
 
-
 def baseline_length(bl) -> float:
     pts = _coerce_points(bl)
     if len(pts) < 2:
@@ -683,18 +674,15 @@ def baseline_length(bl) -> float:
     x2, y2 = pts[-1]
     return math.hypot(x2 - x1, y2 - y1)
 
-
 # Vertikale Separator-Records (Spaltentrenner)
 VSEP_RE = re.compile(r'^[|│┃¦︱︳]+$')  # | │ ┃ ¦ ︱ ︳
-
 
 # Horizontale Separator-Records (Zeilentrenner)
 HSEP_RE = re.compile(r'^[_\-\u2500\u2501\u2504\u2505]{3,}$')  # _ - ─ ━ etc. (mind. 3)
 
-
 def sort_records_reading_order(records, image_width: int, image_height: int,
                                reading_mode: int = READING_MODES["TB_LR"]):
-    # ---------- helpers ----------
+    # ---------- Helfer ----------
     def cx(bb):
         return (bb[0] + bb[2]) / 2.0
 
@@ -718,13 +706,13 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             return vs[f]
         return vs[f] + (vs[c] - vs[f]) * (k - f)
 
-    # Direction flags
-    rev_y = (reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"]))  # bottom->top
-    rev_cols = (reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"]))  # columns right->left
+    # Richtungs-Flags
+    rev_y = (reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"]))  # unten -> oben
+    rev_cols = (reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"]))  # Spalten rechts -> links
 
     W = max(1, int(image_width))
 
-    # ---------- collect bboxes ----------
+    # ---------- BBoxes sammeln ----------
     raw = []
     for r in records:
         bb = record_bbox(r)
@@ -733,7 +721,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     if not raw:
         return list(records)
 
-    # ---------- estimate skew angle from baselines (best) ----------
+    # ---------- Schräglage (Skew) aus Baselines schätzen (am besten) ----------
     angles = []
     for r, _ in raw:
         bl = getattr(r, "baseline", None)
@@ -745,12 +733,12 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             dy = (y2 - y1)
             if abs(dx) > 1.0:
                 a = math.atan2(dy, dx)
-                # reject crazy angles
+                # extrem schräge Winkel verwerfen
                 if abs(a) < math.radians(20):
                     angles.append(a)
 
     skew = statistics.median(angles) if angles else 0.0
-    # rotate coordinates by -skew (deskew)
+    # Koordinaten um -skew rotieren (Entzerren / Deskew)
     cs = math.cos(-skew)
     sn = math.sin(-skew)
 
@@ -758,7 +746,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     Hc = max(1.0, float(image_height)) / 2.0
 
     def rot(x, y):
-        # translate -> rotate -> translate back
+        # verschieben -> rotieren -> zurückverschieben
         x -= Wc
         y -= Hc
         xr = x * cs - y * sn
@@ -777,7 +765,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
         dbb = deskew_bb(bb)
         items.append((r, bb, dbb))
 
-    # ---------- typical line height (deskewed) ----------
+    # ---------- typische Zeilenhöhe (entzerrt / deskewed) ----------
     hs = [(dbb[3] - dbb[1]) for _, _, dbb in items if (dbb[3] - dbb[1]) > 0]
     med_h = sorted(hs)[len(hs) // 2] if hs else 14.0
     MIN_H = max(10.0, 0.6 * med_h)
@@ -785,14 +773,14 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     def is_fullwidth(dbb):
         return (dbb[2] - dbb[0]) >= 0.82 * W
 
-    # body candidates
+    # Kandidaten für Haupttext (Body)
     body = [(r, bb, dbb) for (r, bb, dbb) in items if (dbb[3] - dbb[1]) >= MIN_H and not is_fullwidth(dbb)]
     if len(body) < 8:
-        # fallback: deskewed y then x
+        # Fallback: nach entzerrtem y, dann x sortieren
         ordered = sorted(items, key=lambda x: (cy(x[2]), cx(x[2])), reverse=rev_y)
         return [r for r, _, _ in ordered]
 
-    # ---------- header/footer by y quantiles (deskewed) ----------
+    # ---------- Header/Footer über y-Quantile bestimmen (entzerrt) ----------
     ys_top = [dbb[1] for _, _, dbb in body]
     ys_bot = [dbb[3] for _, _, dbb in body]
     body_top = quant(ys_top, 0.08)
@@ -818,8 +806,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     header_sorted = sort_y_then_x(header)
     footer_sorted = sort_y_then_x(footer)
 
-    # ---------- detect vertical separators ('|', '│', '┃') as gutters ----------
-    # We treat records that are basically only "|" and are tall+thin as separators.
+    # ---------- Vertikale Separatoren ('|', '│', '┃') als Spaltengassen erkennen ----------
     sep_x = []
     for r, bb, dbb in midband:
         pred = getattr(r, "prediction", "")
@@ -841,17 +828,15 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             filtered.append(x)
     sep_x = filtered
 
-    # ---------- build columns ----------
+    # ---------- Spalten aufbauen ----------
     mid_text = [(r, bb, dbb) for (r, bb, dbb) in midband if (dbb[3] - dbb[1]) >= MIN_H and not is_fullwidth(dbb)]
 
     # ==========================================================
-    # 2-COLUMN FALLBACK (wie alter Code) – nur wenn <=2 Spalten
+    # 2-Spalten FALLBACK (wie alter Code) – nur wenn <=2 Spalten
     # ==========================================================
     def _estimate_strong_columns(mid_items):
-        """
-        Zählt 'echte' Spalten grob über x0-Cluster.
-        Gibt 1 / 2 / 3 (3 = 3 oder mehr) zurück.
-        """
+        # Zählt 'echte' Spalten grob über x0-Cluster.
+        # Gibt 1 / 2 / 3 (3 = 3 oder mehr) zurück.
         if not mid_items:
             return 1
 
@@ -970,10 +955,10 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
         return [r for r, _, _ in header_sorted] + [r for r, _, _ in core] + [r for r, _, _ in footer_sorted]
 
-    # If we have explicit separators, use them as boundaries:
-    # columns = count(separators) + 1
+    # Wenn explizite Separatoren da sind, nutzen wir sie als Grenzen:
+    # Spalten = Anzahl(Separatoren) + 1
     if len(sep_x) >= 1:
-        bounds = sep_x[:]  # each is a boundary x
+        bounds = sep_x[:]  # jede Position ist eine x-Grenze
         ncols = len(bounds) + 1
 
         GUTTER = max(18.0, 0.01 * W)  # Schutzbereich um die Trennlinie
@@ -1008,10 +993,10 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             cols[col_index_for(dbb)].append((r, bb, dbb))
 
     else:
-        # No explicit separators: cluster by left edge x0 (deskewed), but robust against skew/indent
-        x_threshold = max(55.0, 0.07 * W)  # a bit larger -> skew tolerant
-        indent_dx = max(30.0, 0.05 * W)  # merge indents more aggressively
-        min_items_for_real_col = max(10, int(0.12 * len(mid_text)))  # require stronger evidence
+        # Keine expliziten Separatoren: nach linker Kante x0 (entzerrt) clustern, robust gegen Schräglage/Einrückung
+        x_threshold = max(55.0, 0.07 * W)  # etwas größer -> toleranter bei Schräglage
+        indent_dx = max(30.0, 0.05 * W)  # Einrückungen aggressiver zusammenführen
+        min_items_for_real_col = max(10, int(0.12 * len(mid_text)))  # stärkere Evidenz verlangen
 
         clusters = []  # {"x": mean_x0, "items":[...]}
         for r, bb, dbb in mid_text:
@@ -1028,7 +1013,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
         clusters.sort(key=lambda c: c["x"])
 
-        # --- NEW: merge "indent/center" clusters by strong horizontal overlap ---
+        # --- NEU: "Einrückungs-/Zentrier"-Cluster bei starkem horizontalen Überlapp zusammenführen ---
         def q(vals, p):
             if not vals:
                 return None
@@ -1055,13 +1040,13 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             w1 = max(1.0, r1 - l1)
             w2 = max(1.0, r2 - l2)
 
-            # overlap ratio (indent/center => high, real columns => near 0)
+            # Überlappungsgrad (Einrückung/Zentrierung => hoch, echte Spalten => nahe 0)
             overlap = max(0.0, min(r1, r2) - max(l1, l2))
             overlap_ratio = overlap / max(1.0, min(w1, w2))
 
             dx = abs(c2["x"] - c1["x"])
 
-            # If close-ish in x OR one sits inside the other, AND they overlap strongly -> merge
+            # Wenn in x relativ nah ODER eines im anderen liegt UND starker Überlapp -> zusammenführen
             close = dx <= max(80.0, 0.12 * W)
             inside = (l2 >= l1 - 0.03 * W and r2 <= r1 + 0.03 * W) or (l1 >= l2 - 0.03 * W and r1 <= r2 + 0.03 * W)
 
@@ -1089,7 +1074,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
         clusters.sort(key=lambda c: c["x"])
 
-        # merge small "indent" clusters into nearest real cluster
+        # Kleine "Einrückungs"-Cluster in den nächstgelegenen echten Cluster einhängen
         def is_real(c):
             return len(c["items"]) >= min_items_for_real_col
 
@@ -1112,7 +1097,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
         merged.sort(key=lambda c: c["x"])
 
-        # If still looks like "one column with indents" -> treat as single column.
+        # Wenn es weiterhin wie "eine Spalte mit Einrückungen" aussieht -> als einspaltig behandeln.
         if len(merged) >= 2:
             sizes = sorted([len(c["items"]) for c in merged], reverse=True)
             biggest = sizes[0]
@@ -1122,11 +1107,11 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
                 merged = [max(merged, key=lambda c: len(c["items"]))]
 
         if len(merged) <= 1:
-            # single column -> just y then x
+            # Einspaltig -> einfach nach y, dann x sortieren
             core = sort_y_then_x(midband)
             return [r for r, _, _ in header_sorted] + [r for r, _, _ in core] + [r for r, _, _ in footer_sorted]
 
-        # build bounds between cluster starts
+        # Grenzen zwischen Cluster-Starts berechnen
         col_starts = [c["x"] for c in merged]
         bounds = [(col_starts[i] + col_starts[i + 1]) / 2.0 for i in range(len(col_starts) - 1)]
 
@@ -1143,7 +1128,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
         for r, bb, dbb in midband:
             cols[col_index_for(dbb)].append((r, bb, dbb))
 
-        # ---------- SECOND PASS: centered headings above columns -> header ----------
+        # ---------- ZWEITER DURCHLAUF: zentrierte Überschriften über Spalten -> Header ----------
         def body_like(dbb):
             h = (dbb[3] - dbb[1])
             w = (dbb[2] - dbb[0])
@@ -1190,7 +1175,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
             for r, bb, dbb in midband:
                 cols[col_index_for(dbb)].append((r, bb, dbb))
 
-    # ---------- sort within each column ----------
+    # ---------- innerhalb jeder Spalte sortieren ----------
     def sort_col(col):
         return sorted(col, key=lambda x: (cy(x[2]), cx(x[2])), reverse=rev_y)
 
@@ -1206,12 +1191,10 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
     return [r for r, _, _ in header_sorted] + [r for r, _, _ in core] + [r for r, _, _ in footer_sorted]
 
-
 def clamp_bbox(bb: Tuple[int, int, int, int], w: int, h: int) -> Optional[Tuple[int, int, int, int]]:
     x0, y0, x1, y1 = bb
     return (max(0, min(w - 1, x0)), max(0, min(h - 1, y0)),
             max(0, min(w, x1)), max(0, min(h, y1)))
-
 
 def _safe_int(v, default=0):
     try:
@@ -1219,9 +1202,8 @@ def _safe_int(v, default=0):
     except Exception:
         return default
 
-
 # -----------------------------
-# TABLE EXPORT HELPERS
+# HILFSFUNKTIONEN FÜR TABELLEN-EXPORT
 # -----------------------------
 def cluster_columns(records: List[RecordView], x_threshold: int = 45):
     cols = []
@@ -1240,7 +1222,6 @@ def cluster_columns(records: List[RecordView], x_threshold: int = 45):
             cols.append({"x": x0, "items": [r]})
     cols.sort(key=lambda c: c["x"])
     return [c["items"] for c in cols]
-
 
 def is_same_visual_row(a: RecordView, b: RecordView, page_width: int) -> bool:
     if not a.bbox or not b.bbox:
@@ -1289,7 +1270,7 @@ def group_rows_by_y(records: List[RecordView], page_width: int):
     # enger = "Abstand geringer" (striktere Gruppierung)
     y_tol = max(10, int(0.45 * med_h))
 
-    # NEW: horizontale Separatoren (_____ / ---- / ───) erkennen
+    # Neu: horizontale Separatoren (_ / - / ─) erkennen
     sep_y: List[float] = []
     filtered_recs: List[RecordView] = []
     for rv in recs:
@@ -1351,10 +1332,8 @@ def group_rows_by_y(records: List[RecordView], page_width: int):
     return rows
 
 def table_to_rows_two_columns(records: List[RecordView], page_width: int) -> List[List[str]]:
-    """
-    Erzwingt exakt 2 Spalten anhand Seitenmitte.
-    Verhindert "3. Spalte" durch Einrückungen/Ausreißer.
-    """
+    #   Erzwingt exakt 2 Spalten anhand Seitenmitte.
+    #   Verhindert "3. Spalte" durch Einrückungen/Ausreißer.
     mid = max(1, int(page_width)) // 2
     rows = group_rows_by_y(records, page_width)
 
@@ -1466,15 +1445,13 @@ def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]
         grid.append(line)
     return grid
 
-
 # -----------------------------
-# RESIZABLE / MOVABLE RECT ITEM
+# SKALIERBARES / VERSCHIEBBARES RECHTECK-ITEM
 # -----------------------------
 class ResizableRectItem(QGraphicsRectItem):
-    """
-    Movable + resizable rect.
-    Calls on_changed(idx, QRectF(scene coords)) after mouse release.
-    """
+    #    Verschiebbares + skalierbares Rechteck.
+    #    Ruft on_changed(idx, QRectF(Szenenkoordinaten)) nach dem Loslassen der Maus auf.
+
     HANDLE_PAD = 6.0
 
     def __init__(self, rect: QRectF, idx: int, on_changed: Callable[[int, QRectF], None],
@@ -1589,9 +1566,8 @@ class ResizableRectItem(QGraphicsRectItem):
             except Exception:
                 pass
 
-
 # -----------------------------
-# DROP-ENABLED QUEUE TABLE
+# WARTEBEREICH-TABELLE MIT DRAG & DROP
 # -----------------------------
 class DropQueueTable(QTableWidget):
     files_dropped = Signal(list)
@@ -1643,9 +1619,8 @@ class DropQueueTable(QTableWidget):
         else:
             event.ignore()
 
-
 # -----------------------------
-# LINES LIST (Delete + DnD reorder)
+# ZEILENLISTE (Entf + Drag&Drop zum Umordnen)
 # -----------------------------
 class LinesListWidget(QListWidget):
     delete_pressed = Signal()
@@ -1677,9 +1652,8 @@ class LinesListWidget(QListWidget):
             order.append(int(idx))
         self.reorder_committed.emit(order, self.currentRow())
 
-
 # -----------------------------
-# OVERLAY BOX EDIT DIALOG
+# DIALOG ZUM BEARBEITEN DER OVERLAY-BOX
 # -----------------------------
 class OverlayBoxDialog(QDialog):
     def __init__(self, tr, img_w: int, img_h: int, bbox: Optional[Tuple[int, int, int, int]] = None, parent=None):
@@ -1744,9 +1718,8 @@ class OverlayBoxDialog(QDialog):
         y1 = max(1, min(self._img_h, y1))
         return (x0, y0, x1, y1)
 
-
 # -----------------------------
-# IMAGE CANVAS WITH CONTEXT MENU + DOUBLE CLICK SELECTION
+# BILD-CANVAS MIT KONTEXTMENÜ + DOPPELKLICK-AUSWAHL
 # -----------------------------
 class ImageCanvas(QGraphicsView):
     rect_clicked = Signal(int)
@@ -1789,24 +1762,24 @@ class ImageCanvas(QGraphicsView):
         self._drop_text = None
         self.tr_func = tr_func
 
-        # draw-box mode
+        # Box-Zeichenmodus
         self._draw_mode = False
         self._draw_start = None
         self._draw_rect_item: Optional[QGraphicsRectItem] = None
         self._pen_draw = QPen(QColor("#00ff7f"), 2)
         self._brush_draw = QBrush(QColor(0, 255, 127, 40))
 
-        # enabled only after OCR finished
+        # Nur aktiv, nachdem die OCR abgeschlossen ist
         self._overlay_enabled = False
 
         self._show_drop_hint()
 
     def _get_view_state(self):
-        """Return (transform, center_scene_point, zoom_scalar)"""
+        # Gibt (Transform, Szenen-Zentrumspunkt, Zoom-Skalar) zurück.
         try:
             t = self.transform()
             center = self.mapToScene(self.viewport().rect().center())
-            z = float(t.m11())  # assuming uniform scaling
+            z = float(t.m11())  # angenommen: gleichmäßige Skalierung
             return t, center, z
         except Exception:
             return None, None, None
@@ -1817,7 +1790,7 @@ class ImageCanvas(QGraphicsView):
                 self.setTransform(t)
             if center is not None:
                 self.centerOn(center)
-            # keep internal zoom in sync (wheelEvent uses it)
+            # internen Zoom synchron halten (wheelEvent nutzt ihn)
             if z is not None:
                 self._zoom = float(z)
             else:
@@ -1827,7 +1800,7 @@ class ImageCanvas(QGraphicsView):
 
     @staticmethod
     def _event_point(event) -> QPoint:
-        # Works across PySide6 versions: sometimes event.position() exists, sometimes not.
+        # Funktioniert über verschiedene PySide6-Versionen hinweg: manchmal gibt es event.position(), manchmal nicht.
         try:
             p = event.position()
             return p.toPoint()
@@ -1909,7 +1882,7 @@ class ImageCanvas(QGraphicsView):
         tr = self.tr_func
 
         if not self._overlay_enabled:
-            disabled = menu.addAction(tr("overlay_only_after_ocr") if tr else "Overlay editing only after OCR.")
+            disabled = menu.addAction(tr("overlay_only_after_ocr") if tr else "Overlay-Bearbeitung erst nach abgeschlossener OCR möglich.")
             disabled.setEnabled(False)
             menu.exec(event.globalPos())
             return
@@ -2048,7 +2021,7 @@ class ImageCanvas(QGraphicsView):
 
         font = QFont("Arial", 20)
         font.setItalic(True)
-        txt = self.tr_func("drop_hint") if self.tr_func else "Drag & drop files here"
+        txt = self.tr_func("drop_hint") if self.tr_func else "Datei(en) hierher ziehen und ablegen"
 
         c = QColor("#aaa") if self._bg_color.lightness() < 128 else QColor("#555")
 
@@ -2071,7 +2044,7 @@ class ImageCanvas(QGraphicsView):
             self._center_drop_hint_in_view()
 
     def load_pil_image(self, im: Image.Image, preserve_view: bool = False):
-        # save current view state BEFORE clearing, if requested
+        # Aktuellen View-Status VOR dem Leeren speichern
         t = center = z = None
         if preserve_view:
             t, center, z = self._get_view_state()
@@ -2084,7 +2057,7 @@ class ImageCanvas(QGraphicsView):
         self._selected_idx = None
         self._drop_text = None
 
-        # IMPORTANT: don't always reset/fit if we preserve
+        # WICHTIG: Nicht immer reset/fitten, wenn wir die Ansicht beibehalten sollen
         if not preserve_view:
             self.resetTransform()
             self._zoom = 1.0
@@ -2099,7 +2072,7 @@ class ImageCanvas(QGraphicsView):
             self._restore_view_state(t, center, z)
         else:
             self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-            # sync zoom from actual transform
+            # Zoom aus der tatsächlichen Transformationsmatrix synchronisieren
             try:
                 self._zoom = float(self.transform().m11())
             except Exception:
@@ -2188,9 +2161,8 @@ class ImageCanvas(QGraphicsView):
             self.scale(factor, factor)
             self._zoom = new_zoom
 
-
 # -----------------------------
-# OCR WORKER
+# OCR-WORKER
 # -----------------------------
 class OCRWorker(QThread):
     file_started = Signal(str)
@@ -2215,7 +2187,7 @@ class OCRWorker(QThread):
         self._device_label = dev
 
         if dev in ("cuda", "rocm"):
-            # Both CUDA and ROCm use torch.cuda backend; ROCm is indicated by torch.version.hip
+            # CUDA und ROCm nutzen beide das torch.cuda-Backend; ROCm erkennt man an torch.version.hip
             if torch.cuda.is_available() and torch.cuda.device_count() > 0:
                 return torch.device("cuda")
 
@@ -2232,7 +2204,7 @@ class OCRWorker(QThread):
                 hip_ver = getattr(torch.version, "hip", None)
                 cuda_ver = getattr(torch.version, "cuda", None)
 
-                # If user selected ROCm or HIP is present -> show ROCm/HIP info; otherwise CUDA info
+                # Wenn der Nutzer ROCm gewählt hat oder HIP vorhanden ist -> ROCm/HIP-Info anzeigen, sonst CUDA-Info
                 if self._device_label == "rocm" or hip_ver:
                     extra = []
                     if hip_ver:
@@ -2268,7 +2240,7 @@ class OCRWorker(QThread):
     def _ensure_models_loaded(self):
         if self._device is None:
             self._device = self._resolve_device()
-            # show chosen backend label (cuda/rocm/mps/cpu) + actual torch device
+            # Gewähltes Backend-Label (cuda/rocm/mps/cpu) + tatsächliches torch-Device anzeigen
             self.device_resolved.emit(f"{self._device_label} -> {self._device}")
             self._emit_gpu_info(self._device)
         if self._rec_model is None:
@@ -2302,12 +2274,12 @@ class OCRWorker(QThread):
         self.progress.emit(int(overall * 100))
 
     # -------------------------------------------------------
-    # OCRWorker._ocr_one (ersetze deine komplette Funktion damit)
+    # OCRWorker._ocr_one
     # -------------------------------------------------------
     def _ocr_one(self, img_path: str, file_idx: int, total_files: int):
         self.file_started.emit(img_path)
         try:
-            # --- load image once (RGB) ---
+            # --- Bild einmalig laden (RGB) ---
             im = Image.open(img_path).convert("RGB")
 
             # --- FIX A: zu kleine Bilder hochskalieren (verhindert Baselines < 5px) ---
@@ -2316,7 +2288,7 @@ class OCRWorker(QThread):
                 scale = 2 if min_dim >= 700 else 3
                 im = im.resize((im.size[0] * scale, im.size[1] * scale), Image.BICUBIC)
 
-            # --- segmentation ---
+            # --- Segmentierung ---
             if getattr(self.job, "segmenter_mode", "blla") == "pageseg":
                 # pageseg braucht ein bi-level Bild (Mode "1")
                 bw = binarization.nlbin(im)  # empfohlen für legacy pageseg
@@ -2342,7 +2314,7 @@ class OCRWorker(QThread):
 
             expected = self._seg_expected_lines(seg)
 
-            # --- recognition ---
+            # --- Erkennung (Recognition) ---
             kr_records = []
             done = 0
 
@@ -2362,7 +2334,7 @@ class OCRWorker(QThread):
             if self.isInterruptionRequested():
                 return
 
-            # --- sort records in reading order ---
+            # --- Records in Leserichtung sortieren ---
             kr_sorted = sort_records_reading_order(
                 kr_records, im.size[0], im.size[1], self.job.reading_direction
             )
@@ -2464,9 +2436,8 @@ class OCRWorker(QThread):
         except Exception as e:
             self.failed.emit(str(e))
 
-
 # -----------------------------
-# EXPORT DIALOGS
+# EXPORT-DIALOGE
 # -----------------------------
 class ExportModeDialog(QDialog):
     def __init__(self, tr, parent=None):
@@ -2490,7 +2461,6 @@ class ExportModeDialog(QDialog):
     def accept(self):
         self.choice = "all" if self.rb_all.isChecked() else "selected"
         super().accept()
-
 
 class ExportSelectFilesDialog(QDialog):
     def __init__(self, tr, items: List[TaskItem], parent=None):
@@ -2521,9 +2491,8 @@ class ExportSelectFilesDialog(QDialog):
         self.selected_paths = [p for p in paths if p]
         self.accept()
 
-
 # -----------------------------
-# MAIN WINDOW
+# HAUPTFENSTER
 # -----------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -2542,7 +2511,7 @@ class MainWindow(QMainWindow):
         self.current_theme = "bright"
         self.current_segmenter_mode = "blla"
 
-        # queue columns dynamic ratio
+        # Dynamisches Verhältnis der Queue-Spaltenbreiten
         self.queue_col_ratio = 0.75
         self._resizing_cols = False
 
@@ -2553,7 +2522,7 @@ class MainWindow(QMainWindow):
         self.worker: Optional[OCRWorker] = None
         self.queue_items: List[TaskItem] = []
 
-        # Canvas
+        # Canvas (Bildanzeige)
         self.canvas = ImageCanvas(tr_func=self._tr)
         self.canvas.rect_clicked.connect(self.on_rect_clicked)
         self.canvas.rect_changed.connect(self.on_overlay_rect_changed)
@@ -2565,7 +2534,7 @@ class MainWindow(QMainWindow):
         self.canvas.overlay_delete_requested.connect(self.on_canvas_delete_box)
         self.canvas.overlay_select_requested.connect(self.on_canvas_select_line)
 
-        # Queue Table
+        # Wartebereich-Tabelle
         self.queue_table = DropQueueTable()
         self.queue_table.setColumnCount(2)
         self.queue_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -2585,14 +2554,14 @@ class MainWindow(QMainWindow):
         header.sectionResized.connect(self._on_queue_header_resized)
         self.queue_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # Queue hint overlay
+        # Hinweis-Overlay für den Wartebereich
         self.queue_hint = QLabel(self._tr("queue_drop_hint"), self.queue_table.viewport())
         self.queue_hint.setAlignment(Qt.AlignCenter)
         self.queue_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.queue_hint.setStyleSheet("color: rgba(180,180,180,180); font-style: italic;")
         self.queue_hint.hide()
 
-        # Lines list
+        # Zeilenliste
         self.list_lines = LinesListWidget()
         self.list_lines.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list_lines.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
@@ -2617,7 +2586,7 @@ class MainWindow(QMainWindow):
         self.lbl_queue = QLabel(self._tr("lbl_queue"))
         self.lbl_lines = QLabel(self._tr("lbl_lines"))
 
-        # Toolbar Actions
+        # Toolbar-Aktionen
         self.act_add = QAction(QIcon.fromTheme("document-open"), self._tr("act_add_files"), self)
         self.act_add.triggered.connect(self.choose_files)
 
@@ -2640,7 +2609,7 @@ class MainWindow(QMainWindow):
         self.act_toggle_log.setChecked(False)
         self.act_toggle_log.toggled.connect(self.toggle_log_area)
 
-        # Undo / Redo actions
+        # Undo-/Redo-Aktionen
         self.act_undo = QAction(self._tr("act_undo"), self)
         self.act_undo.setShortcut(QKeySequence("Ctrl+Z"))
         self.act_undo.triggered.connect(self.undo)
@@ -2677,7 +2646,7 @@ class MainWindow(QMainWindow):
         self._log(self._tr_log("log_started"))
 
     # -----------------------------
-    # Translation
+    # Übersetzung
     # -----------------------------
     def _tr(self, key: str, *args):
         txt = TRANSLATIONS.get(self.current_lang, TRANSLATIONS["de"]).get(key, key)
@@ -2686,7 +2655,7 @@ class MainWindow(QMainWindow):
         return txt
 
     def _detect_system_lang(self) -> str:
-        # e.g. "de_DE", "en_US", "fr_FR"
+        # z. B. "de_DE", "en_US", "fr_FR"
         name = QLocale.system().name().lower()
         if name.startswith("de"):
             return "de"
@@ -2708,7 +2677,7 @@ class MainWindow(QMainWindow):
         self.delete_selected_queue_items(reset_preview=True)
 
     # -----------------------------
-    # Undo helpers (snapshots)
+    # Undo Helfer (snapshots)
     # -----------------------------
     @staticmethod
     def _snapshot_recs(recs: List[RecordView]) -> List[Tuple[str, Optional[Tuple[int, int, int, int]]]]:
@@ -2789,7 +2758,7 @@ class MainWindow(QMainWindow):
                 break
 
     # -----------------------------
-    # UI
+    # Benutzeroberfläche (UI)
     # -----------------------------
     def _init_ui(self):
         self.toolbar = QToolBar(self._tr("toolbar_main"))
@@ -2961,7 +2930,7 @@ class MainWindow(QMainWindow):
 
         self.options_menu = menubar.addMenu(self._tr("menu_options"))
 
-        # Languages
+        # Sprachen
         self.lang_menu = self.options_menu.addMenu(self._tr("menu_languages"))
         lang_group = QActionGroup(self)
         for key, code in [("lang_de", "de"), ("lang_en", "en"), ("lang_fr", "fr")]:
@@ -2973,7 +2942,7 @@ class MainWindow(QMainWindow):
             lang_group.addAction(act)
             self.lang_menu.addAction(act)
 
-        # HW menu
+        # Hardware-Menü
         self.options_menu.addSeparator()
         self.hw_menu = self.options_menu.addMenu(self._tr("menu_hw"))
         hw_group = QActionGroup(self)
@@ -2988,7 +2957,7 @@ class MainWindow(QMainWindow):
             self.hw_menu.addAction(act)
             self.hw_actions[dev] = act
 
-        # Reading direction
+        # Leserichtung
         self.options_menu.addSeparator()
         self.reading_menu = self.options_menu.addMenu(self._tr("menu_reading"))
         read_group = QActionGroup(self)
@@ -3008,7 +2977,7 @@ class MainWindow(QMainWindow):
             self.reading_menu.addAction(act)
             self.read_actions.append(act)
 
-        # Overlay
+        # Overlay (Boxen)
         self.options_menu.addSeparator()
         self.act_overlay = QAction(self._tr("act_overlay_show"), self)
         self.act_overlay.setCheckable(True)
@@ -3016,7 +2985,7 @@ class MainWindow(QMainWindow):
         self.act_overlay.toggled.connect(self._on_overlay_toggled)
         self.options_menu.addAction(self.act_overlay)
 
-        # Theme
+        # Theme / Erscheinungsbild
         self.options_menu.addSeparator()
         self.theme_menu = self.options_menu.addMenu(self._tr("menu_appearance"))
         self.act_theme_bright = QAction(self._tr("theme_bright"), self)
@@ -3083,7 +3052,7 @@ class MainWindow(QMainWindow):
         self.queue_hint.setVisible(empty)
 
     # -----------------------------
-    # Progress helpers
+    # Fortschritts-Helfer
     # -----------------------------
     def _set_progress_busy(self):
         self.progress_bar.setValue(0)
@@ -3311,7 +3280,7 @@ class MainWindow(QMainWindow):
             self._update_queue_row(it.path)
 
     # -----------------------------
-    # GPU detection + availability
+    # GPU-Erkennung + Verfügbarkeit
     # -----------------------------
     def _gpu_capabilities(self) -> Dict[str, Tuple[bool, str]]:
         caps: Dict[str, Tuple[bool, str]] = {"cpu": (True, "CPU")}
@@ -3327,13 +3296,13 @@ class MainWindow(QMainWindow):
         hip_ver = getattr(torch.version, "hip", None)
         cuda_ver = getattr(torch.version, "cuda", None)
 
-        # ROCm (HIP) availability
+        # Verfügbarkeit von ROCm (HIP)
         rocm_avail = cuda_avail and (hip_ver is not None)
         rocm_details = ""
         if rocm_avail:
             rocm_details = f"{cuda_name} (HIP {hip_ver})" if cuda_name else f"HIP {hip_ver}"
 
-        # CUDA availability (real CUDA build)
+        # Verfügbarkeit von CUDA (echter CUDA-Build)
         cuda_true = cuda_avail and (cuda_ver is not None)
         cuda_true_details = ""
         if cuda_true:
@@ -3389,7 +3358,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(self._tr("msg_device", self._tr(label_key)))
 
     # -----------------------------
-    # Drag & Drop on MainWindow
+    # Drag & Drop im Hauptfenster
     # -----------------------------
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -3413,7 +3382,7 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     # -----------------------------
-    # Queue + preview
+    # Wartebereich + Vorschau
     # -----------------------------
     def choose_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, self._tr("dlg_load_img"), "", self._tr("dlg_filter_img"))
@@ -3701,13 +3670,13 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, self._tr("err_title"), str(e))
 
     # -----------------------------
-    # OCR controls
+    # OCR-Steuerung
     # -----------------------------
     def start_ocr(self):
         if not self.model_path or not os.path.exists(self.model_path):
             QMessageBox.critical(self, self._tr("err_title"), self._tr("warn_need_rec"))
             return
-        # NEW: segmentation optional -> fallback to legacy pageseg if not provided
+        # NEU: Segmentierung optional -> Fallback auf legacy pageseg, wenn nichts angegeben ist
         use_pageseg = (not self.seg_model_path) or (not os.path.exists(self.seg_model_path))
 
         if use_pageseg:
@@ -3866,7 +3835,7 @@ class MainWindow(QMainWindow):
                 break
 
     # -----------------------------
-    # Lines + overlays
+    # Zeilen + Overlays
     # -----------------------------
     def _current_task(self) -> Optional[TaskItem]:
         if self.queue_table.currentRow() < 0:
@@ -4025,7 +3994,7 @@ class MainWindow(QMainWindow):
         elif chosen == act_add_below:
             self._add_line(task, insert_row=row + 1)
         elif chosen == act_draw:
-            # Draw box FOR THIS LINE (kept as-is)
+            # Box FÜR DIESE ZEILE zeichnen (unverändert)
             self._pending_new_line_box = False
             self._pending_box_for_row = row
             self.canvas.start_draw_box_mode()
@@ -4125,7 +4094,7 @@ class MainWindow(QMainWindow):
         self.canvas.start_draw_box_mode()
 
     # -----------------------------
-    # Canvas actions
+    # Canvas-Aktionen
     # -----------------------------
     def on_canvas_select_line(self, idx: int):
         self.on_rect_clicked(idx)
@@ -4138,7 +4107,7 @@ class MainWindow(QMainWindow):
         return task
 
     def on_canvas_add_box_draw(self, scene_pos: QPointF):
-        # NEW BEHAVIOR: drawing a new overlay box creates a NEW line at the end.
+        # NEUES VERHALTEN: Eine neue Overlay-Box erzeugt eine NEUE Zeile am Ende.
         task = self._ensure_overlay_possible()
         if not task:
             return
@@ -4205,12 +4174,12 @@ class MainWindow(QMainWindow):
             if y1 <= y0:
                 y1 = min(img_h, y0 + 1)
 
-        # Case A: create new line at end (canvas draw)
+        # Fall A: Neue Zeile am Ende erzeugen (Canvas-Zeichnen)
         if self._pending_new_line_box:
             self._pending_new_line_box = False
             self._pending_box_for_row = None
 
-            # Optional: ask for text (optional) – user can also just edit in list afterwards.
+            # Optional: Text abfragen (optional) – der Nutzer kann ihn später auch in der Liste bearbeiten.
             new_txt, ok = QInputDialog.getText(self, self._tr("new_line_from_box_title"),
                                                self._tr("new_line_from_box_label"))
             if not ok:
@@ -4224,7 +4193,7 @@ class MainWindow(QMainWindow):
             self.list_lines.setFocus()
             return
 
-        # Case B: draw box for a specific existing row (line context menu)
+        # Fall B: Box für eine bestimmte existierende Zeile zeichnen (Zeilen-Kontextmenü)
         if self._pending_box_for_row is None:
             return
 
@@ -4272,7 +4241,7 @@ class MainWindow(QMainWindow):
                 self._sync_ui_after_recs_change(task, keep_row=keep)
 
     # -----------------------------
-    # Overlay toggle
+    # Overlay umschalten
     # -----------------------------
     def _on_overlay_toggled(self, checked):
         self.show_overlay = checked
@@ -4432,7 +4401,7 @@ class MainWindow(QMainWindow):
             return
 
     # -----------------------------
-    # Keyboard focus handling
+    # Tastatur-/Fokus-Handling
     # -----------------------------
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space and not getattr(self.canvas, "_draw_mode", False):
@@ -4450,14 +4419,12 @@ class MainWindow(QMainWindow):
             return
         super().keyReleaseEvent(event)
 
-
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
