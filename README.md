@@ -1,4 +1,4 @@
-# KrakenOCR-Tool
+# Bottled Kraken
 
 ## Inhaltsverzeichnis
 
@@ -41,6 +41,7 @@ KrakenOCR-Tool ist ein grafisches OCR-Tool auf Basis von **Kraken** und **PySide
   - Bilder (.png, .jpg, .bmp) inkl. Overlays
   - Durchsuchbares PDF (Bild + unsichtbarer Textlayer)
 - CPU-, CUDA- und experimentelle MPS-Unterstützung
+- Erstellung von Projekten
 
 ## Voraussetzungen
 
@@ -61,8 +62,8 @@ KrakenOCR-Tool ist ein grafisches OCR-Tool auf Basis von **Kraken** und **PySide
 
 ### Repository klonen
 
-    git clone https://github.com/<dein-user>/KrakenOCR-Tool.git
-    cd KrakenOCR-Tool
+    git clone https://github.com/Testatost/Bottled-Kraken.git
+    cd Bottled-Kraken
 
 ### Virtuelle Umgebung erstellen
 
@@ -113,11 +114,11 @@ Das Tool benötigt mindestens ein Kraken-Recognition-Modell (z. B. `.mlmodel`, `
 
 ### Build mit Spec-Datei
 
-    pyinstaller KrakenOCR-Tool.spec --clean
+    pyinstaller Bottled Kraken.spec --clean
 
 Die erzeugte EXE befindet sich anschließend unter:
 
-    dist/KrakenOCR-Tool/
+    dist/Bottled Kraken/
 
 ---
 
