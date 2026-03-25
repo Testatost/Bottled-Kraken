@@ -2,7 +2,7 @@
 
 ## Inhaltsverzeichnis
 
-- [KrakenOCR-Tool](#krakenocr-tool)
+- [Bottled Kraken](#krakenocr-tool)
   - [Features](#features)
   - [Voraussetzungen](#voraussetzungen)
     - [Betriebssystem](#betriebssystem)
@@ -23,7 +23,7 @@
 
 ---
 
-KrakenOCR-Tool ist ein grafisches OCR-Tool auf Basis von **Kraken** und **PySide6** mit interaktiver Zeilenanzeige, Bounding-Box-Overlays und umfangreichen Exportfunktionen. Es richtet sich insbesondere an Digital-Humanities-Projekte, Archivarbeit und alle Anwendungsfälle, in denen strukturierte und nachvollziehbare OCR-Ergebnisse benötigt werden.
+Bottled Kraken ist ein grafisches OCR-Tool auf Basis von **Kraken** und **PySide6** mit interaktiver Zeilenanzeige, Bounding-Box-Overlays und umfangreichen Exportfunktionen. Es richtet sich insbesondere an Digital-Humanities-Projekte, Archivarbeit und alle Anwendungsfälle, in denen strukturierte und nachvollziehbare OCR-Ergebnisse benötigt werden.
 
 ## Features
 
