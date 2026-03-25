@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import math
 import statistics
 import json
@@ -8,12 +9,25 @@ import warnings
 import re
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Tuple, Dict, Callable
+import fitz
+import ctypes
+import shutil
+import urllib.request
+import urllib.error
+import urllib.parse
+import http.client
+import base64
+import mimetypes
+import socket
+from io import BytesIO
 
 # GUI-Framework
-from PySide6.QtCore import Qt, QThread, Signal, QRectF, QUrl, QTimer, QSize, QPointF, QPoint, QDateTime, QLocale
+from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
+                            QSize, QPointF, QEvent, QPoint, QDateTime, QLocale,
+                            QCoreApplication)
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
-    QKeySequence, QActionGroup, QIcon, QPalette
+    QKeySequence, QActionGroup, QIcon, QPalette, QShortcut
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox,
@@ -22,7 +36,8 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem, QGraphicsSimpleTextItem, QSplitter, QStatusBar,
     QMenu, QTableWidget, QTableWidgetItem, QHeaderView, QToolBar,
     QAbstractItemView, QInputDialog, QDialog, QDialogButtonBox, QRadioButton,
-    QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit, QToolButton,
+    QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit,
+    QToolButton, QProgressDialog, QLineEdit, QTextEdit
 )
 
 # PySide-Helfer zur Objekt-Validitätsprüfung
@@ -54,13 +69,23 @@ STATUS_WAITING = 0
 STATUS_PROCESSING = 1
 STATUS_DONE = 2
 STATUS_ERROR = 3
+STATUS_AI_PROCESSING = 4
+STATUS_EXPORTING = 5
 
 STATUS_ICONS = {
     STATUS_WAITING: "⏳",
     STATUS_PROCESSING: "⚙️",
     STATUS_DONE: "✅",
-    STATUS_ERROR: "❌"
+    STATUS_ERROR: "❌",
+    STATUS_AI_PROCESSING: "🤖",
+    STATUS_EXPORTING: "📄"
 }
+
+# Queue-Spalten
+QUEUE_COL_NUM = 0
+QUEUE_COL_CHECK = 1
+QUEUE_COL_FILE = 2
+QUEUE_COL_STATUS = 3
 
 THEMES = {
     "bright": {
@@ -82,19 +107,40 @@ THEMES = {
 }
 
 ZENODO_URL = "https://zenodo.org/communities/ocr_models/records?q=&l=list&p=1&s=10&sort=mostdownloaded"
+SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+SUPPORTED_PDF_EXTS = {".pdf"}
+
+KRAKEN_MODELS_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + vLLM\Kraken-Modelle"
+
+def resource_path(relative_path: str) -> str:
+    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
+
+def is_supported_input(path: str) -> bool:
+    ext = os.path.splitext(path)[1].lower()
+    return ext in SUPPORTED_IMAGE_EXTS or ext in SUPPORTED_PDF_EXTS
+
+def _load_image_gray(path: str) -> Image.Image:
+    return Image.open(path).convert("L")
+
+def _load_image_color(path: str) -> Image.Image:
+    return Image.open(path).convert("RGB")
 
 # -----------------------------
 # ÜBERSETZUNGEN
 # -----------------------------
 TRANSLATIONS = {
     "de": {
-        "app_title": "Kraken OCR Professional",
+        "dlg_filter_img": "Bilder/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
+        "pdf_render_title": "PDF wird vorbereitet",
+        "pdf_render_label": "Seiten werden gerendert… ({}/{}): {}",
+        "app_title": "Bottled Kraken",
         "toolbar_main": "Werkzeugleiste",
         "menu_file": "&Datei",
         "menu_edit": "&Bearbeiten",
         "menu_export": "Exportieren als...",
         "menu_exit": "Beenden",
-        "menu_models": "&Modelle",
+        "menu_models": "&Kraken-Modelle",
         "menu_options": "&Optionen",
         "menu_languages": "Sprachen",
         "menu_hw": "CPU/GPU",
@@ -102,6 +148,7 @@ TRANSLATIONS = {
         "menu_appearance": "Erscheinungsbild",
         "act_clear_rec": "Recognition-Modell entfernen",
         "act_clear_seg": "Segmentierungs-Modell entfernen",
+        "act_paste_clipboard": "Aus Zwischenablage einfügen",
 
         "log_toggle_show": "Log",
         "log_toggle_hide": "Log",
@@ -136,7 +183,7 @@ TRANSLATIONS = {
         "act_delete": "Löschen",
         "act_rename": "Umbenennen...",
         "act_clear_queue": "Wartebereich leeren",
-        "act_start_ocr": "Start",
+        "act_start_ocr": "Start Kraken OCR",
         "act_stop_ocr": "Stopp",
         "act_re_ocr": "Wiederholen",
         "act_re_ocr_tip": "Ausgewählte Datei(en) erneut verarbeiten",
@@ -181,7 +228,6 @@ TRANSLATIONS = {
         "dlg_label_name": "Neuer Dateiname:",
         "dlg_save": "Speichern",
         "dlg_load_img": "Bilder wählen",
-        "dlg_filter_img": "Bilder (*.png *.jpg *.jpeg *.tif *.bmp *.webp)",
         "dlg_choose_rec": "Recognition-Modell: ",
         "dlg_choose_seg": "Segmentierungs-Modell: ",
         "dlg_filter_model": "Modelle (*.mlmodel *.pt)",
@@ -243,17 +289,48 @@ TRANSLATIONS = {
         "log_export_done": "Export abgeschlossen: {} Datei(en) als {} nach {}",
         "log_export_single": "Export: {} -> {}",
         "log_export_log_done": "Log exportiert: {}",
+        "act_ai_revise": "LM-Überarbeitung",
+        "act_ai_revise_tip": "OCR-Text mit lokalem LLM überarbeiten",
+        "msg_ai_started": "Überarbeitung gestartet...",
+        "msg_ai_done": "Überarbeitung abgeschlossen.",
+        "msg_ai_model_set": "KI-Modell-ID: {}",
+        "msg_ai_disabled": "Überarbeitung nicht möglich.",
+        "warn_need_done_for_ai": "Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.",
+        "warn_need_ai_model": "Kein Modell über localhost gefunden. Bitte vLLM/LM Studio starten oder eine Modell-ID setzen.",
+        "warn_ai_server": "LM Studio Server nicht erreichbar. Bitte Modell laden und lokalen Server starten.",
+        "dlg_choose_ai_model": "LM-Studio Modell-Identifier",
+        "dlg_choose_ai_model_label": "Optionale Modell-ID. Leer lassen, wenn das laufende localhost-Modell automatisch verwendet werden soll:",
+        "log_ai_started": "Überarbeitung gestartet: {}",
+        "log_ai_done": "Überarbeitung abgeschlossen: {}",
+        "log_ai_error": "Überarbeitung Fehler: {} -> {}",
+        "status_ai_processing": "Überarbeitung...",
+        "status_exporting": "Exportiere...",
 
+        "menu_project_save": "Projekt speichern",
+        "menu_project_save_as": "Projekt speichern unter...",
+        "menu_project_load": "Projekt laden...",
+        "dlg_filter_project": "Bottled-Kraken Projekt (*.json)",
+        "msg_project_saved": "Projekt gespeichert: {}",
+        "msg_project_loaded": "Projekt geladen: {}",
+        "warn_project_load_failed": "Projekt konnte nicht geladen werden: {}",
+        "warn_project_save_failed": "Projekt konnte nicht gespeichert werden: {}",
+        "warn_project_file_missing": "Datei nicht gefunden: {}",
+        "line_menu_swap_with": "Zeile tauschen mit…",
+        "dlg_swap_title": "Zeilen tauschen",
+        "dlg_swap_label": "Mit Zeilennummer tauschen (1…):",
     },
 
     "en": {
-        "app_title": "Kraken OCR Professional",
+        "dlg_filter_img": "Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
+        "pdf_render_title": "Preparing PDF",
+        "pdf_render_label": "Rendering pages… ({}/{}): {}",
+        "app_title": "Bottled Kraken",
         "toolbar_main": "Toolbar",
         "menu_file": "&File",
         "menu_edit": "&Edit",
         "menu_export": "Export as...",
         "menu_exit": "Exit",
-        "menu_models": "&Models",
+        "menu_models": "&Kraken Models",
         "menu_options": "&Options",
         "menu_languages": "Languages",
         "menu_hw": "CPU/GPU",
@@ -261,6 +338,7 @@ TRANSLATIONS = {
         "menu_appearance": "Appearance",
         "act_clear_rec": "Clear recognition model",
         "act_clear_seg": "Clear segmentation model",
+        "act_paste_clipboard": "Paste from clipboard",
 
         "log_toggle_show": "Log",
         "log_toggle_hide": "Log",
@@ -295,7 +373,7 @@ TRANSLATIONS = {
         "act_delete": "Delete",
         "act_rename": "Rename...",
         "act_clear_queue": "Clear queue",
-        "act_start_ocr": "Start",
+        "act_start_ocr": "Start Kraken OCR",
         "act_stop_ocr": "Stop",
         "act_re_ocr": "Reprocess",
         "act_re_ocr_tip": "Reprocess selected file(s)",
@@ -340,7 +418,6 @@ TRANSLATIONS = {
         "dlg_label_name": "New filename:",
         "dlg_save": "Save",
         "dlg_load_img": "Choose images",
-        "dlg_filter_img": "Images (*.png *.jpg *.jpeg *.tif *.bmp *.webp)",
         "dlg_choose_rec": "recognition model: ",
         "dlg_choose_seg": "segmentation model: ",
         "dlg_filter_model": "Models (*.mlmodel *.pt)",
@@ -402,17 +479,48 @@ TRANSLATIONS = {
         "log_export_done": "Export finished: {} file(s) as {} to {}",
         "log_export_single": "Export: {} -> {}",
         "log_export_log_done": "Log exported: {}",
+        "act_ai_revise": "LM Revision",
+        "act_ai_revise_tip": "Revise OCR text with local LLM",
+        "msg_ai_started": "AI revision started...",
+        "msg_ai_done": "AI revision finished.",
+        "msg_ai_model_set": "AI model ID: {}",
+        "msg_ai_disabled": "AI revision not available.",
+        "warn_need_done_for_ai": "Please select a finished OCR item first.",
+        "warn_need_ai_model": "No model was found via localhost. Please start vLLM/LM Studio or set a model ID.",
+        "warn_ai_server": "LM Studio server is not reachable. Please load the model and start the local server.",
+        "dlg_choose_ai_model": "LM Studio model identifier",
+        "dlg_choose_ai_model_label": "Optional model ID. Leave empty to automatically use the running localhost model:",
+        "log_ai_started": "AI revision started: {}",
+        "log_ai_done": "AI revision finished: {}",
+        "log_ai_error": "AI revision error: {} -> {}",
+        "status_ai_processing": "AI revising...",
+        "status_exporting": "Exporting...",
 
+        "menu_project_save": "Save project",
+        "menu_project_save_as": "Save project as...",
+        "menu_project_load": "Load project...",
+        "dlg_filter_project": "Bottled Kraken Project (*.json)",
+        "msg_project_saved": "Project saved: {}",
+        "msg_project_loaded": "Project loaded: {}",
+        "warn_project_load_failed": "Project could not be loaded: {}",
+        "warn_project_save_failed": "Project could not be saved: {}",
+        "warn_project_file_missing": "File not found: {}",
+        "line_menu_swap_with": "Swap line with…",
+        "dlg_swap_title": "Swap lines",
+        "dlg_swap_label": "Swap with line number (1…):",
     },
 
     "fr": {
-        "app_title": "Professionnel Kraken OCR",
+        "dlg_filter_img": "Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
+        "pdf_render_title": "Préparation du PDF",
+        "pdf_render_label": "Rendu des pages… ({}/{}): {}",
+        "app_title": "Bottled Kraken",
         "toolbar_main": "Barre d’outils",
         "menu_file": "&Fichier",
         "menu_edit": "&Édition",
         "menu_export": "Exporter en tant que...",
         "menu_exit": "Quitter",
-        "menu_models": "&Modèles",
+        "menu_models": "&Modèles Kraken",
         "menu_options": "&Options",
         "menu_languages": "Langues",
         "menu_hw": "CPU/GPU",
@@ -420,6 +528,7 @@ TRANSLATIONS = {
         "menu_appearance": "Apparence",
         "act_clear_rec": "Retirer le modèle de reconnaissance",
         "act_clear_seg": "Retirer le modèle de segmentation",
+        "act_paste_clipboard": "Coller depuis le presse-papiers",
 
         "log_toggle_show": "Log",
         "log_toggle_hide": "Log",
@@ -454,7 +563,7 @@ TRANSLATIONS = {
         "act_delete": "Supprimer",
         "act_rename": "Renommer...",
         "act_clear_queue": "Vider la file d’attente",
-        "act_start_ocr": "Démarrer",
+        "act_start_ocr": "Démarrer Kraken OCR",
         "act_stop_ocr": "Arrêter",
         "act_re_ocr": "Relancer",
         "act_re_ocr_tip": "Relancer le traitement du/des fichier(s) sélectionné(s)",
@@ -499,7 +608,6 @@ TRANSLATIONS = {
         "dlg_label_name": "Nouveau nom de fichier:",
         "dlg_save": "Enregistrer",
         "dlg_load_img": "Choisir des images",
-        "dlg_filter_img": "Images (*.png *.jpg *.jpeg *.tif *.bmp *.webp)",
         "dlg_choose_rec": "le modèle de reconnaissance: ",
         "dlg_choose_seg": "le modèle de segmentation: ",
         "dlg_filter_model": "Modèles (*.mlmodel *.pt)",
@@ -561,7 +669,35 @@ TRANSLATIONS = {
         "log_export_done": "Export terminé : {} fichier(s) en {} vers {}",
         "log_export_single": "Export : {} -> {}",
         "log_export_log_done": "Log exporté : {}",
+        "act_ai_revise": "Révision LM",
+        "act_ai_revise_tip": "Réviser le texte OCR avec un LLM local",
+        "msg_ai_started": "Révision IA démarrée...",
+        "msg_ai_done": "Révision IA terminée.",
+        "msg_ai_model_set": "ID du modèle IA : {}",
+        "msg_ai_disabled": "Révision IA non disponible.",
+        "warn_need_done_for_ai": "Veuillez d'abord sélectionner un fichier OCR terminé.",
+        "warn_need_ai_model": "Aucun modèle trouvé via localhost. Veuillez démarrer vLLM/LM Studio ou définir un identifiant de modèle.",
+        "warn_ai_server": "Serveur LM Studio inaccessible. Veuillez charger le modèle et démarrer le serveur local.",
+        "dlg_choose_ai_model": "Identifiant du modèle LM Studio",
+        "dlg_choose_ai_model_label": "Identifiant de modèle facultatif. Laissez vide pour utiliser automatiquement le modèle localhost en cours d'exécution :",
+        "log_ai_started": "Révision IA démarrée : {}",
+        "log_ai_done": "Révision IA terminée : {}",
+        "log_ai_error": "Erreur de révision IA : {} -> {}",
+        "status_ai_processing": "Révision IA...",
+        "status_exporting": "Export en cours...",
 
+        "menu_project_save": "Enregistrer le projet",
+        "menu_project_save_as": "Enregistrer le projet sous...",
+        "menu_project_load": "Charger un projet...",
+        "dlg_filter_project": "Projet Bottled Kraken (*.json)",
+        "msg_project_saved": "Projet enregistré : {}",
+        "msg_project_loaded": "Projet chargé : {}",
+        "warn_project_load_failed": "Impossible de charger le projet : {}",
+        "warn_project_save_failed": "Impossible d’enregistrer le projet : {}",
+        "warn_project_file_missing": "Fichier introuvable : {}",
+        "line_menu_swap_with": "Échanger la ligne avec…",
+        "dlg_swap_title": "Échanger les lignes",
+        "dlg_swap_label": "Échanger avec le numéro de ligne (1…) :",
     }
 }
 
@@ -588,6 +724,8 @@ class TaskItem:
     edited: bool = False
     undo_stack: List[UndoSnapshot] = field(default_factory=list)
     redo_stack: List[UndoSnapshot] = field(default_factory=list)
+    source_kind: str = "image"   # "image" oder "pdf_page"
+    relative_path: str = ""
 
 @dataclass
 class OCRJob:
@@ -679,6 +817,65 @@ VSEP_RE = re.compile(r'^[|│┃¦︱︳]+$')  # | │ ┃ ¦ ︱ ︳
 
 # Horizontale Separator-Records (Zeilentrenner)
 HSEP_RE = re.compile(r'^[_\-\u2500\u2501\u2504\u2505]{3,}$')  # _ - ─ ━ etc. (mind. 3)
+ONLY_SYMBOL_LINE_RE = re.compile(r'^[\.\,\:\;\-–—_\/\\\|\(\)\[\]\{\}\'"`~^*+=<>!?·•…]+$')
+
+def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["TB_LR"]):
+    """
+    Einfache, stabile Sortierung für einspaltige Handschrift:
+    zuerst von oben nach unten, innerhalb derselben Zeilenhöhe von links nach rechts.
+    """
+    raw = []
+    for r in records:
+        bb = record_bbox(r)
+        if bb:
+            raw.append((r, bb))
+
+    if not raw:
+        return list(records)
+
+    rev_y = reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"])
+    rev_x = reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"])
+
+    heights = [(bb[3] - bb[1]) for _, bb in raw if (bb[3] - bb[1]) > 0]
+    med_h = statistics.median(heights) if heights else 20.0
+    y_tol = max(10.0, med_h * 0.6)
+
+    def cx(bb):
+        return (bb[0] + bb[2]) / 2.0
+
+    def cy(bb):
+        return (bb[1] + bb[3]) / 2.0
+
+    # erst grob nach y sortieren
+    raw.sort(key=lambda x: cy(x[1]), reverse=rev_y)
+
+    rows = []
+    for r, bb in raw:
+        my = cy(bb)
+        placed = False
+
+        for row in rows:
+            if abs(my - row["cy"]) <= y_tol:
+                row["items"].append((r, bb))
+                n = len(row["items"])
+                row["cy"] = ((row["cy"] * (n - 1)) + my) / n
+                placed = True
+                break
+
+        if not placed:
+            rows.append({
+                "cy": my,
+                "items": [(r, bb)]
+            })
+
+    rows.sort(key=lambda row: row["cy"], reverse=rev_y)
+
+    ordered = []
+    for row in rows:
+        row["items"].sort(key=lambda x: cx(x[1]), reverse=rev_x)
+        ordered.extend([r for r, _ in row["items"]])
+
+    return ordered
 
 def sort_records_reading_order(records, image_width: int, image_height: int,
                                reading_mode: int = READING_MODES["TB_LR"]):
@@ -1202,6 +1399,287 @@ def _safe_int(v, default=0):
     except Exception:
         return default
 
+def _clean_ocr_text(text: Any) -> str:
+    if text is None:
+        return ""
+    txt = str(text)
+
+    # unsichtbare / störende Zeichen entfernen
+    txt = txt.replace("\u00a0", " ")   # NBSP
+    txt = txt.replace("\u200b", "")    # zero-width space
+    txt = txt.replace("\ufeff", "")    # BOM
+
+    # Leerraum normalisieren
+    txt = re.sub(r"[ \t\r\f\v]+", " ", txt)
+    return txt.strip()
+
+
+def _is_effectively_empty_ocr_text(text: Any) -> bool:
+    return _clean_ocr_text(text) == ""
+
+def _is_symbol_only_line(text: Any) -> bool:
+    txt = _clean_ocr_text(text)
+    if not txt:
+        return False
+
+    # nur Symbol-/Trennzeichen
+    if not ONLY_SYMBOL_LINE_RE.fullmatch(txt):
+        return False
+
+    # wirklich "ganze Zeile nur Zeichen"
+    # ein einzelner Punkt, Doppelpunkt, Slash etc. soll weg
+    return True
+
+def _extract_json_string_lines_object(text: str):
+    if not text:
+        return None
+
+    raw = str(text).strip()
+
+    # fences entfernen
+    raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```\s*$", "", raw)
+
+    # 1) direktes JSON
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            lines = data["lines"]
+            if all(isinstance(x, str) for x in lines):
+                return lines
+    except Exception:
+        pass
+
+    # 2) erstes JSON-Objekt extrahieren
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        chunk = raw[start:end + 1]
+
+        try:
+            data = json.loads(chunk)
+            if isinstance(data, dict) and isinstance(data.get("lines"), list):
+                lines = data["lines"]
+                if all(isinstance(x, str) for x in lines):
+                    return lines
+        except Exception:
+            pass
+
+        repaired = re.sub(r",(\s*[}\]])", r"\1", chunk)
+        try:
+            data = json.loads(repaired)
+            if isinstance(data, dict) and isinstance(data.get("lines"), list):
+                lines = data["lines"]
+                if all(isinstance(x, str) for x in lines):
+                    return lines
+        except Exception:
+            pass
+
+    # 3) typografische Quotes als letzter Fallback
+    normalized = raw
+    normalized = normalized.replace("’", "'").replace("‘", "'")
+    normalized = normalized.replace("„", "\"").replace("“", "\"").replace("”", "\"")
+
+    try:
+        data = json.loads(normalized)
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            lines = data["lines"]
+            if all(isinstance(x, str) for x in lines):
+                return lines
+    except Exception:
+        pass
+
+    return None
+
+def _extract_json_lines_object(text: str):
+    if not text:
+        return None
+
+    raw = str(text).strip()
+
+    # fences entfernen
+    raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```\s*$", "", raw)
+
+    # 1) ZUERST IMMER das rohe JSON versuchen
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            return data["lines"]
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+
+    # 2) Erstes JSON-Objekt isolieren und roh parsen
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        chunk = raw[start:end + 1]
+
+        try:
+            data = json.loads(chunk)
+            if isinstance(data, dict) and isinstance(data.get("lines"), list):
+                return data["lines"]
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+
+        # 3) nur sehr konservative Reparatur: trailing commas
+        repaired = re.sub(r",(\s*[}\]])", r"\1", chunk)
+        try:
+            data = json.loads(repaired)
+            if isinstance(data, dict) and isinstance(data.get("lines"), list):
+                return data["lines"]
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+
+    # 4) LETZTER FALLBACK:
+    # nur wenn das Modell kein sauberes JSON geliefert hat, typografische Quotes glätten
+    normalized = raw
+    normalized = normalized.replace("’", "'").replace("‘", "'")
+
+    # WICHTIG:
+    # „ “ nur hier ganz am Ende als Notfall-Fallback,
+    # niemals vor dem ersten json.loads()
+    normalized = normalized.replace("„", "\"").replace("“", "\"").replace("”", "\"")
+
+    try:
+        data = json.loads(normalized)
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            return data["lines"]
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+
+    # 5) lines-array direkt extrahieren
+    m = re.search(r'"lines"\s*:\s*(\[[\s\S]*\])', raw)
+    if m:
+        arr_txt = m.group(1)
+        arr_txt = re.sub(r",(\s*[}\]])", r"\1", arr_txt)
+        try:
+            arr = json.loads(arr_txt)
+            if isinstance(arr, list):
+                return arr
+        except Exception:
+            pass
+
+    return None
+
+def _pil_to_data_url(
+    im: Image.Image,
+    max_side: int = 5000,
+    image_format: str = "JPEG",
+    jpeg_quality: int = 85,
+) -> str:
+    im = im.convert("RGB")
+    w, h = im.size
+
+    scale = min(max_side / max(w, h), 1.0)
+    if scale < 1.0:
+        im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+    buf = BytesIO()
+
+    fmt = (image_format or "JPEG").upper()
+    if fmt == "JPEG":
+        im.save(buf, format="JPEG", quality=int(jpeg_quality), optimize=True)
+        mime = "image/jpeg"
+    else:
+        im.save(buf, format="PNG")
+        mime = "image/png"
+
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+def _image_to_data_url(path: str) -> str:
+    im = _load_image_gray(path)
+    return _pil_to_data_url(im)
+
+def _page_to_data_url(
+    path: str,
+    max_side: int = 5000,
+    image_format: str = "JPEG",
+    jpeg_quality: int = 85,
+) -> str:
+    im = _load_image_color(path)
+    return _pil_to_data_url(
+        im,
+        max_side=max_side,
+        image_format=image_format,
+        jpeg_quality=jpeg_quality,
+    )
+
+def _page_to_small_jpeg_data_url(
+    path: str,
+    max_side: int = 1200,
+    jpeg_quality: int = 65,
+) -> str:
+    im = _load_image_color(path)
+
+    w, h = im.size
+    longest = max(w, h)
+    if longest > max_side:
+        scale = max_side / float(longest)
+        im = im.resize(
+            (max(1, int(w * scale)), max(1, int(h * scale))),
+            Image.LANCZOS
+        )
+
+    return _pil_to_data_url(
+        im,
+        max_side=max_side,
+        image_format="JPEG",
+        jpeg_quality=jpeg_quality,
+    )
+
+def _crop_block_to_data_url_context(
+    path: str,
+    recs: List["RecordView"],
+    start: int,
+    end: int,
+    pad_x: int = 40,
+    pad_y: int = 35,
+) -> str:
+    im = _load_image_color(path)
+    boxes = [rv.bbox for rv in recs[start:end] if rv.bbox]
+
+    if not boxes:
+        return _pil_to_data_url(im, max_side=768)
+
+    x0 = max(0, min(bb[0] for bb in boxes) - pad_x)
+    y0 = max(0, min(bb[1] for bb in boxes) - pad_y)
+    x1 = min(im.size[0], max(bb[2] for bb in boxes) + pad_x)
+    y1 = min(im.size[1], max(bb[3] for bb in boxes) + pad_y)
+
+    crop = im.crop((x0, y0, x1, y1))
+    return _pil_to_data_url(crop, max_side=1600)
+
+def _crop_single_line_to_data_url(
+    path: str,
+    rv: "RecordView",
+    pad_x: int = 80,
+    pad_y: int = 30,
+    extra_context_y: int = 20,
+) -> str:
+    im = _load_image_color(path)
+
+    if not rv.bbox:
+        return _pil_to_data_url(im, max_side=1600)
+
+    x0, y0, x1, y1 = rv.bbox
+
+    x0 = max(0, x0 - pad_x)
+    y0 = max(0, y0 - pad_y - extra_context_y)
+    x1 = min(im.size[0], x1 + pad_x)
+    y1 = min(im.size[1], y1 + pad_y + extra_context_y)
+
+    crop = im.crop((x0, y0, x1, y1))
+    return _pil_to_data_url(crop, max_side=1600)
 # -----------------------------
 # HILFSFUNKTIONEN FÜR TABELLEN-EXPORT
 # -----------------------------
@@ -1611,7 +2089,7 @@ class DropQueueTable(QTableWidget):
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p):
+            if p and os.path.exists(p) and is_supported_input(p):
                 files.append(p)
         if files:
             self.files_dropped.emit(files)
@@ -1735,12 +2213,21 @@ class ImageCanvas(QGraphicsView):
 
     def __init__(self, tr_func=None):
         super().__init__()
+        icon_path = resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.NoDrag)
         self._space_panning = False
+
+        # NEU: Maus-Panning (LMB drag)
+        self._mouse_panning = False
+        self._pan_start = QPoint()
+        self._pan_start_h = 0
+        self._pan_start_v = 0
 
         # Drag & Drop
         self.setAcceptDrops(True)
@@ -1847,7 +2334,7 @@ class ImageCanvas(QGraphicsView):
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p):
+            if p and os.path.exists(p) and is_supported_input(p):
                 files.append(p)
         if files:
             self.files_dropped.emit(files)
@@ -1933,6 +2420,19 @@ class ImageCanvas(QGraphicsView):
             self.scene.addItem(self._draw_rect_item)
             return
 
+        if (not self._draw_mode) and event.button() == Qt.LeftButton:
+            it = self.itemAt(self._event_point(event))
+
+            # Wenn gezoomt und NICHT auf Overlay-Box: direkt per Maus pannen (LMB gedrückt halten)
+            if self._zoom > 1.01 and not isinstance(it, ResizableRectItem):
+                self._mouse_panning = True
+                self._pan_start = self._event_point(event)  # viewport coords
+                self._pan_start_h = self.horizontalScrollBar().value()
+                self._pan_start_v = self.verticalScrollBar().value()
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+
         item = self.itemAt(self._event_point(event))
         if isinstance(item, ResizableRectItem):
             self.rect_clicked.emit(item.idx)
@@ -1969,12 +2469,23 @@ class ImageCanvas(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
+        # NEU: Maus-Panning
+        if self._mouse_panning:
+            p = self._event_point(event)
+            delta = p - self._pan_start
+            self.horizontalScrollBar().setValue(self._pan_start_h - delta.x())
+            self.verticalScrollBar().setValue(self._pan_start_v - delta.y())
+            event.accept()
+            return
+
+        # Box-Zeichnen wie gehabt
         if self._draw_mode and self._draw_start and self._draw_rect_item is not None:
             sp = self.mapToScene(self._event_point(event))
             r = QRectF(self._draw_start, sp).normalized()
             if isValid(self._draw_rect_item):
                 self._draw_rect_item.setRect(r)
             return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -1986,6 +2497,16 @@ class ImageCanvas(QGraphicsView):
             if rect and rect.width() >= 5 and rect.height() >= 5:
                 self.box_drawn.emit(rect)
             return
+
+        if event.button() == Qt.LeftButton and self._mouse_panning:
+            self._mouse_panning = False
+            if self._zoom > 1.01 and not self._draw_mode:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.unsetCursor()
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def clear_all(self):
@@ -2035,6 +2556,7 @@ class ImageCanvas(QGraphicsView):
 
         # Sonst: neu erzeugen
         self._drop_text = self.scene.addText(txt, font)
+        self._drop_text.setAcceptedMouseButtons(Qt.NoButton)
         self._drop_text.setDefaultTextColor(c)
         self._center_drop_hint_in_view()
 
@@ -2066,6 +2588,8 @@ class ImageCanvas(QGraphicsView):
         pix = QPixmap.fromImage(qim)
         self._pixmap_item = self.scene.addPixmap(pix)
         self._pixmap_item.setZValue(0)
+        self._pixmap_item.setAcceptedMouseButtons(Qt.NoButton)
+        self._pixmap_item.setAcceptHoverEvents(False)
         self.setSceneRect(self.scene.itemsBoundingRect())
 
         if preserve_view and t is not None:
@@ -2160,6 +2684,57 @@ class ImageCanvas(QGraphicsView):
         if 0.05 <= new_zoom <= 20.0:
             self.scale(factor, factor)
             self._zoom = new_zoom
+        if self._zoom > 1.01 and not self._draw_mode:
+            self.setCursor(Qt.OpenHandCursor)
+        elif not self._draw_mode:
+            self.unsetCursor()
+
+class PDFRenderWorker(QThread):
+    progress = Signal(int, int, str)          # current, total, pdf_path
+    finished_pdf = Signal(str, list)          # pdf_path, out_paths
+    failed_pdf = Signal(str, str)             # pdf_path, error_message
+
+    def __init__(self, pdf_path: str, dpi: int = 300, parent=None):
+        super().__init__(parent)
+        self.pdf_path = pdf_path
+        self.dpi = int(dpi)
+
+    def run(self):
+        out_paths: List[str] = []
+        try:
+            pdf_path = self.pdf_path
+            dpi = self.dpi
+
+            base = os.path.splitext(os.path.basename(pdf_path))[0]
+            tmp_dir = os.path.join(os.path.dirname(pdf_path), f".kraken_tmp_{base}")
+            os.makedirs(tmp_dir, exist_ok=True)
+
+            doc = fitz.open(pdf_path)
+            total = int(doc.page_count)
+
+            zoom = dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+
+            try:
+                for i in range(total):
+                    if self.isInterruptionRequested():
+                        break
+
+                    page = doc.load_page(i)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    out = os.path.join(tmp_dir, f"{base}_p{i + 1:04d}.png")
+                    pix.save(out)
+                    out_paths.append(out)
+
+                    self.progress.emit(i + 1, total, pdf_path)
+            finally:
+                doc.close()
+
+            # auch wenn abgebrochen -> "fertig" mit dem was da ist
+            self.finished_pdf.emit(pdf_path, out_paths)
+
+        except Exception as e:
+            self.failed_pdf.emit(self.pdf_path, str(e))
 
 # -----------------------------
 # OCR-WORKER
@@ -2279,8 +2854,8 @@ class OCRWorker(QThread):
     def _ocr_one(self, img_path: str, file_idx: int, total_files: int):
         self.file_started.emit(img_path)
         try:
-            # --- Bild einmalig laden (RGB) ---
-            im = Image.open(img_path).convert("RGB")
+            # --- Bild einmalig laden (Graustufe) ---
+            im = _load_image_gray(img_path)
 
             # --- FIX A: zu kleine Bilder hochskalieren (verhindert Baselines < 5px) ---
             min_dim = min(im.size)
@@ -2334,10 +2909,20 @@ class OCRWorker(QThread):
             if self.isInterruptionRequested():
                 return
 
-            # --- Records in Leserichtung sortieren ---
-            kr_sorted = sort_records_reading_order(
-                kr_records, im.size[0], im.size[1], self.job.reading_direction
-            )
+            rec_model_name = os.path.basename(self.job.recognition_model_path).lower()
+
+            if "handwriting" in rec_model_name:
+                kr_sorted = sort_records_handwriting_simple(
+                    kr_records,
+                    self.job.reading_direction
+                )
+            else:
+                kr_sorted = sort_records_reading_order(
+                    kr_records,
+                    im.size[0],
+                    im.size[1],
+                    self.job.reading_direction
+                )
 
             # --- WIDE LINE SPLIT: nur echte 2-Spalten-Zeilen splitten, Header NICHT ---
             def _is_header_like(bb, txt, page_w, page_h):
@@ -2366,22 +2951,24 @@ class OCRWorker(QThread):
                 pred = getattr(r, "prediction", None)
                 if pred is None:
                     continue
-                txt = str(pred)
+
+                txt = _clean_ocr_text(pred)
+                if _is_effectively_empty_ocr_text(txt) or _is_symbol_only_line(txt):
+                    continue
+
                 bb = record_bbox(r)
+                split_done = False
 
                 if bb:
                     x0, y0, x1, y1 = bb
                     w = x1 - x0
+
                     if w > int(page_w * 0.80) and not _is_header_like(bb, txt, page_w, page_h):
                         parts = two_col_splitter.split(txt, maxsplit=1)
-                        xs = []
-                        for rr in kr_sorted:
-                            bb2 = record_bbox(rr)
-                            if bb2:
-                                xs.append(bb2[0])
-                        xs.sort()
+
                         if len(parts) == 2:
-                            left_txt, right_txt = map(str.strip, parts)
+                            left_txt, right_txt = map(_clean_ocr_text, parts)
+
                             mid = page_w // 2
                             left_bb = clamp_bbox((0, y0, mid, y1), page_w, page_h)
                             right_bb = clamp_bbox((mid, y0, page_w, y1), page_w, page_h)
@@ -2392,19 +2979,41 @@ class OCRWorker(QThread):
                             if right_bb and right_txt:
                                 parts_in_order.append((right_txt, right_bb))
 
-                            rev_x = self.job.reading_direction in (READING_MODES["TB_RL"], READING_MODES["BT_RL"])
+                            rev_x = self.job.reading_direction in (
+                                READING_MODES["TB_RL"],
+                                READING_MODES["BT_RL"]
+                            )
                             if rev_x:
                                 parts_in_order = list(reversed(parts_in_order))
 
-                            for txt_part, bb_part in parts_in_order:
-                                record_views.append(RecordView(out_idx, txt_part, bb_part))
-                                lines.append(txt_part)
-                                out_idx += 1
-                            continue
+                            if parts_in_order:
+                                for txt_part, bb_part in parts_in_order:
+                                    record_views.append(RecordView(out_idx, txt_part, bb_part))
+                                    lines.append(txt_part)
+                                    out_idx += 1
+                                split_done = True
+
+                if split_done:
+                    continue
 
                 record_views.append(RecordView(out_idx, txt, bb))
                 lines.append(txt)
                 out_idx += 1
+
+            filtered_record_views: List[RecordView] = []
+            filtered_lines: List[str] = []
+
+            for rv in record_views:
+                rv.text = _clean_ocr_text(rv.text)
+                if _is_effectively_empty_ocr_text(rv.text) or _is_symbol_only_line(rv.text):
+                    continue
+
+                rv.idx = len(filtered_record_views)
+                filtered_record_views.append(rv)
+                filtered_lines.append(rv.text)
+
+            record_views = filtered_record_views
+            lines = filtered_lines
 
             self._emit_overall_progress(file_idx, total_files, 1.0)
             text = "\n".join(lines).strip()
@@ -2435,6 +3044,914 @@ class OCRWorker(QThread):
             self.finished_batch.emit()
         except Exception as e:
             self.failed.emit(str(e))
+
+class AIBatchRevisionWorker(QThread):
+    file_started = Signal(str, int, int)          # path, current, total
+    file_finished = Signal(str, list, int, int)   # path, revised_lines, current, total
+    file_failed = Signal(str, str, int, int)      # path, error, current, total
+    progress_changed = Signal(int)                # overall 0..100
+    status_changed = Signal(str)
+    finished_batch = Signal()
+
+    def __init__(
+            self,
+            items: List[TaskItem],
+            lm_model: str,
+            endpoint: str,
+            enable_thinking: bool = False,
+            temperature: float = 0.2,
+            top_p: float = 0.8,
+            top_k: int = 10,
+            presence_penalty: float = 0.0,
+            repetition_penalty: float = 1.0,
+            min_p: float = 0.0,
+            max_tokens: int = 1200,
+            parent=None
+    ):
+        super().__init__(parent)
+        self.items = items
+        self.lm_model = lm_model
+        self.endpoint = endpoint
+        self.enable_thinking = enable_thinking
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.presence_penalty = presence_penalty
+        self.repetition_penalty = repetition_penalty
+        self.min_p = min_p
+        self.max_tokens = max_tokens
+        self._current_worker = None
+
+    def cancel(self):
+        self.requestInterruption()
+
+        w = self._current_worker
+        if w is not None:
+            try:
+                w.cancel()
+            except Exception:
+                pass
+
+    def run(self):
+        total = len(self.items)
+        if total <= 0:
+            self.finished_batch.emit()
+            return
+
+        for i, task in enumerate(self.items, start=1):
+            if self.isInterruptionRequested():
+                break
+
+            self.file_started.emit(task.path, i, total)
+            self.status_changed.emit(f"KI-Datei {i}/{total}: {os.path.basename(task.path)}")
+
+            try:
+                _, _, _, recs = task.results
+                worker = AIRevisionWorker(
+                    path=task.path,
+                    recs=recs,
+                    lm_model=self.lm_model,
+                    endpoint=self.endpoint,
+                    enable_thinking=self.enable_thinking,
+                    source_kind=task.source_kind,
+                    temperature=self.temperature,
+                    top_p=self.top_p,
+                    top_k=self.top_k,
+                    presence_penalty=self.presence_penalty,
+                    repetition_penalty=self.repetition_penalty,
+                    min_p=self.min_p,
+                    max_tokens=self.max_tokens,
+                )
+                self._current_worker = worker
+                revised_holder = {"lines": None, "error": None}
+
+                def _done(path, lines):
+                    revised_holder["lines"] = lines
+
+                def _fail(path, msg):
+                    revised_holder["error"] = msg
+
+                worker.finished_revision.connect(_done)
+                worker.failed_revision.connect(_fail)
+
+                worker.run()  # absichtlich synchron innerhalb des Batch-Threads
+                self._current_worker = None
+
+                if revised_holder["error"] is not None:
+                    self.file_failed.emit(task.path, revised_holder["error"], i, total)
+                else:
+                    self.file_finished.emit(task.path, revised_holder["lines"], i, total)
+
+            except Exception as e:
+                self.file_failed.emit(task.path, str(e), i, total)
+
+            percent = int((i / total) * 100)
+            self.progress_changed.emit(percent)
+
+        self.status_changed.emit("KI-Batch abgeschlossen.")
+        self.finished_batch.emit()
+
+def _normalize_bbox(bb: Optional[BBox], img_w: int, img_h: int) -> Optional[List[float]]:
+    if not bb or img_w <= 0 or img_h <= 0:
+        return None
+    x0, y0, x1, y1 = bb
+    return [
+        round(x0 / img_w, 4),
+        round(y0 / img_h, 4),
+        round(x1 / img_w, 4),
+        round(y1 / img_h, 4),
+    ]
+
+
+def _extract_text_lines(text: str) -> List[str]:
+    if not text:
+        return []
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+class AIRevisionWorker(QThread):
+    finished_revision = Signal(str, list)   # path, revised_lines
+    failed_revision = Signal(str, str)      # path, error
+    progress_changed = Signal(int)          # 0..100
+    status_changed = Signal(str)            # live text
+
+    def __init__(
+            self,
+            path: str,
+            recs: List[RecordView],
+            lm_model: str,
+            endpoint: str = "http://127.0.0.1:1234/v1/chat/completions",
+            enable_thinking: bool = False,
+            source_kind: str = "image",
+            temperature: float = 0.2,
+            top_p: float = 0.8,
+            top_k: int = 10,
+            presence_penalty: float = 0.0,
+            repetition_penalty: float = 1.0,
+            min_p: float = 0.0,
+            max_tokens: int = 1200,
+            parent=None
+    ):
+        super().__init__(parent)
+        self.path = path
+        self.recs = recs
+        self.lm_model = lm_model
+        self.endpoint = endpoint
+        self.source_kind = source_kind
+
+        self.enable_thinking = bool(enable_thinking)
+        self.temperature = float(temperature)
+        self.top_p = float(top_p)
+        self.top_k = int(top_k)
+        self.presence_penalty = float(presence_penalty)
+        self.repetition_penalty = float(repetition_penalty)
+        self.min_p = float(min_p)
+        self.max_tokens = int(max_tokens)
+
+        self._cancelled = False
+        self._active_conn = None
+
+    def cancel(self):
+        self._cancelled = True
+        self.requestInterruption()
+
+        conn = self._active_conn
+        self._active_conn = None
+
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _is_image_processing_error(self, exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return (
+                "failed to process image" in msg
+                or "image" in msg and "http 400" in msg
+        )
+
+    def _request_page_ocr_with_fixed_linecount(self, page_data_url: str, recs: List[RecordView]) -> List[str]:
+        img_w, img_h = _load_image_color(self.path).size
+
+        line_specs = []
+        for rv in recs:
+            line_specs.append({
+                "idx": int(rv.idx),
+                "bbox": _normalize_bbox(rv.bbox, img_w, img_h)
+            })
+
+        system_prompt = (
+            "Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche Drucke und Handschriften. "
+            "Du bist spezialisiert auf Fraktur, Sütterlin, Kurrent und verwandte ältere deutsche Schriftformen. "
+            "Lies den Text frei direkt aus dem Bild. "
+            "Das Bild ist die einzige Wahrheitsquelle. "
+            "Du darfst den OCR-Hinweis nicht rekonstruieren, sondern musst den Text wirklich aus dem Bild lesen. "
+            "Bewahre historische Schreibweisen, Eigennamen, Abkürzungen und alte Orthographie so genau wie möglich. "
+            "Modernisiere oder normalisiere nichts. "
+            "Wenn einzelne Zeichen unsicher sind, nutze den visuellen und sprachlichen Kontext historischer deutscher Texte. "
+            "Die vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
+            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
+            "Antworte ausschließlich mit gültigem JSON. "
+            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
+        )
+
+        user_prompt = (
+            "Lies den Text direkt aus dem Bild.\n\n"
+            "Du musst dich exakt an die vorgegebene Kraken-Zeilenstruktur halten.\n"
+            f"Es gibt genau {len(recs)} Zielzeilen.\n"
+            "Für jede Zielzeile gibt es einen festen idx.\n"
+            "Gib für jeden idx genau den Text der zugehörigen handschriftlichen Zeile zurück.\n"
+            "Verschiebe keinen Text zwischen den idx-Werten.\n"
+            "Lasse keinen idx aus.\n"
+            "Die bbox dient nur als Orientierung, welche visuelle Zeile gemeint ist.\n\n"
+            "Wichtig:\n"
+            f"- Gib genau {len(recs)} Einträge im Feld lines zurück\n"
+            f"- Die idx-Werte müssen exakt 0 bis {len(recs) - 1} sein\n"
+            "- Gib NUR ein JSON-Objekt zurück\n"
+            "- Kein Markdown\n"
+            "- Keine Analyse\n"
+            "- Keine zusätzlichen Sätze\n"
+            "- Keine Kommentare\n"
+            "- Wenn eine Zeile unklar ist, gib den bestmöglichen Text zurück\n"
+            "- Wenn eine Zielzeile wirklich leer wäre, gib für diese Zeile text als leeren String zurück\n\n"
+            "Kraken-Zielzeilenstruktur:\n"
+            f"{json.dumps(line_specs, ensure_ascii=False)}\n\n"
+            "Antwortformat exakt so:\n"
+            "{\"lines\":[{\"idx\":0,\"text\":\"...\"},{\"idx\":1,\"text\":\"...\"}]}"
+        )
+
+        payload = {
+            "model": self.lm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": page_data_url}},
+                    ],
+                },
+            ],
+            **self._build_sampling_payload(
+                response_format=self._response_format_lines()
+            ),
+        }
+
+        data = self._post_json(payload)
+        try:
+            print("RAW FULL LM STUDIO RESPONSE:")
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:12000])
+        except Exception:
+            pass
+        content = self._extract_message_content(data)
+
+        # Debug-Log: rohe Modellantwort sichtbar machen
+        try:
+            print("RAW PAGE OCR RESPONSE:")
+            print(content[:4000])
+        except Exception:
+            pass
+
+        lines = _extract_json_lines_object(content)
+
+        if not isinstance(lines, list):
+            raise ValueError(
+                "Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\n"
+                f"Extrahierter Content:\n{content[:3000] if content else '<leer>'}"
+            )
+
+        out = [""] * len(recs)
+
+        for item in lines:
+            if not isinstance(item, dict):
+                continue
+            idx = item.get("idx")
+            txt = str(item.get("text", "")).strip()
+            if isinstance(idx, int) and 0 <= idx < len(recs):
+                out[idx] = txt
+
+        # Wenn fast alles leer ist -> kompletter Fehler
+        filled = sum(1 for x in out if str(x).strip())
+        if filled < max(1, int(len(recs) * 0.6)):
+            raise ValueError(
+                f"Seiten-OCR lieferte zu wenig verwertbare Zeilen: {filled}/{len(recs)}"
+            )
+
+        # Leere Einzelzeilen gezielt mit Kraken-Original auffüllen,
+        # damit die Zeilenstruktur exakt erhalten bleibt
+        for i in range(len(out)):
+            if not str(out[i]).strip():
+                out[i] = recs[i].text
+
+        return out
+
+    def _request_single_line_reread(
+            self,
+            line_data_url: str,
+            idx: int,
+            current_text: str = "",
+    ) -> str:
+        system_prompt = (
+            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften. "
+            "Lies den Text frei direkt aus dem Bild. "
+            "Das Bild ist die einzige Wahrheitsquelle. "
+            "Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst lesen. "
+            "Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
+            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
+            "Antworte ausschließlich mit gültigem JSON. "
+            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
+        )
+
+        user_prompt = (
+            "Lies genau die zentrale handschriftliche Zeile aus dem Bildausschnitt.\n"
+            "Gib ausschließlich genau EIN JSON-Objekt zurück.\n"
+            "Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n"
+            "Wichtig:\n"
+            "- doppelte Anführungszeichen innerhalb von text immer als \\\" escapen\n"
+            "- keine Ausgabe vor oder nach dem JSON\n"
+            "Format:\n"
+            "{\"text\":\"...\"}\n\n"
+            f"Zeilenindex: {idx}\n"
+            f"Aktueller OCR-Text als schwacher Hinweis:\n{current_text}"
+        )
+
+        payload = {
+            "model": self.lm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": line_data_url}},
+                    ],
+                },
+            ],
+            **self._build_sampling_payload(
+                response_format=self._response_format_single_text()
+            ),
+        }
+
+        data = self._post_json(payload)
+        content = self._extract_message_content(data)
+
+        try:
+            print("RAW SINGLE LINE RESPONSE:")
+            print(content[:2000])
+        except Exception:
+            pass
+
+        if "```" in content:
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+        content = content.strip()
+
+        obj = None
+        try:
+            obj = json.loads(content)
+        except Exception:
+            pass
+
+        if obj is None:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    obj = json.loads(content[start:end + 1])
+                except Exception:
+                    pass
+
+        if isinstance(obj, dict):
+            txt = str(obj.get("text", "")).strip()
+            if txt or txt == "":
+                return txt
+
+        lines = _extract_text_lines(content)
+        if lines:
+            return lines[0].strip()
+
+        return current_text
+
+    def _build_sampling_payload(self, response_format: Optional[dict] = None) -> dict:
+        payload = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "presence_penalty": self.presence_penalty,
+            "max_tokens": self.max_tokens,
+            "stream": False,
+        }
+
+        if response_format is not None:
+            payload["response_format"] = response_format
+
+        if self.top_k > 0:
+            payload["top_k"] = self.top_k
+
+        if self.min_p > 0:
+            payload["min_p"] = self.min_p
+
+        if self.repetition_penalty != 1.0:
+            payload["repetition_penalty"] = self.repetition_penalty
+
+        return payload
+
+    def _response_format_lines(self) -> dict:
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "ocr_lines",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "lines": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "idx": {"type": "integer"},
+                                    "text": {"type": "string"}
+                                },
+                                "required": ["idx", "text"],
+                                "additionalProperties": False
+                            }
+                        }
+                    },
+                    "required": ["lines"],
+                    "additionalProperties": False
+                }
+            }
+        }
+
+    def _response_format_single_text(self) -> dict:
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "ocr_single_line",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"}
+                    },
+                    "required": ["text"],
+                    "additionalProperties": False
+                }
+            }
+        }
+
+    def _normalize_lines(self, revised: list, original: list) -> list:
+        revised = [str(x).strip() for x in revised]
+
+        if len(revised) == len(original):
+            return revised
+
+        if len(revised) > len(original):
+            return revised[:len(original)]
+
+        fixed = list(revised)
+        fixed.extend(original[len(revised):])
+        return fixed
+
+    def _post_json(self, payload: dict) -> dict:
+        if self._cancelled or self.isInterruptionRequested():
+            raise RuntimeError("Überarbeitung abgebrochen.")
+
+        body = json.dumps(payload).encode("utf-8")
+        parsed = urllib.parse.urlparse(self.endpoint)
+
+        if parsed.scheme not in ("http", "https"):
+            raise RuntimeError(f"Nicht unterstütztes Schema: {parsed.scheme}")
+
+        host = parsed.hostname
+        port = parsed.port
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+
+        if not host:
+            raise RuntimeError("Ungültiger Endpoint.")
+
+        conn = None
+        try:
+            if parsed.scheme == "https":
+                conn = http.client.HTTPSConnection(host, port or 443, timeout=600)
+            else:
+                conn = http.client.HTTPConnection(host, port or 80, timeout=600)
+
+            self._active_conn = conn
+
+            conn.request(
+                "POST",
+                path,
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer lm-studio"
+                }
+            )
+
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+
+            resp = conn.getresponse()
+            raw = resp.read().decode("utf-8", errors="replace")
+
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+
+            if resp.status >= 400:
+                raise RuntimeError(f"HTTP {resp.status}: {raw}")
+
+            return json.loads(raw)
+
+        except socket.timeout:
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+            raise RuntimeError("Zeitüberschreitung bei LM Studio")
+
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Ungültige JSON-Antwort von LM Studio: {e}")
+
+        except Exception as e:
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+            raise
+
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            if self._active_conn is conn:
+                self._active_conn = None
+
+    def _extract_message_content(self, data: dict) -> str:
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(
+                f"LM Studio lieferte keine choices. Antwort:\n{json.dumps(data, ensure_ascii=False)[:3000]}"
+            )
+
+        choice0 = choices[0] or {}
+        message = choice0.get("message", {}) if isinstance(choice0, dict) else {}
+
+        def flatten(val):
+            if val is None:
+                return ""
+            if isinstance(val, str):
+                return val.strip()
+            if isinstance(val, list):
+                parts = []
+                for part in val:
+                    if isinstance(part, str) and part.strip():
+                        parts.append(part.strip())
+                    elif isinstance(part, dict):
+                        # NUR echte Antwortfelder, KEIN reasoning_content
+                        for key in ("text", "content", "output_text"):
+                            v = part.get(key)
+                            if isinstance(v, str) and v.strip():
+                                parts.append(v.strip())
+                return "\n".join(parts).strip()
+            if isinstance(val, dict):
+                for key in ("text", "content", "output_text"):
+                    v = val.get(key)
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+            return str(val).strip()
+
+        # 1) ZUERST nur echte Ausgabe lesen
+        candidates = []
+        if isinstance(message, dict):
+            candidates.append(message.get("content"))
+            candidates.append(message.get("text"))
+            candidates.append(message.get("output_text"))
+
+        if isinstance(choice0, dict):
+            candidates.append(choice0.get("content"))
+            candidates.append(choice0.get("text"))
+
+        for cand in candidates:
+            txt = flatten(cand)
+            if txt:
+                # <think> entfernen, falls ein Modell sowas trotzdem in content schreibt
+                txt = re.sub(r"<think>.*?</think>", "", txt, flags=re.DOTALL).strip()
+                if txt:
+                    return txt
+
+        # 2) reasoning_content NICHT als normale Antwort verwenden
+        reasoning = ""
+        if isinstance(message, dict):
+            rc = message.get("reasoning_content")
+            if isinstance(rc, str) and rc.strip():
+                reasoning = rc.strip()
+
+        finish_reason = ""
+        if isinstance(choice0, dict):
+            finish_reason = str(choice0.get("finish_reason", "")).strip()
+
+        if reasoning:
+            cleaned = re.sub(r"<think>.*?</think>", "", reasoning, flags=re.DOTALL).strip()
+
+            # Falls reasoning_content selbst schon JSON enthält, nutzen wir es als Notfall-Fallback
+            if cleaned:
+                if cleaned.startswith("{") or '"lines"' in cleaned or '"text"' in cleaned:
+                    return cleaned
+
+            if finish_reason == "length":
+                raise RuntimeError(
+                    "Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen JSON-Antwort abgeschnitten "
+                    "(finish_reason=length). Erhöhe max_tokens oder verwende ein nicht-thinkendes Modell."
+                )
+
+            raise RuntimeError(
+                "Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. "
+                "Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne reasoning."
+            )
+
+        raise RuntimeError("LM Studio lieferte keinen verwertbaren Antwortinhalt.")
+
+    def _request_block_reread(
+            self,
+            block_data_url: str,
+            start_idx: int,
+            end_idx: int,
+            current_lines: List[str],
+    ) -> List[str]:
+        count = end_idx - start_idx
+
+        system_prompt = (
+            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften. "
+            "Lies den Text frei direkt aus dem Bild. "
+            "Das Bild ist die einzige Wahrheitsquelle. "
+            "Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst lesen. "
+            "Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
+            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
+            "Antworte ausschließlich mit gültigem JSON. "
+            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
+        )
+
+        joined_hint = "\n".join(
+            f"{start_idx + i}: {txt}" for i, txt in enumerate(current_lines)
+        )
+
+        user_prompt = (
+            "Lies die handschriftlichen Zeilen im Bildausschnitt.\n"
+            "Gib ausschließlich genau EIN JSON-Objekt zurück.\n"
+            "Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n"
+            f"Es müssen genau {count} Einträge im Feld lines stehen.\n"
+            "Wichtig:\n"
+            "- doppelte Anführungszeichen innerhalb von text immer als \\\" escapen\n"
+            "- keine weiteren Felder außer idx und text\n"
+            "- keine Ausgabe vor oder nach dem JSON\n"
+            "Format:\n"
+            "{\"lines\":[{\"idx\":0,\"text\":\"...\"}]}\n\n"
+            "Die idx-Werte müssen lokal bei 0 beginnen.\n"
+            "Aktueller OCR-Hinweis:\n"
+            f"{joined_hint}"
+        )
+
+        payload = {
+            "model": self.lm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": block_data_url}},
+                    ],
+                },
+            ],
+            **self._build_sampling_payload(
+                response_format=self._response_format_lines()
+            ),
+        }
+
+        data = self._post_json(payload)
+        content = self._extract_message_content(data)
+
+        try:
+            print("RAW BLOCK RESPONSE:")
+            print(content[:3000])
+        except Exception:
+            pass
+
+        lines = _extract_json_lines_object(content)
+        if not isinstance(lines, list):
+            return current_lines
+
+        out = [""] * count
+        for item in lines:
+            if not isinstance(item, dict):
+                continue
+            idx = item.get("idx")
+            txt = str(item.get("text", "")).strip()
+            if isinstance(idx, int) and 0 <= idx < count:
+                out[idx] = txt
+
+        fixed = []
+        for i in range(count):
+            txt = out[i].strip()
+            if txt:
+                fixed.append(txt)
+            else:
+                fixed.append(current_lines[i])
+
+        return fixed
+
+    def _chunk_records(self, recs: List[RecordView], block_size: int = 3) -> List[Tuple[int, int]]:
+        chunks: List[Tuple[int, int]] = []
+        i = 0
+        n = len(recs)
+        while i < n:
+            j = min(n, i + block_size)
+            chunks.append((i, j))
+            i = j
+        return chunks
+
+    def run(self):
+        if self._cancelled or self.isInterruptionRequested():
+            self.failed_revision.emit(self.path, "Überarbeitung abgebrochen.")
+            return
+        try:
+            original_lines = [rv.text for rv in self.recs]
+
+            if not self.recs:
+                self.finished_revision.emit(self.path, [])
+                return
+
+            self.status_changed.emit(f"Starte freie KI-OCR: {os.path.basename(self.path)}")
+            self.progress_changed.emit(0)
+
+            self.status_changed.emit(
+                f"Freies Seiten-OCR mit fixer Zeilenanzahl: {os.path.basename(self.path)}"
+            )
+
+            revised_all = None
+            last_err = None
+
+            retry_configs = [
+                {"max_side": 2000, "image_format": "JPEG", "jpeg_quality": 100},
+                {"max_side": 1500, "image_format": "JPEG", "jpeg_quality": 85},
+                {"max_side": 1000, "image_format": "JPEG", "jpeg_quality": 70},
+            ]
+
+            for cfg in retry_configs:
+                if self._cancelled or self.isInterruptionRequested():
+                    raise RuntimeError("Überarbeitung abgebrochen.")
+
+                try:
+                    self.status_changed.emit(
+                        f"Vision-OCR Versuch: {cfg['max_side']}px {cfg['image_format']}"
+                    )
+                    page_data_url = _page_to_data_url(
+                        self.path,
+                        max_side=cfg["max_side"],
+                        image_format=cfg["image_format"],
+                        jpeg_quality=cfg["jpeg_quality"],
+                    )
+
+                    if self._cancelled or self.isInterruptionRequested():
+                        raise RuntimeError("Überarbeitung abgebrochen.")
+
+                    revised_all = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
+                    break
+                except Exception as e:
+                    last_err = e
+                    if self._is_image_processing_error(e):
+                        continue
+                    raise
+
+            if revised_all is None:
+                # Spezial-Fallback nur für PDF-Seiten:
+                # nochmal als stark verkleinertes JPEG versuchen
+                if self.source_kind == "pdf_page":
+                    try:
+                        self.status_changed.emit("PDF-Fallback: stark verkleinertes JPEG wird versucht")
+                        page_data_url = _page_to_small_jpeg_data_url(
+                            self.path,
+                            max_side=1200,
+                            jpeg_quality=65,
+                        )
+                        revised_all = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
+                    except Exception as pdf_fallback_err:
+                        last_err = pdf_fallback_err
+
+                if revised_all is None:
+                    raise RuntimeError(f"Bild konnte vom Vision-Modell nicht verarbeitet werden: {last_err}")
+
+            if len(revised_all) != len(original_lines):
+                raise ValueError(
+                    f"Seiten-OCR gab {len(revised_all)} statt {len(original_lines)} Zeilen zurück."
+                )
+
+            if len(revised_all) != len(self.recs):
+                raise ValueError(
+                    f"LLM gab {len(revised_all)} Zeilen zurück, erwartet wurden {len(self.recs)}."
+                )
+
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+
+            self.status_changed.emit(f"Freie KI-OCR abgeschlossen: {os.path.basename(self.path)}")
+            self.progress_changed.emit(100)
+            self.finished_revision.emit(self.path, revised_all)
+
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = str(e)
+            self.failed_revision.emit(self.path, f"HTTP-Fehler: {e}\n{body}")
+
+        except urllib.error.URLError as e:
+            self.failed_revision.emit(self.path, f"LM Studio nicht erreichbar: {e}")
+
+        except socket.timeout:
+            self.failed_revision.emit(self.path, "Zeitüberschreitung beim Warten auf LM Studio.")
+
+        except Exception as e:
+            self.failed_revision.emit(self.path, str(e))
+
+class ProgressStatusDialog(QDialog):
+    cancel_requested = Signal()
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+
+        lay = QVBoxLayout(self)
+
+        self.lbl_status = QLabel("Bereit")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setMinimumWidth(320)
+        self.lbl_status.setMaximumWidth(520)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+
+        self.btn_cancel = QPushButton("Abbrechen")
+        self.btn_cancel.clicked.connect(self.cancel_requested.emit)
+
+        lay.addWidget(self.lbl_status)
+        lay.addWidget(self.progress)
+        lay.addWidget(self.btn_cancel)
+
+        self.adjustSize()
+
+    def set_status(self, text: str):
+        self.lbl_status.setText(text)
+        self.adjustSize()
+
+    def set_progress(self, value: int):
+        self.progress.setValue(max(0, min(100, int(value))))
+
+# -----------------------------
+# EXPORT-DIALOGE
+# -----------------------------
+
+class ExportWorker(QThread):
+    file_started = Signal(str, int, int)   # display_name, current, total
+    file_done = Signal(str, str, int, int) # display_name, dest_path, current, total
+    file_error = Signal(str, str, int, int)
+    progress_changed = Signal(int)
+    status_changed = Signal(str)
+    finished_batch = Signal()
+
+    def __init__(self, render_callback, items: List[TaskItem], fmt: str, folder: str, parent=None):
+        super().__init__(parent)
+        self.render_callback = render_callback
+        self.items = items
+        self.fmt = fmt
+        self.folder = folder
+
+    def run(self):
+        total = len(self.items)
+        if total <= 0:
+            self.finished_batch.emit()
+            return
+
+        for i, it in enumerate(self.items, start=1):
+            if self.isInterruptionRequested():
+                break
+
+            base_name = os.path.splitext(it.display_name)[0]
+            dest_path = os.path.join(self.folder, f"{base_name}.{self.fmt}")
+
+            self.file_started.emit(it.display_name, i, total)
+            self.status_changed.emit(f"Exportiere {i}/{total}: {it.display_name}")
+
+            try:
+                self.render_callback(dest_path, self.fmt, it)
+                self.file_done.emit(it.display_name, dest_path, i, total)
+            except Exception as e:
+                self.file_error.emit(it.display_name, str(e), i, total)
+
+            self.progress_changed.emit(int((i / total) * 100))
+
+        self.status_changed.emit("Export abgeschlossen.")
+        self.finished_batch.emit()
 
 # -----------------------------
 # EXPORT-DIALOGE
@@ -2500,6 +4017,30 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900)
         self.setAcceptDrops(True)
 
+        self.temp_dirs_created = set()
+        QApplication.instance().installEventFilter(self)
+
+        self.ai_worker: Optional[AIRevisionWorker] = None
+        self.ai_model_id = ""
+        self.ai_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
+        self.ai_base_url = None
+
+        self.project_file_path = ""
+
+        # OCR-Korrektur: konservativ und stabil
+        self.ai_enable_thinking = False
+        self.ai_temperature = 0.0
+        self.ai_top_p = 0.2
+        self.ai_top_k = 1
+        self.ai_presence_penalty = 0.0
+        self.ai_repetition_penalty = 1.0
+        self.ai_min_p = 0.0
+        self.ai_max_tokens = 8000
+
+        self.ai_available_models: List[str] = []
+        self.ai_model_actions: Dict[str, QAction] = {}
+        self.ai_model_group: Optional[QActionGroup] = None
+
         self.current_lang = "de"
         self.log_lang = self._detect_system_lang()
         self.reading_direction = READING_MODES["TB_LR"]
@@ -2507,6 +4048,8 @@ class MainWindow(QMainWindow):
         self.show_overlay = True
         self.model_path = ""
         self.seg_model_path = ""
+        self.rec_model_candidates = []
+        self.default_seg_model = ""
         self.current_export_dir = ""
         self.current_theme = "bright"
         self.current_segmenter_mode = "blla"
@@ -2522,6 +4065,16 @@ class MainWindow(QMainWindow):
         self.worker: Optional[OCRWorker] = None
         self.queue_items: List[TaskItem] = []
 
+        self.pdf_worker: Optional[PDFRenderWorker] = None
+        self.pdf_progress_dlg: Optional[QProgressDialog] = None
+        self._pending_pdf_path: Optional[str] = None
+
+        self.export_worker: Optional[ExportWorker] = None
+        self.export_dialog: Optional[ProgressStatusDialog] = None
+        self.ai_batch_worker: Optional[AIBatchRevisionWorker] = None
+        self.ai_batch_dialog: Optional[ProgressStatusDialog] = None
+        self.ai_progress_dialog: Optional[ProgressStatusDialog] = None
+
         # Canvas (Bildanzeige)
         self.canvas = ImageCanvas(tr_func=self._tr)
         self.canvas.rect_clicked.connect(self.on_rect_clicked)
@@ -2536,23 +4089,27 @@ class MainWindow(QMainWindow):
 
         # Wartebereich-Tabelle
         self.queue_table = DropQueueTable()
-        self.queue_table.setColumnCount(2)
+        self.queue_table.setColumnCount(4)
+        self.queue_table.verticalHeader().setVisible(False)
         self.queue_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.queue_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.queue_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.queue_table.itemChanged.connect(self.on_item_changed)
         self.queue_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.queue_table.customContextMenuRequested.connect(self.queue_context_menu)
+        self.queue_table.currentCellChanged.connect(self.on_queue_current_cell_changed)
         self.queue_table.cellDoubleClicked.connect(self.on_queue_double_click)
         self.queue_table.delete_pressed.connect(self._delete_queue_via_key)
         self.queue_table.files_dropped.connect(self.add_files_to_queue)
         self.queue_table.table_resized.connect(self._fit_queue_columns_exact)
 
         header = self.queue_table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignCenter)
         header.setSectionsMovable(False)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.sectionResized.connect(self._on_queue_header_resized)
         self.queue_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        header.sectionClicked.connect(self._on_queue_header_clicked)
 
         # Hinweis-Overlay für den Wartebereich
         self.queue_hint = QLabel(self._tr("queue_drop_hint"), self.queue_table.viewport())
@@ -2590,6 +4147,15 @@ class MainWindow(QMainWindow):
         self.act_add = QAction(QIcon.fromTheme("document-open"), self._tr("act_add_files"), self)
         self.act_add.triggered.connect(self.choose_files)
 
+        self.act_paste_files = QAction("Aus Zwischenablage einfügen", self)
+        self.act_paste_files.setShortcut(QKeySequence.Paste)
+        self.act_paste_files.triggered.connect(self.paste_files_from_clipboard)
+        self.addAction(self.act_paste_files)
+
+        self.shortcut_paste_files_main = QShortcut(QKeySequence.Paste, self)
+        self.shortcut_paste_files_main.setContext(Qt.WindowShortcut)
+        self.shortcut_paste_files_main.activated.connect(self.paste_files_from_clipboard)
+
         self.act_clear = QAction(QIcon.fromTheme("edit-clear"), self._tr("act_clear_queue"), self)
         self.act_clear.triggered.connect(self.clear_queue)
 
@@ -2603,6 +4169,19 @@ class MainWindow(QMainWindow):
         self.act_re_ocr = QAction(QIcon.fromTheme("view-refresh"), self._tr("act_re_ocr"), self)
         self.act_re_ocr.setToolTip(self._tr("act_re_ocr_tip"))
         self.act_re_ocr.triggered.connect(self.reprocess_selected)
+
+        self.act_ai_revise = QAction(self._tr("act_ai_revise"), self)
+        self.act_ai_revise.setToolTip(self._tr("act_ai_revise_tip"))
+        self.act_ai_revise.triggered.connect(self.run_ai_revision)
+
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+        self._ai_server_cache_ttl = 2.0
+
+        self._update_ai_model_ui()
 
         self.act_toggle_log = QAction(QIcon.fromTheme("document-preview"), self._tr("log_toggle_show"), self)
         self.act_toggle_log.setCheckable(True)
@@ -2621,7 +4200,7 @@ class MainWindow(QMainWindow):
         self.addAction(self.act_undo)
         self.addAction(self.act_redo)
 
-        self.btn_rec_model = QPushButton(self._tr("dlg_choose_rec") + " -")
+        self.btn_rec_model = QPushButton("Rec-Modell: -")
         self.btn_rec_model.setIcon(QIcon.fromTheme("document-open"))
         self.btn_rec_model.clicked.connect(self.choose_rec_model)
 
@@ -2633,6 +4212,8 @@ class MainWindow(QMainWindow):
         self._pending_new_line_box: bool = False
 
         self._auto_select_best_device()
+        self._scan_kraken_models()
+        self._load_default_segmentation_model()
         self._init_ui()
         self._init_menu()
         self.apply_theme("bright")
@@ -2644,6 +4225,816 @@ class MainWindow(QMainWindow):
 
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
+
+    def _cleanup_temp_dirs(self):
+        for d in list(self.temp_dirs_created):
+            try:
+                if os.path.isdir(d):
+                    shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                pass
+        self.temp_dirs_created.clear()
+
+    def eventFilter(self, obj, event):
+        try:
+            et = event.type()
+
+            if et in (QEvent.ShortcutOverride, QEvent.KeyPress):
+                if event.matches(QKeySequence.Paste):
+                    # Nur reagieren, wenn dieses Fenster wirklich aktiv ist
+                    if QApplication.activeWindow() is not self:
+                        return super().eventFilter(obj, event)
+
+                    fw = QApplication.focusWidget()
+
+                    # In Texteingaben normales Einfügen erlauben
+                    if isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit)):
+                        return super().eventFilter(obj, event)
+
+                    self.paste_files_from_clipboard()
+                    event.accept()
+                    return True
+        except Exception:
+            pass
+
+        return super().eventFilter(obj, event)
+
+    def _is_local_port_open(self, host: str, port: int, timeout: float = 0.12) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except Exception:
+            return False
+
+    def _reorder_lines_keep_box_slots(self, task: TaskItem, order: List[int], keep_row: Optional[int] = None):
+        if not task or not task.results:
+            return
+
+        text, kr_records, im, recs = task.results
+        n = len(recs)
+
+        if len(order) != n:
+            return
+
+        try:
+            order = [int(i) for i in order]
+        except Exception:
+            return
+
+        if sorted(order) != list(range(n)):
+            return
+
+        self._push_undo(task)
+
+        old_recs = list(recs)
+
+        # GANZE Records verschieben, nicht nur Texte
+        new_recs = [
+            RecordView(i, old_recs[src_idx].text, old_recs[src_idx].bbox)
+            for i, src_idx in enumerate(order)
+        ]
+
+        task.edited = True
+        task.results = (text, kr_records, im, new_recs)
+        self._sync_ui_after_recs_change(task, keep_row=keep_row)
+
+    def _get_active_ai_model_display(self) -> str:
+        explicit = (self.ai_model_id or "").strip()
+        if explicit:
+            return explicit
+
+        models = self._fetch_loaded_llm_models()
+        if models:
+            return f"AUTO → {models[0]}"
+
+        return "AUTO → -"
+
+    def _update_ai_model_ui(self):
+        display = self._get_active_ai_model_display()
+
+        if hasattr(self, "btn_ai_model"):
+            self.btn_ai_model.setText(f"KI: {display}")
+
+        if hasattr(self, "act_llm_status"):
+            self.act_llm_status.setText(f"LLM: {display}")
+
+    def _process_ui(self):
+        QCoreApplication.processEvents()
+
+    def _fetch_loaded_llm_models(self) -> List[str]:
+        base_url, _ = self._detect_local_openai_server()
+        if not base_url:
+            return []
+
+        url = base_url + "/models"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"Authorization": "Bearer local"},
+                method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                data = json.loads(raw)
+
+            models_data = data.get("data", [])
+            out = []
+            if isinstance(models_data, list):
+                for m in models_data:
+                    if not isinstance(m, dict):
+                        continue
+                    mid = str(m.get("id", "")).strip()
+                    if mid:
+                        out.append(mid)
+
+            # doppelte raus, Reihenfolge behalten
+            seen = set()
+            uniq = []
+            for mid in out:
+                if mid not in seen:
+                    seen.add(mid)
+                    uniq.append(mid)
+            return uniq
+
+        except Exception:
+            return []
+
+    def _set_ai_model_from_menu(self, model_id: str):
+        self.ai_model_id = (model_id or "").strip()
+        self._update_ai_model_ui()
+
+        if self.ai_model_id:
+            self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
+        else:
+            self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
+
+    def _refresh_ai_models_menu(self):
+        if not hasattr(self, "ai_models_menu"):
+            return
+
+        self.ai_models_menu.clear()
+        self.ai_available_models = self._fetch_loaded_llm_models()
+
+        self.ai_model_group = QActionGroup(self)
+        self.ai_model_group.setExclusive(True)
+        self.ai_model_actions = {}
+
+        if not self.ai_available_models:
+            act = QAction("Keine localhost-Modelle gefunden", self)
+            act.setEnabled(False)
+            self.ai_models_menu.addAction(act)
+            return
+
+        for mid in self.ai_available_models:
+            act = QAction(mid, self)
+            act.setCheckable(True)
+            act.setChecked(mid == self.ai_model_id)
+            act.triggered.connect(lambda checked, m=mid: self._set_ai_model_from_menu(m))
+            self.ai_model_group.addAction(act)
+            self.ai_models_menu.addAction(act)
+            self.ai_model_actions[mid] = act
+
+        self.ai_models_menu.addSeparator()
+
+        act_auto = QAction("AUTO (erstes verfügbares Modell)", self)
+        act_auto.setCheckable(True)
+        act_auto.setChecked(not bool(self.ai_model_id))
+        act_auto.triggered.connect(lambda checked: self._set_ai_model_from_menu(""))
+        self.ai_model_group.addAction(act_auto)
+        self.ai_models_menu.addAction(act_auto)
+
+    def _swap_lines(self, task: TaskItem, row_a: int, row_b: int):
+        if not task or not task.results:
+            return
+
+        _, _, _, recs = task.results
+        if not (0 <= row_a < len(recs)) or not (0 <= row_b < len(recs)):
+            return
+
+        if row_a == row_b:
+            self._sync_ui_after_recs_change(task, keep_row=row_a)
+            return
+
+        order = list(range(len(recs)))
+        order[row_a], order[row_b] = order[row_b], order[row_a]
+
+        self._reorder_lines_keep_box_slots(task, order, keep_row=row_b)
+
+    def _swap_line_with_dialog(self, task: TaskItem, row: int):
+        if not task or not task.results:
+            return
+
+        _, _, _, recs = task.results
+        if not (0 <= row < len(recs)):
+            return
+
+        target, ok = QInputDialog.getInt(
+            self,
+            self._tr("dlg_swap_title"),
+            self._tr("dlg_swap_label"),
+            row + 1,  # value
+            1,  # minValue
+            max(1, len(recs)),  # maxValue
+            1  # step
+        )
+        if not ok:
+            return
+
+        self._swap_lines(task, row, target - 1)
+
+    def _recordview_to_dict(self, rv: RecordView) -> dict:
+        return {
+            "idx": int(rv.idx),
+            "text": rv.text,
+            "bbox": list(rv.bbox) if rv.bbox else None,
+        }
+
+    def _recordview_from_dict(self, data: dict) -> RecordView:
+        bbox = data.get("bbox")
+        if bbox is not None:
+            bbox = tuple(int(x) for x in bbox)
+        return RecordView(
+            idx=int(data.get("idx", 0)),
+            text=str(data.get("text", "")),
+            bbox=bbox
+        )
+
+    def _task_to_dict(self, task: TaskItem) -> dict:
+        payload = {
+            "path": task.path,
+            "display_name": task.display_name,
+            "status": int(task.status),
+            "edited": bool(task.edited),
+            "source_kind": task.source_kind,
+            "relative_path": os.path.basename(task.path),
+            "undo_stack": [],
+            "redo_stack": [],
+            "results": None,
+        }
+
+        if task.results:
+            text, kr_records, im, recs = task.results
+            payload["results"] = {"text": text, "records": [self._recordview_to_dict(rv) for rv in recs], }
+
+        return payload
+
+    def _task_from_dict(self, data: dict) -> TaskItem:
+        task = TaskItem(
+            path=str(data.get("path", "")),
+            display_name=str(data.get("display_name", os.path.basename(str(data.get("path", ""))))),
+            status=int(data.get("status", STATUS_WAITING)),
+            edited=bool(data.get("edited", False)),
+            source_kind=str(data.get("source_kind", "image")),
+            relative_path=str(data.get("relative_path", os.path.basename(str(data.get("path", ""))))),
+        )
+
+        results = data.get("results")
+        if results:
+            recs = [self._recordview_from_dict(x) for x in results.get("records", [])]
+            text = str(results.get("text", "\n".join(rv.text for rv in recs).strip()))
+
+            gray_im = None
+            if os.path.exists(task.path):
+                try:
+                    gray_im = _load_image_gray(task.path)
+                except Exception:
+                    gray_im = None
+
+            task.results = (text, [], gray_im, recs)
+
+        return task
+
+    def _project_to_dict(self) -> dict:
+        current_row = self.queue_table.currentRow()
+
+        return {
+            "version": 1,
+            "settings": {
+                "language": self.current_lang,
+                "reading_direction": self.reading_direction,
+                "device": self.device_str,
+                "show_overlay": self.show_overlay,
+                "theme": self.current_theme,
+                "model_path": self.model_path,
+                "seg_model_path": self.seg_model_path,
+                "current_export_dir": self.current_export_dir,
+                "ai_model_id": self.ai_model_id,
+                "current_row": current_row,
+            },
+            "queue_items": [self._task_to_dict(task) for task in self.queue_items],
+        }
+
+    def _remap_missing_project_files(self):
+        missing = [t for t in self.queue_items if not os.path.exists(t.path)]
+        if not missing:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            self._tr("warn_title"),
+            "Einige Originaldateien wurden nicht gefunden.\n\n"
+            "Möchten Sie einen neuen Ordner auswählen, damit die Dateien neu zugeordnet werden?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        new_base_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Neuen Basisordner für Originaldateien wählen",
+            self.current_export_dir or os.getcwd()
+        )
+        if not new_base_dir:
+            return
+
+        unresolved = []
+
+        for task in missing:
+            candidates = []
+
+            rel = (task.relative_path or "").strip()
+            old_path = (task.path or "").strip()
+
+            if rel:
+                candidates.append(os.path.join(new_base_dir, rel))
+
+            if old_path:
+                candidates.append(os.path.join(new_base_dir, os.path.basename(old_path)))
+
+            # doppelte Kandidaten vermeiden
+            seen = set()
+            final_candidates = []
+            for c in candidates:
+                norm = os.path.normpath(c)
+                if norm not in seen:
+                    seen.add(norm)
+                    final_candidates.append(norm)
+
+            found = None
+            for c in final_candidates:
+                if os.path.exists(c):
+                    found = c
+                    break
+
+            if found:
+                task.path = found
+                if not task.relative_path:
+                    task.relative_path = os.path.basename(found)
+            else:
+                unresolved.append(task.display_name)
+
+        if unresolved:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Einige Dateien konnten weiterhin nicht gefunden werden:\n\n" + "\n".join(unresolved[:20])
+            )
+
+    def _load_project_dict(self, data: dict):
+        progress = QProgressDialog("Projekt wird geladen...", None, 0, 100, self)
+        progress.setWindowTitle("Projekt laden")
+        progress.setWindowModality(Qt.ApplicationModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+        self._process_ui()
+
+        try:
+            self.clear_queue()
+            progress.setLabelText("Einstellungen werden wiederhergestellt...")
+            progress.setValue(5)
+            self._process_ui()
+
+            settings = data.get("settings", {})
+            self.current_lang = settings.get("language", self.current_lang)
+            self.reading_direction = int(settings.get("reading_direction", self.reading_direction))
+            self.device_str = settings.get("device", self.device_str)
+            self.show_overlay = bool(settings.get("show_overlay", self.show_overlay))
+            self.current_theme = settings.get("theme", self.current_theme)
+            self.model_path = settings.get("model_path", self.model_path)
+            self.seg_model_path = settings.get("seg_model_path", self.seg_model_path)
+            self.current_export_dir = settings.get("current_export_dir", self.current_export_dir)
+            self.ai_model_id = settings.get("ai_model_id", self.ai_model_id)
+
+            queue_data = data.get("queue_items", [])
+            self.queue_items = []
+
+            total = max(1, len(queue_data))
+
+            progress.setLabelText("Projektdaten werden eingelesen...")
+            progress.setValue(10)
+            self._process_ui()
+
+            for idx, task_data in enumerate(queue_data, start=1):
+                task = self._task_from_dict(task_data)
+                self.queue_items.append(task)
+
+                pct = 10 + int((idx / total) * 35)
+                progress.setLabelText(f"Projektobjekte werden eingelesen... ({idx}/{total})")
+                progress.setValue(pct)
+                self._process_ui()
+
+            progress.setLabelText("Dateipfade werden geprüft...")
+            progress.setValue(50)
+            self._process_ui()
+
+            self._remap_missing_project_files()
+
+            progress.setLabelText("Wartebereich wird aufgebaut...")
+            self._process_ui()
+
+            for idx, task in enumerate(self.queue_items, start=1):
+                row = self.queue_table.rowCount()
+                self.queue_table.insertRow(row)
+
+                num_item = QTableWidgetItem(str(row + 1))
+                num_item.setTextAlignment(Qt.AlignCenter)
+                num_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+                check_item = QTableWidgetItem()
+                check_item.setTextAlignment(Qt.AlignCenter)
+                check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                check_item.setCheckState(Qt.Unchecked)
+
+                name_item = QTableWidgetItem(task.display_name)
+                name_item.setData(Qt.UserRole, task.path)
+                name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+
+                status_item = QTableWidgetItem()
+                status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+                self.queue_table.setItem(row, QUEUE_COL_NUM, num_item)
+                self.queue_table.setItem(row, QUEUE_COL_CHECK, check_item)
+                self.queue_table.setItem(row, QUEUE_COL_FILE, name_item)
+                self.queue_table.setItem(row, QUEUE_COL_STATUS, status_item)
+
+                self._update_queue_row(task.path)
+
+                pct = 50 + int((idx / total) * 35)
+                progress.setLabelText(f"Wartebereich wird aufgebaut... ({idx}/{total})")
+                progress.setValue(pct)
+                self._process_ui()
+
+            progress.setLabelText("Oberfläche wird aktualisiert...")
+            progress.setValue(90)
+            self._process_ui()
+
+            self.apply_theme(self.current_theme)
+            self.retranslate_ui()
+
+            current_row = int(settings.get("current_row", 0))
+            if self.queue_table.rowCount() > 0:
+                current_row = max(0, min(self.queue_table.rowCount() - 1, current_row))
+                self.queue_table.selectRow(current_row)
+
+                path = self.queue_table.item(current_row, QUEUE_COL_FILE).data(Qt.UserRole)
+                task = next((i for i in self.queue_items if i.path == path), None)
+
+                if task:
+                    if os.path.exists(path):
+                        if task.status == STATUS_DONE and task.results:
+                            self.load_results(path)
+                        else:
+                            self.preview_image(path)
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            self._tr("warn_title"),
+                            self._tr("warn_project_file_missing", path)
+                        )
+
+            self._refresh_queue_numbers()
+            self._fit_queue_columns_exact()
+            self._update_queue_hint()
+            self._update_models_menu_labels()
+            self._update_model_clear_buttons()
+
+            progress.setLabelText("Projekt abgeschlossen.")
+            progress.setValue(100)
+            self._process_ui()
+
+        finally:
+            progress.close()
+
+    def save_project_as(self):
+        base_dir = self.current_export_dir or os.getcwd()
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            self._tr("menu_project_save_as"),
+            os.path.join(base_dir, "projekt.json"),
+            self._tr("dlg_filter_project")
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+
+        self.project_file_path = path
+        self.save_project()
+
+    def save_project(self):
+        if not self.project_file_path:
+            self.save_project_as()
+            return
+
+        try:
+            data = self._project_to_dict()
+            with open(self.project_file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            self.status_bar.showMessage(self._tr("msg_project_saved", os.path.basename(self.project_file_path)))
+
+            QMessageBox.information(
+                self,
+                self._tr("info_title"),
+                self._tr("msg_project_saved", os.path.basename(self.project_file_path))
+            )
+
+        except Exception as e:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_project_save_failed", str(e)))
+
+    def load_project(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self._tr("menu_project_load"),
+            self.current_export_dir or os.getcwd(),
+            self._tr("dlg_filter_project")
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            self.project_file_path = path
+            self._load_project_dict(data)
+            self.status_bar.showMessage(self._tr("msg_project_loaded", os.path.basename(path)))
+        except Exception as e:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_project_load_failed", str(e)))
+
+    def _queue_check_col_width(self) -> int:
+        style = self.queue_table.style()
+        indicator_w = style.pixelMetric(style.PixelMetric.PM_IndicatorWidth)
+        return max(18, indicator_w + 6)  # 3 px links + 3 px rechts
+
+    def _refresh_queue_numbers(self):
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_NUM)
+            if item is None:
+                item = QTableWidgetItem()
+                item.setTextAlignment(Qt.AlignCenter)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.queue_table.setItem(row, QUEUE_COL_NUM, item)
+            item.setText(str(row + 1))
+
+    def on_queue_current_cell_changed(self, currentRow, currentColumn, previousRow, previousColumn):
+        if currentRow < 0:
+            return
+        item = self.queue_table.item(currentRow, QUEUE_COL_FILE)
+        if not item:
+            return
+        path = item.data(Qt.UserRole)
+        if path:
+            self.preview_image(path)
+
+    def _checked_queue_tasks(self) -> List[TaskItem]:
+        out = []
+        for row in range(self.queue_table.rowCount()):
+            check_item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            file_item = self.queue_table.item(row, QUEUE_COL_FILE)
+            if not check_item or not file_item:
+                continue
+            if check_item.checkState() == Qt.Checked:
+                path = file_item.data(Qt.UserRole)
+                task = next((t for t in self.queue_items if t.path == path), None)
+                if task:
+                    out.append(task)
+        return out
+
+    def _selected_queue_tasks(self) -> List[TaskItem]:
+        rows = self.queue_table.selectionModel().selectedRows()
+        if not rows:
+            return []
+
+        paths = []
+        for model_index in rows:
+            item = self.queue_table.item(model_index.row(), QUEUE_COL_FILE)
+            if item:
+                p = item.data(Qt.UserRole)
+                if p:
+                    paths.append(p)
+
+        out = []
+        for p in paths:
+            task = next((i for i in self.queue_items if i.path == p), None)
+            if task:
+                out.append(task)
+        return out
+
+    def _normalize_toolbar_button_sizes(self):
+        target_height = 34
+        clear_width = 28
+
+        # Alle Toolbar-QToolButtons angleichen
+        for b in self.toolbar.findChildren(QToolButton):
+            b.setMinimumHeight(target_height)
+            b.setMaximumHeight(target_height)
+            b.setMinimumWidth(0)
+            b.setMaximumWidth(16777215)
+
+        # Hauptbuttons angleichen
+        for btn_name in ("btn_rec_model", "btn_seg_model", "btn_ai_model"):
+            btn = getattr(self, btn_name, None)
+            if btn is not None:
+                btn.setMinimumHeight(target_height)
+                btn.setMaximumHeight(target_height)
+                btn.setMinimumWidth(0)
+                btn.setMaximumWidth(16777215)
+
+        # kleine X-Buttons
+        for btn_name in ("btn_rec_clear", "btn_seg_clear"):
+            btn = getattr(self, btn_name, None)
+            if btn is not None:
+                btn.setMinimumHeight(target_height)
+                btn.setMaximumHeight(target_height)
+                btn.setFixedWidth(clear_width)
+
+    def _scan_kraken_models(self):
+        self.rec_model_candidates = []
+        self.default_seg_model = ""
+
+        model_dir = KRAKEN_MODELS_DIR
+        if not os.path.isdir(model_dir):
+            return
+
+        for name in sorted(os.listdir(model_dir)):
+            full = os.path.join(model_dir, name)
+            if not os.path.isfile(full):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in (".mlmodel", ".pt"):
+                continue
+
+            lname = name.lower()
+
+            # Standard-Segmentierung: blla
+            if "blla" in lname:
+                if not self.default_seg_model:
+                    self.default_seg_model = full
+                continue
+
+            # Alles andere als Recognition behandeln
+            self.rec_model_candidates.append(full)
+
+    def _load_default_segmentation_model(self):
+        if self.default_seg_model and os.path.exists(self.default_seg_model):
+            self.seg_model_path = self.default_seg_model
+            self.current_segmenter_mode = "blla"
+
+    def choose_rec_model_from_scanned(self):
+        if not getattr(self, "rec_model_candidates", None):
+            QMessageBox.warning(self, self._tr("warn_title"), "Keine Recognition-Modelle gefunden.")
+            return
+
+        names = [os.path.basename(p) for p in self.rec_model_candidates]
+        current_name = os.path.basename(self.model_path) if self.model_path else names[0]
+
+        selected, ok = QInputDialog.getItem(
+            self,
+            self._tr("dlg_choose_rec"),
+            "Recognition-Modell auswählen:",
+            names,
+            max(0, names.index(current_name)) if current_name in names else 0,
+            False
+        )
+        if not ok or not selected:
+            return
+
+        for p in self.rec_model_candidates:
+            if os.path.basename(p) == selected:
+                self.model_path = p
+                break
+
+        self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(self.model_path)}")
+        self._update_models_menu_labels()
+        self._update_model_clear_buttons()
+
+    def _detect_local_openai_server(self, force: bool = False) -> Tuple[Optional[str], Optional[str]]:
+        now = time.monotonic()
+
+        if not force:
+            age = now - float(self._ai_server_cache.get("ts", 0.0))
+            if age < self._ai_server_cache_ttl:
+                return self._ai_server_cache.get("base_url"), self._ai_server_cache.get("model_id")
+
+        candidates = [
+            ("127.0.0.1", 1234),  # LM Studio
+            ("localhost", 1234),
+            ("127.0.0.1", 8000),  # vLLM
+            ("localhost", 8000),
+            ("127.0.0.1", 8080),
+            ("localhost", 8080),
+            ("127.0.0.1", 3000),
+            ("localhost", 3000),
+        ]
+
+        # 1) Erst ultraschnell prüfen, ob überhaupt ein Port offen ist
+        open_candidates = []
+        for host, port in candidates:
+            if self._is_local_port_open(host, port, timeout=0.12):
+                open_candidates.append((host, port))
+
+        if not open_candidates:
+            self._ai_server_cache = {
+                "ts": now,
+                "base_url": None,
+                "model_id": None,
+            }
+            return None, None
+
+        # 2) Nur für offene Ports /v1/models abfragen
+        for host, port in open_candidates:
+            url = f"http://{host}:{port}/v1/models"
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"Authorization": "Bearer local"},
+                    method="GET"
+                )
+                with urllib.request.urlopen(req, timeout=0.35) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    data = json.loads(raw)
+
+                models_data = data.get("data", [])
+                if isinstance(models_data, list) and models_data:
+                    first = models_data[0]
+                    model_id = str(first.get("id", "")).strip() or "-"
+                    base_url = url.rsplit("/models", 1)[0]
+
+                    self._ai_server_cache = {
+                        "ts": now,
+                        "base_url": base_url,
+                        "model_id": model_id,
+                    }
+                    return base_url, model_id
+
+            except Exception:
+                continue
+
+        self._ai_server_cache = {
+            "ts": now,
+            "base_url": None,
+            "model_id": None,
+        }
+        return None, None
+
+    def _check_lm_studio_server(self) -> bool:
+        base_url, model_id = self._detect_local_openai_server()
+        return bool(base_url and model_id)
+
+    def _fetch_loaded_llm_name(self) -> str:
+        base_url, model_id = self._detect_local_openai_server()
+        return model_id or "-"
+
+    def _refresh_ai_endpoint_from_localhost(self):
+        base_url, _ = self._detect_local_openai_server()
+        if base_url:
+            self.ai_base_url = base_url
+            self.ai_endpoint = base_url + "/chat/completions"
+        self._update_ai_model_ui()
+
+    def _resolve_ai_model_id(self) -> str:
+        self._refresh_ai_endpoint_from_localhost()
+
+        # 1) explizit ausgewähltes Modell hat Vorrang
+        model_id = (self.ai_model_id or "").strip()
+        if model_id:
+            return model_id
+
+        # 2) sonst erstes geladenes localhost-Modell
+        models = self._fetch_loaded_llm_models()
+        if models:
+            return models[0]
+
+        return ""
+
+    def refresh_models_menu_status(self):
+        base_url, _ = self._detect_local_openai_server()
+        server_on = bool(base_url)
+
+        if server_on:
+            self.ai_base_url = base_url
+            self.ai_endpoint = base_url + "/chat/completions"
+
+        self._update_ai_model_ui()
+
+        self.act_server_status.setText(
+            f"Localhost-Server: {'ON' if server_on else 'OFF'}"
+            + (f" ({base_url})" if server_on else "")
+        )
 
     # -----------------------------
     # Übersetzung
@@ -2675,6 +5066,113 @@ class MainWindow(QMainWindow):
     def _delete_queue_via_key(self):
         # Löscht selektierte Zeilen und setzt danach die Vorschau zurück
         self.delete_selected_queue_items(reset_preview=True)
+
+    def run_ai_revision_for_selected(self):
+        selected = self._selected_queue_tasks()
+        if selected:
+            items = [it for it in selected if it.status == STATUS_DONE and it.results]
+        else:
+            items = [it for it in self.queue_items if it.status == STATUS_DONE and it.results]
+
+        if not items:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
+            return
+
+        self.act_ai_revise.setEnabled(False)
+        self.act_ai_revise_all.setEnabled(False)
+
+        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
+        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
+        self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
+        self.ai_batch_dialog.show()
+
+        self.ai_batch_worker = AIBatchRevisionWorker(
+            items=items,
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_batch_worker.file_started.connect(self.on_ai_batch_file_started)
+        self.ai_batch_worker.status_changed.connect(self.ai_batch_dialog.set_status)
+        self.ai_batch_worker.status_changed.connect(self._log)
+        self.ai_batch_worker.progress_changed.connect(self.ai_batch_dialog.set_progress)
+        self.ai_batch_worker.file_finished.connect(self.on_ai_batch_file_done)
+        self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
+        self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
+        self.ai_batch_worker.start()
+
+    def run_ai_revision_for_all(self):
+        items = [it for it in self.queue_items if it.status == STATUS_DONE and it.results]
+        if not items:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
+            return
+
+        self.act_ai_revise.setEnabled(False)
+        self.act_ai_revise_all.setEnabled(False)
+
+        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
+        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
+        self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
+        self.ai_batch_dialog.show()
+
+        self.ai_batch_worker = AIBatchRevisionWorker(
+            items=items,
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_batch_worker.file_started.connect(self.on_ai_batch_file_started)
+        self.ai_batch_worker.status_changed.connect(self.ai_batch_dialog.set_status)
+        self.ai_batch_worker.status_changed.connect(self._log)
+        self.ai_batch_worker.progress_changed.connect(self.ai_batch_dialog.set_progress)
+        self.ai_batch_worker.file_finished.connect(self.on_ai_batch_file_done)
+        self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
+        self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
+        self.ai_batch_worker.start()
+
+    def on_ai_batch_file_started(self, path: str, current: int, total: int):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if task:
+            task.status = STATUS_AI_PROCESSING
+            self._update_queue_row(path)
+
+    def _cancel_ai_batch_revision(self):
+        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
+            self.ai_batch_worker.cancel()
 
     # -----------------------------
     # Undo Helfer (snapshots)
@@ -2747,6 +5245,212 @@ class MainWindow(QMainWindow):
         snap = task.redo_stack.pop()
         self._apply_snapshot(task, snap)
 
+    def set_ai_model_dialog(self):
+        model_id, ok = QInputDialog.getText(
+            self,
+            self._tr("dlg_choose_ai_model"),
+            self._tr("dlg_choose_ai_model_label"),
+            text=self.ai_model_id
+        )
+        if not ok:
+            return
+
+        self.ai_model_id = model_id.strip()
+
+        self._update_ai_model_ui()
+
+        if self.ai_model_id:
+            self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
+        else:
+            self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
+
+    def run_ai_revision(self):
+        checked = self._checked_queue_tasks()
+        selected = self._selected_queue_tasks()
+
+        # Priorität: Checkmarks vor Auswahl
+        target_tasks = checked if checked else selected
+
+        # Wenn mehrere markiert/selektiert sind -> Batch
+        if len(target_tasks) > 1:
+            items = [it for it in target_tasks if it.status == STATUS_DONE and it.results]
+            if not items:
+                QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+                return
+            self._run_ai_revision_batch(items)
+            return
+
+        # Wenn genau ein markierter/selektierter Eintrag existiert -> diesen nehmen
+        if len(target_tasks) == 1:
+            task = target_tasks[0]
+        else:
+            # Fallback: aktuelles Vorschau-Element
+            task = self._current_task()
+
+        if not task or task.status != STATUS_DONE or not task.results:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if self.ai_worker and self.ai_worker.isRunning():
+            return
+
+        _, _, _, recs = task.results
+        if not recs:
+            return
+
+        self.act_ai_revise.setEnabled(False)
+        self.act_ai_revise_all.setEnabled(False)
+        self.status_bar.showMessage(self._tr("msg_ai_started"))
+        self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
+
+        self.ai_progress_dialog = ProgressStatusDialog("KI-Überarbeitung", self)
+        self.ai_progress_dialog.set_status("Verbinde mit LM Studio…")
+        self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
+        self.ai_progress_dialog.show()
+
+        self.ai_worker = AIRevisionWorker(
+            path=task.path,
+            recs=recs,
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            source_kind=task.source_kind,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_worker.progress_changed.connect(self.ai_progress_dialog.set_progress)
+        self.ai_worker.status_changed.connect(self.ai_progress_dialog.set_status)
+        self.ai_worker.status_changed.connect(self._log)
+        self.ai_worker.finished_revision.connect(self.on_ai_revision_done)
+        self.ai_worker.failed_revision.connect(self.on_ai_revision_failed)
+        self.ai_worker.start()
+
+    def _run_ai_revision_batch(self, items: List[TaskItem]):
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
+            return
+
+        self.act_ai_revise.setEnabled(False)
+        self.act_ai_revise_all.setEnabled(False)
+
+        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
+        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
+        self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
+        self.ai_batch_dialog.show()
+
+        self.ai_batch_worker = AIBatchRevisionWorker(
+            items=items,
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_batch_worker.file_started.connect(self.on_ai_batch_file_started)
+        self.ai_batch_worker.status_changed.connect(self.ai_batch_dialog.set_status)
+        self.ai_batch_worker.status_changed.connect(self._log)
+        self.ai_batch_worker.progress_changed.connect(self.ai_batch_dialog.set_progress)
+        self.ai_batch_worker.file_finished.connect(self.on_ai_batch_file_done)
+        self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
+        self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
+        self.ai_batch_worker.start()
+
+    def _cancel_ai_revision(self):
+        if self.ai_worker and self.ai_worker.isRunning():
+            self.ai_worker.cancel()
+
+    def on_ai_revision_done(self, path: str, revised_lines: list):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if not task or not task.results:
+            self.act_ai_revise.setEnabled(True)
+            self.act_ai_revise_all.setEnabled(True)
+            if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+            return
+
+        text, kr_records, im, recs = task.results
+
+        revised_lines = [str(x).strip() for x in revised_lines]
+
+        self._log(
+            f"KI Rückgabe für {os.path.basename(path)}: {len(revised_lines)} Zeilen, OCR hatte {len(recs)} Zeilen")
+
+        if len(revised_lines) < len(recs):
+            revised_lines.extend([recs[i].text for i in range(len(revised_lines), len(recs))])
+        elif len(revised_lines) > len(recs):
+            revised_lines = revised_lines[:len(recs)]
+
+        self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
+        self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
+        self._log(f"NEU alle Zeilen: {revised_lines}")
+
+        self._push_undo(task)
+
+        # WICHTIG: neue RecordView-Liste bauen, nicht in-place mutieren
+        new_recs = [
+            RecordView(i, revised_lines[i], recs[i].bbox)
+            for i in range(len(recs))
+        ]
+
+        new_text = "\n".join(rv.text for rv in new_recs).strip()
+        task.results = (new_text, kr_records, im, new_recs)
+        task.edited = True
+
+        cur = self._current_task()
+        if cur and cur.path == path:
+            self._sync_ui_after_recs_change(task, keep_row=self.list_lines.currentRow())
+        else:
+            self._update_queue_row(path)
+
+        self.act_ai_revise.setEnabled(True)
+        self.act_ai_revise_all.setEnabled(True)
+        self.status_bar.showMessage(self._tr("msg_ai_done"))
+        self._log(self._tr_log("log_ai_done", os.path.basename(path)))
+
+        if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
+
+    def on_ai_revision_failed(self, path: str, msg: str):
+        self.act_ai_revise.setEnabled(True)
+        self.act_ai_revise_all.setEnabled(True)
+
+        if "abgebrochen" in str(msg).lower():
+            self.status_bar.showMessage("Überarbeitung abgebrochen.")
+            self._log(f"Überarbeitung abgebrochen: {os.path.basename(path)}")
+        else:
+            self.status_bar.showMessage("Überarbeitung fehlgeschlagen.")
+            self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
+            QMessageBox.warning(self, self._tr("warn_title"), msg)
+
+        if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
+
     def _auto_select_best_device(self):
         caps = self._gpu_capabilities()
 
@@ -2774,13 +5478,12 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(self.act_play)
         self.toolbar.addAction(self.act_stop)
         self.toolbar.addAction(self.act_re_ocr)
-
-        # NEU: Log Button direkt rechts neben Wiederholen
+        self.toolbar.addAction(self.act_ai_revise)
         self.toolbar.addAction(self.act_toggle_log)
 
+        # Nur Recognition-Modell in der Toolbar
         self.toolbar.addSeparator()
 
-        # --- Rec model widget (button + X) ---
         rec_wrap = QWidget()
         rec_lay = QHBoxLayout(rec_wrap)
         rec_lay.setContentsMargins(0, 0, 0, 0)
@@ -2794,7 +5497,8 @@ class MainWindow(QMainWindow):
         self.btn_rec_clear.clicked.connect(self.clear_rec_model)
         rec_lay.addWidget(self.btn_rec_clear)
 
-        # --- Seg model widget (button + X) ---
+        self.toolbar.addWidget(rec_wrap)
+
         seg_wrap = QWidget()
         seg_lay = QHBoxLayout(seg_wrap)
         seg_lay.setContentsMargins(0, 0, 0, 0)
@@ -2808,7 +5512,6 @@ class MainWindow(QMainWindow):
         self.btn_seg_clear.clicked.connect(self.clear_seg_model)
         seg_lay.addWidget(self.btn_seg_clear)
 
-        self.toolbar.addWidget(rec_wrap)
         self.toolbar.addWidget(seg_wrap)
 
         self._make_toolbar_buttons_pushy()
@@ -2822,7 +5525,35 @@ class MainWindow(QMainWindow):
         right.addWidget(self.log_edit, 1)
 
         right.addWidget(self.progress_bar)
-        right.addWidget(self.lbl_lines)
+
+        lines_head = QHBoxLayout()
+        lines_head.addWidget(self.lbl_lines)
+
+        self.btn_import_lines = QToolButton()
+        self.btn_import_lines.setText("Import")
+        self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
+        self.btn_import_lines.setPopupMode(QToolButton.InstantPopup)
+
+        import_menu = QMenu(self)
+
+        self.act_import_lines_current = QAction("Für aktuelles Bild", self)
+        self.act_import_lines_selected = QAction("Für ausgewählte Bilder", self)
+        self.act_import_lines_all = QAction("Für alle Bilder", self)
+
+        self.act_import_lines_current.triggered.connect(self.import_lines_for_current_image)
+        self.act_import_lines_selected.triggered.connect(self.import_lines_for_selected_images)
+        self.act_import_lines_all.triggered.connect(self.import_lines_for_all_images)
+
+        import_menu.addAction(self.act_import_lines_current)
+        import_menu.addAction(self.act_import_lines_selected)
+        import_menu.addAction(self.act_import_lines_all)
+
+        self.btn_import_lines.setMenu(import_menu)
+
+        lines_head.addWidget(self.btn_import_lines)
+        lines_head.addStretch(1)
+
+        right.addLayout(lines_head)
         right.addWidget(self.list_lines, 3)
 
         right_widget = QWidget()
@@ -2841,6 +5572,68 @@ class MainWindow(QMainWindow):
         self.splitter.splitterMoved.connect(lambda *_: self._fit_queue_columns_exact())
         self.setCentralWidget(self.splitter)
 
+        self._make_toolbar_buttons_pushy()
+        self._update_model_clear_buttons()
+        QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
+
+    def on_ai_batch_file_done(self, path: str, revised_lines: list, current: int, total: int):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if not task or not task.results:
+            return
+
+        task.status = STATUS_DONE
+        self._update_queue_row(path)
+
+        text, kr_records, im, recs = task.results
+
+        revised_lines = [str(x).strip() for x in revised_lines]
+        self._log(
+            f"KI Batch Rückgabe für {os.path.basename(path)}: {len(revised_lines)} Zeilen, OCR hatte {len(recs)} Zeilen")
+
+        if len(revised_lines) < len(recs):
+            revised_lines.extend([recs[i].text for i in range(len(revised_lines), len(recs))])
+        elif len(revised_lines) > len(recs):
+            revised_lines = revised_lines[:len(recs)]
+
+            self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
+            self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
+            self._log(f"NEU alle Zeilen: {revised_lines}")
+
+        self._push_undo(task)
+
+        # WICHTIG: neue Liste statt Mutation der alten
+        new_recs = [
+            RecordView(i, revised_lines[i], recs[i].bbox)
+            for i in range(len(recs))
+        ]
+
+        new_text = "\n".join(rv.text for rv in new_recs).strip()
+        task.results = (new_text, kr_records, im, new_recs)
+        task.edited = True
+
+        keep_row = self.list_lines.currentRow() if self._current_task() and self._current_task().path == path else 0
+        self._sync_ui_after_recs_change(task, keep_row=keep_row)
+        self._update_queue_row(path)
+
+        self._log(self._tr_log("log_ai_done", os.path.basename(path)))
+
+    def on_ai_batch_file_failed(self, path: str, msg: str, current: int, total: int):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if task:
+            task.status = STATUS_ERROR
+            self._update_queue_row(path)
+        self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
+
+    def on_ai_batch_finished(self):
+        self.act_ai_revise.setEnabled(True)
+        self.act_ai_revise_all.setEnabled(True)
+
+        if self.ai_batch_dialog:
+            self.ai_batch_dialog.close()
+            self.ai_batch_dialog = None
+
+        self.status_bar.showMessage("KI-Batch abgeschlossen.")
+
     def _make_toolbar_buttons_pushy(self):
         # Alle QToolButtons, die QToolBar für QAction erstellt
         for b in self.toolbar.findChildren(QToolButton):
@@ -2850,6 +5643,9 @@ class MainWindow(QMainWindow):
         # Auch die Modell-Buttons
         self.btn_rec_model.setCursor(Qt.PointingHandCursor)
         self.btn_seg_model.setCursor(Qt.PointingHandCursor)
+
+        if hasattr(self, "btn_import_lines"):
+            self.btn_import_lines.setCursor(Qt.PointingHandCursor)
 
     def _init_menu(self):
         lang_group = QActionGroup(self)
@@ -2878,6 +5674,25 @@ class MainWindow(QMainWindow):
         self.act_add_files.triggered.connect(self.choose_files)
         self.file_menu.addAction(self.act_add_files)
 
+        self.act_paste_files_menu = QAction(self._tr("act_paste_clipboard"), self)
+        self.act_paste_files_menu.setShortcut(QKeySequence.Paste)
+        self.act_paste_files_menu.triggered.connect(self.paste_files_from_clipboard)
+        self.file_menu.addAction(self.act_paste_files_menu)
+
+        self.file_menu.addSeparator()
+
+        self.act_project_save = QAction(self._tr("menu_project_save"), self)
+        self.act_project_save.triggered.connect(self.save_project)
+        self.file_menu.addAction(self.act_project_save)
+
+        self.act_project_save_as = QAction(self._tr("menu_project_save_as"), self)
+        self.act_project_save_as.triggered.connect(self.save_project_as)
+        self.file_menu.addAction(self.act_project_save_as)
+
+        self.act_project_load = QAction(self._tr("menu_project_load"), self)
+        self.act_project_load.triggered.connect(self.load_project)
+        self.file_menu.addAction(self.act_project_load)
+
         self.file_menu.addSeparator()
         self.export_menu = self.file_menu.addMenu(self._tr("menu_export"))
 
@@ -2902,14 +5717,17 @@ class MainWindow(QMainWindow):
 
         self.models_menu = menubar.addMenu(self._tr("menu_models"))
 
+        self.revision_models_menu = menubar.addMenu("Modelle - Überarbeitung")
+
         # Menüeinträge zeigen immer den aktuell geladenen Namen
-        self.act_rec = QAction(f"{self._tr('dlg_choose_rec')}-", self)
+        self.act_rec = QAction("Recognition-Modell laden...", self)
         self.act_rec.triggered.connect(self.choose_rec_model)
         self.models_menu.addAction(self.act_rec)
 
-        self.act_seg = QAction(f"{self._tr('dlg_choose_seg')}-", self)
+        self.act_seg = QAction("Segmentierungs-Modell laden...", self)
         self.act_seg.triggered.connect(self.choose_seg_model)
         self.models_menu.addAction(self.act_seg)
+
         self.models_menu.addSeparator()
 
         # --- Clear actions in Models menu ---
@@ -2927,6 +5745,17 @@ class MainWindow(QMainWindow):
         self.act_download = QAction(self._tr("act_download_model"), self)
         self.act_download.triggered.connect(self.open_download_link)
         self.models_menu.addAction(self.act_download)
+
+        self.ai_models_menu = self.revision_models_menu.addMenu("KI-Modell für Überarbeitung")
+        self.revision_models_menu.aboutToShow.connect(self._refresh_ai_models_menu)
+
+        self.revision_models_menu.addSeparator()
+
+        self.act_server_status = QAction("Localhost-Server: OFF", self)
+        self.act_server_status.setEnabled(False)
+        self.revision_models_menu.addAction(self.act_server_status)
+
+        self.revision_models_menu.aboutToShow.connect(self.refresh_models_menu_status)
 
         self.options_menu = menubar.addMenu(self._tr("menu_options"))
 
@@ -3001,31 +5830,55 @@ class MainWindow(QMainWindow):
     # -----------------------------
     # Queue columns
     # -----------------------------
+
+    def _on_queue_header_clicked(self, logical_index: int):
+        if logical_index != QUEUE_COL_CHECK:
+            return
+
+        states = []
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            if item:
+                states.append(item.checkState() == Qt.Checked)
+
+        if not states:
+            return
+
+        set_checked = not all(states)
+
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            if item:
+                item.setCheckState(Qt.Checked if set_checked else Qt.Unchecked)
+
+    def _queue_num_col_width(self) -> int:
+        count = max(1, self.queue_table.rowCount())
+        digits = len(str(count))
+
+        fm = self.queue_table.fontMetrics()
+        text_w = fm.horizontalAdvance("9" * digits)
+        header_w = fm.horizontalAdvance("#")
+
+        # kleiner Puffer links/rechts
+        return max(header_w, text_w) + 10
+
     def _fit_queue_columns_exact(self):
         if self._resizing_cols:
             return
         self._resizing_cols = True
         try:
             vw = max(1, self.queue_table.viewport().width())
-            w0 = int(vw * float(self.queue_col_ratio))
-            w1 = vw - w0
 
-            min0, min1 = 80, 60
-            if w0 < min0:
-                w0 = min0
-                w1 = max(min1, vw - w0)
-            if w1 < min1:
-                w1 = min1
-                w0 = max(min0, vw - w1)
+            num_w = self._queue_num_col_width()
+            check_w = self._queue_check_col_width()
+            status_w = 120
 
-            if w0 + w1 != vw:
-                w1 = max(min1, vw - w0)
+            file_w = max(120, vw - num_w - check_w - status_w)
 
-            self.queue_table.setColumnWidth(0, w0)
-            self.queue_table.setColumnWidth(1, w1)
-
-            if vw > 0:
-                self.queue_col_ratio = max(0.1, min(0.9, w0 / float(vw)))
+            self.queue_table.setColumnWidth(QUEUE_COL_NUM, num_w)
+            self.queue_table.setColumnWidth(QUEUE_COL_CHECK, check_w)
+            self.queue_table.setColumnWidth(QUEUE_COL_FILE, file_w)
+            self.queue_table.setColumnWidth(QUEUE_COL_STATUS, status_w)
 
             self._update_queue_hint()
         finally:
@@ -3034,10 +5887,6 @@ class MainWindow(QMainWindow):
     def _on_queue_header_resized(self, logicalIndex: int, oldSize: int, newSize: int):
         if self._resizing_cols:
             return
-        w0 = self.queue_table.columnWidth(0)
-        w1 = self.queue_table.columnWidth(1)
-        total = max(1, w0 + w1)
-        self.queue_col_ratio = max(0.1, min(0.9, w0 / float(total)))
         self._fit_queue_columns_exact()
 
     def resizeEvent(self, event):
@@ -3212,6 +6061,31 @@ class MainWindow(QMainWindow):
 
         self.act_export_log.setText(self._tr("menu_export_log"))
 
+        if hasattr(self, "act_ai_revise"):
+            self.act_ai_revise.setText(self._tr("act_ai_revise"))
+            self.act_ai_revise.setToolTip(self._tr("act_ai_revise_tip"))
+        if hasattr(self, "btn_ai_model"):
+            self._update_ai_model_ui()
+        if hasattr(self, "act_ai_revise_all"):
+            self.act_ai_revise_all.setText("Alle Überarbeiten")
+            self.act_ai_revise_all.setToolTip("Alle fertig erkannten Dateien überarbeiten")
+        if hasattr(self, "btn_import_lines"):
+            self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
+        if hasattr(self, "act_import_lines_current"):
+            self.act_import_lines_current.setText("Für aktuelles Bild")
+        if hasattr(self, "act_import_lines_selected"):
+            self.act_import_lines_selected.setText("Für ausgewählte Bilder")
+        if hasattr(self, "act_import_lines_all"):
+            self.act_import_lines_all.setText("Für alle Bilder")
+        if hasattr(self, "act_project_save"):
+            self.act_project_save.setText(self._tr("menu_project_save"))
+        if hasattr(self, "act_project_save_as"):
+            self.act_project_save_as.setText(self._tr("menu_project_save_as"))
+        if hasattr(self, "act_project_load"):
+            self.act_project_load.setText(self._tr("menu_project_load"))
+        if hasattr(self, "act_paste_files_menu"):
+            self.act_paste_files_menu.setText(self._tr("act_paste_clipboard"))
+
         self.act_undo.setText(self._tr("act_undo"))
         self.act_redo.setText(self._tr("act_redo"))
 
@@ -3231,17 +6105,17 @@ class MainWindow(QMainWindow):
 
         self.lbl_queue.setText(self._tr("lbl_queue"))
         self.lbl_lines.setText(self._tr("lbl_lines"))
-        self.queue_table.setHorizontalHeaderLabels([self._tr("col_file"), self._tr("col_status")])
+        self.queue_table.setHorizontalHeaderLabels(["#", "☐", self._tr("col_file"), self._tr("col_status")])
 
         if self.model_path:
-            self.btn_rec_model.setText(f"{self._tr('dlg_choose_rec')}{os.path.basename(self.model_path)}")
+            self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(self.model_path)}")
         else:
-            self.btn_rec_model.setText(f"{self._tr('dlg_choose_rec')}-")
+            self.btn_rec_model.setText("Rec-Modell: -")
 
         if self.seg_model_path:
-            self.btn_seg_model.setText(f"{self._tr('dlg_choose_seg')}{os.path.basename(self.seg_model_path)}")
+            self.btn_seg_model.setText(f"Seg-Modell: {os.path.basename(self.seg_model_path)}")
         else:
-            self.btn_seg_model.setText(f"{self._tr('dlg_choose_seg')}-")
+            self.btn_seg_model.setText("Seg-Modell: -")
 
         mapping = {"cpu": "hw_cpu", "cuda": "hw_cuda", "rocm": "hw_rocm", "mps": "hw_mps"}
         for dev, key in mapping.items():
@@ -3257,6 +6131,8 @@ class MainWindow(QMainWindow):
         self.canvas._show_drop_hint()
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
+        QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
+
         # Models menu actions
         self.act_rec.setText(
             f"{self._tr('dlg_choose_rec')}{os.path.basename(self.model_path) if self.model_path else '-'}")
@@ -3373,7 +6249,7 @@ class MainWindow(QMainWindow):
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p):
+            if p and os.path.exists(p) and is_supported_input(p):
                 files.append(p)
         if files:
             self.add_files_to_queue(files)
@@ -3384,10 +6260,168 @@ class MainWindow(QMainWindow):
     # -----------------------------
     # Wartebereich + Vorschau
     # -----------------------------
+    def paste_files_from_clipboard(self):
+        cb = QApplication.clipboard()
+        md = cb.mimeData()
+
+        files = []
+
+        if md:
+            # Standardfall: Explorer-Dateien als URLs
+            if md.hasUrls():
+                for url in md.urls():
+                    p = url.toLocalFile()
+                    if p and os.path.exists(p) and is_supported_input(p):
+                        files.append(p)
+
+            # Fallback: Textliste mit Dateipfaden
+            if not files and md.hasText():
+                raw = md.text().strip()
+                if raw:
+                    parts = [x.strip().strip('"') for x in raw.splitlines() if x.strip()]
+                    for p in parts:
+                        if os.path.exists(p) and is_supported_input(p):
+                            files.append(p)
+
+            # Windows-Fallback: rohe Mime-Formate prüfen
+            if not files:
+                for fmt in md.formats():
+                    try:
+                        data = md.data(fmt)
+                        if not data:
+                            continue
+                        txt = bytes(data).decode("utf-8", errors="ignore").strip("\x00").strip()
+                        if not txt:
+                            continue
+
+                        for candidate in re.split(r'[\r\n]+', txt):
+                            candidate = candidate.strip().strip('"')
+                            if os.path.exists(candidate) and is_supported_input(candidate):
+                                files.append(candidate)
+                    except Exception:
+                        pass
+
+        # doppelte entfernen, Reihenfolge behalten
+        unique = []
+        seen = set()
+        for p in files:
+            np = os.path.normpath(p)
+            if np not in seen:
+                seen.add(np)
+                unique.append(p)
+
+        if unique:
+            self.add_files_to_queue(unique)
+        else:
+            QMessageBox.information(
+                self,
+                self._tr("info_title"),
+                "In der Zwischenablage wurden keine unterstützten Dateien gefunden."
+            )
+
     def choose_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, self._tr("dlg_load_img"), "", self._tr("dlg_filter_img"))
         if files:
             self.add_files_to_queue(files)
+
+    def _start_pdf_render_async(self, pdf_path: str, dpi: int = 300):
+        # falls schon ein PDF gerendert wird: optional blockieren oder queue’n
+        if self.pdf_worker and self.pdf_worker.isRunning():
+            QMessageBox.information(self, self._tr("info_title"),
+                                    "Es wird gerade bereits ein PDF gerendert. Bitte warte kurz.")
+            return
+
+        self._pending_pdf_path = pdf_path
+
+        # Dialog
+        dlg = QProgressDialog(self)
+        dlg.setWindowTitle(self._tr("pdf_render_title"))
+        dlg.setCancelButtonText(
+            "Abbrechen" if self.current_lang == "de" else ("Cancel" if self.current_lang == "en" else "Annuler")
+        )
+        dlg.setMinimum(0)
+        dlg.setMaximum(0)  # wird gesetzt, sobald wir total kennen
+        dlg.setValue(0)
+        dlg.setAutoClose(True)
+        dlg.setAutoReset(True)
+        dlg.setWindowModality(Qt.ApplicationModal)
+        dlg.canceled.connect(self._cancel_pdf_render)
+        dlg.show()
+
+        self.pdf_progress_dlg = dlg
+
+        # Worker
+        w = PDFRenderWorker(pdf_path, dpi=dpi, parent=self)
+        w.progress.connect(self._on_pdf_render_progress)
+        w.finished_pdf.connect(self._on_pdf_render_finished)
+        w.failed_pdf.connect(self._on_pdf_render_failed)
+
+        self.pdf_worker = w
+        w.start()
+
+    def _cancel_pdf_render(self):
+        if self.pdf_worker and self.pdf_worker.isRunning():
+            self.pdf_worker.requestInterruption()
+
+    def _on_pdf_render_progress(self, cur: int, total: int, pdf_path: str):
+        dlg = self.pdf_progress_dlg
+        if dlg:
+            if dlg.maximum() != max(1, total):
+                dlg.setMaximum(max(1, total))
+            try:
+                dlg.setLabelText(self._tr("pdf_render_label", cur, total, os.path.basename(pdf_path)))
+            except Exception:
+                dlg.setLabelText(f"Rendering pages… ({cur}/{total}): {os.path.basename(pdf_path)}")
+            dlg.setValue(cur)
+
+    def _on_pdf_render_finished(self, pdf_path: str, out_paths: list):
+        # Dialog schließen
+        if self.pdf_progress_dlg:
+            self.pdf_progress_dlg.setValue(self.pdf_progress_dlg.maximum())
+            self.pdf_progress_dlg.close()
+            self.pdf_progress_dlg = None
+
+        # Worker cleanup
+        self.pdf_worker = None
+
+        if not out_paths:
+            return
+
+        # Seiten in Queue einfügen
+        added_any = False
+        last_added = None
+        base_name = os.path.basename(pdf_path)
+
+        for i, img_path in enumerate(out_paths, start=1):
+            if any(it.path == img_path for it in self.queue_items):
+                continue
+            disp = f"{base_name} – Seite {i:04d}"
+            self._add_file_to_queue_single(img_path, display_name=disp, source_kind="pdf_page")
+            added_any = True
+            last_added = img_path
+
+        if added_any and last_added:
+            self.preview_image(last_added)
+            self._log(self._tr_log("log_added_files", len(out_paths)))
+
+        if out_paths:
+            try:
+                self.temp_dirs_created.add(os.path.dirname(out_paths[0]))
+            except Exception:
+                pass
+
+        self._refresh_queue_numbers()
+        self._fit_queue_columns_exact()
+        self._update_queue_hint()
+
+    def _on_pdf_render_failed(self, pdf_path: str, msg: str):
+        if self.pdf_progress_dlg:
+            self.pdf_progress_dlg.close()
+            self.pdf_progress_dlg = None
+
+        self.pdf_worker = None
+
+        QMessageBox.warning(self, self._tr("warn_title"), f"PDF konnte nicht gerendert werden:\n{msg}")
 
     def add_files_to_queue(self, paths: List[str]):
         added_any = False
@@ -3397,6 +6431,17 @@ class MainWindow(QMainWindow):
         for p in paths:
             if not p or not os.path.exists(p):
                 continue
+            if not is_supported_input(p):
+                continue
+
+            ext = os.path.splitext(p)[1].lower()
+
+            if ext == ".pdf":
+                self._start_pdf_render_async(p, dpi=300)
+                added_any = True  # damit dein Log/Hint-Update unten nicht „vergisst“
+                continue
+
+            # normale Bilder
             if any(it.path == p for it in self.queue_items):
                 continue
             self._add_file_to_queue_single(p)
@@ -3413,28 +6458,54 @@ class MainWindow(QMainWindow):
         self._fit_queue_columns_exact()
         self._update_queue_hint()
 
-    def _add_file_to_queue_single(self, path: str):
-        item = TaskItem(path=path, display_name=os.path.basename(path))
+    def _add_file_to_queue_single(
+            self,
+            path: str,
+            display_name: Optional[str] = None,
+            source_kind: str = "image"
+    ):
+        item = TaskItem(
+            path=path,
+            display_name=display_name or os.path.basename(path),
+            source_kind=source_kind
+        )
         self.queue_items.append(item)
 
         row = self.queue_table.rowCount()
         self.queue_table.insertRow(row)
 
+        num_item = QTableWidgetItem(str(row + 1))
+        num_item.setTextAlignment(Qt.AlignCenter)
+        num_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        check_item = QTableWidgetItem()
+        check_item.setTextAlignment(Qt.AlignCenter)
+        check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+        check_item.setCheckState(Qt.Unchecked)
+
         name_item = QTableWidgetItem(item.display_name)
         name_item.setData(Qt.UserRole, path)
-        name_item.setFlags(name_item.flags() | Qt.ItemIsEditable)
+        name_item.setFlags(
+            Qt.ItemIsEnabled
+            | Qt.ItemIsSelectable
+            | Qt.ItemIsEditable
+        )
 
         status_item = QTableWidgetItem(f"{STATUS_ICONS[STATUS_WAITING]} {self._tr('status_waiting')}")
-        status_item.setFlags(status_item.flags() ^ Qt.ItemIsEditable)
+        status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-        self.queue_table.setItem(row, 0, name_item)
-        self.queue_table.setItem(row, 1, status_item)
+        self.queue_table.setItem(row, QUEUE_COL_NUM, num_item)
+        self.queue_table.setItem(row, QUEUE_COL_CHECK, check_item)
+        self.queue_table.setItem(row, QUEUE_COL_FILE, name_item)
+        self.queue_table.setItem(row, QUEUE_COL_STATUS, status_item)
+
         self.queue_table.selectRow(row)
+        self._refresh_queue_numbers()
 
     def on_item_changed(self, item: QTableWidgetItem):
-        if item.column() == 0:
+        if item.column() == QUEUE_COL_FILE:
             row = item.row()
-            path_item = self.queue_table.item(row, 0)
+            path_item = self.queue_table.item(row, QUEUE_COL_FILE)
             if not path_item:
                 return
             path = path_item.data(Qt.UserRole)
@@ -3448,11 +6519,35 @@ class MainWindow(QMainWindow):
 
     def queue_context_menu(self, pos):
         menu = QMenu()
+
+        start_ocr_act = menu.addAction(self._tr("act_start_ocr"))
+        ai_revise_act = menu.addAction(self._tr("act_ai_revise"))
+        menu.addSeparator()
+
         rename_act = menu.addAction(self._tr("act_rename"))
         delete_act = menu.addAction(self._tr("act_delete"))
+        menu.addSeparator()
+
+        check_all_act = menu.addAction("Alle markieren")
+        uncheck_all_act = menu.addAction("Alle Markierungen entfernen")
 
         action = menu.exec(self.queue_table.viewport().mapToGlobal(pos))
         if not action:
+            return
+
+        if action == start_ocr_act:
+            self.start_ocr()
+            return
+
+        if action == ai_revise_act:
+            self.run_ai_revision()
+            return
+
+        if action == check_all_act:
+            self.check_all_queue_items()
+            return
+        if action == uncheck_all_act:
+            self.uncheck_all_queue_items()
             return
 
         item = self.queue_table.itemAt(pos)
@@ -3460,7 +6555,7 @@ class MainWindow(QMainWindow):
             return
 
         row = item.row()
-        path = self.queue_table.item(row, 0).data(Qt.UserRole)
+        path = self.queue_table.item(row, QUEUE_COL_FILE).data(Qt.UserRole)
         task = next((t for t in self.queue_items if t.path == path), None)
 
         if action == rename_act and task:
@@ -3472,23 +6567,49 @@ class MainWindow(QMainWindow):
             )
             if ok:
                 task.display_name = new_name
-                self.queue_table.item(row, 0).setText(new_name)
+                self.queue_table.item(row, QUEUE_COL_FILE).setText(new_name)
 
         elif action == delete_act:
             self.delete_selected_queue_items()
 
+    def check_all_queue_items(self):
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            if item:
+                item.setCheckState(Qt.Checked)
+
+    def uncheck_all_queue_items(self):
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            if item:
+                item.setCheckState(Qt.Unchecked)
+
     def delete_selected_queue_items(self, reset_preview: bool = False):
-        rows = sorted(set(index.row() for index in self.queue_table.selectedIndexes()), reverse=True)
+        checked_rows = []
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, QUEUE_COL_CHECK)
+            if item and item.checkState() == Qt.Checked:
+                checked_rows.append(row)
+
+        # Priorität: Checkmarks vor Auswahl
+        rows = checked_rows if checked_rows else sorted(
+            set(index.row() for index in self.queue_table.selectedIndexes()),
+            reverse=True
+        )
+
         if not rows:
             return
 
+        rows = sorted(set(rows), reverse=True)
+
         current_preview_path = None
         if self.queue_table.currentRow() >= 0:
-            current_preview_path = self.queue_table.item(self.queue_table.currentRow(), 0).data(Qt.UserRole)
+            current_preview_path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(
+                Qt.UserRole)
 
         removed_paths = []
         for row in rows:
-            path = self.queue_table.item(row, 0).data(Qt.UserRole)
+            path = self.queue_table.item(row, QUEUE_COL_FILE).data(Qt.UserRole)
             removed_paths.append(path)
             self.queue_items = [i for i in self.queue_items if i.path != path]
             self.queue_table.removeRow(row)
@@ -3498,18 +6619,17 @@ class MainWindow(QMainWindow):
             self.canvas.set_overlay_enabled(False)
             self.list_lines.clear()
             self._set_progress_idle(0)
-
         else:
             if current_preview_path and current_preview_path in removed_paths:
                 self.queue_table.selectRow(0)
-                p = self.queue_table.item(0, 0).data(Qt.UserRole)
+                p = self.queue_table.item(0, QUEUE_COL_FILE).data(Qt.UserRole)
                 self.preview_image(p)
 
+        self._refresh_queue_numbers()
         self._fit_queue_columns_exact()
         self._update_queue_hint()
 
         if reset_preview:
-            # Vorschau zurücksetzen wie beim Programmstart
             self.canvas.clear_all()
             self.canvas.set_overlay_enabled(False)
             self.list_lines.clear()
@@ -3524,6 +6644,7 @@ class MainWindow(QMainWindow):
         self._set_progress_idle(0)
         self._fit_queue_columns_exact()
         self._update_queue_hint()
+        self._cleanup_temp_dirs()
         self._log(self._tr_log("log_queue_cleared"))
 
     def preview_image(self, path: str):
@@ -3546,7 +6667,8 @@ class MainWindow(QMainWindow):
             return
 
         text, kr_records, im, recs = item.results
-        self.canvas.load_pil_image(im)
+        preview_im = _load_image_color(path)
+        self.canvas.load_pil_image(preview_im)
         self.canvas.set_overlay_enabled(item.status == STATUS_DONE)
 
         if self.show_overlay:
@@ -3571,7 +6693,7 @@ class MainWindow(QMainWindow):
 
     def refresh_preview(self):
         if self.queue_table.currentRow() >= 0:
-            path = self.queue_table.item(self.queue_table.currentRow(), 0).data(Qt.UserRole)
+            path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
             item = next((i for i in self.queue_items if i.path == path), None)
             if item and item.status == STATUS_DONE:
                 self.load_results(path)
@@ -3579,7 +6701,7 @@ class MainWindow(QMainWindow):
                 self.preview_image(path)
 
     def on_queue_double_click(self, row, col):
-        path = self.queue_table.item(row, 0).data(Qt.UserRole)
+        path = self.queue_table.item(row, QUEUE_COL_FILE).data(Qt.UserRole)
         self.preview_image(path)
 
     def choose_rec_model(self):
@@ -3587,7 +6709,7 @@ class MainWindow(QMainWindow):
         if p:
             self.model_path = p
             name = os.path.basename(p)
-            self.btn_rec_model.setText(f"{self._tr('dlg_choose_rec')}{name}")
+            self.btn_rec_model.setText(f"Rec-Modell: {name}")
             self.status_bar.showMessage(self._tr("msg_loaded_rec", name))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
@@ -3597,7 +6719,7 @@ class MainWindow(QMainWindow):
         if p:
             self.seg_model_path = p
             name = os.path.basename(p)
-            self.btn_seg_model.setText(f"{self._tr('dlg_choose_seg')}{name}")
+            self.btn_seg_model.setText(f"Seg-Modell: {name}")
             self.status_bar.showMessage(self._tr("msg_loaded_seg", name))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
@@ -3618,14 +6740,14 @@ class MainWindow(QMainWindow):
 
     def clear_rec_model(self):
         self.model_path = ""
-        self.btn_rec_model.setText(f"{self._tr('dlg_choose_rec')}-")
+        self.btn_rec_model.setText("Rec-Modell: -")
         self.status_bar.showMessage(self._tr("msg_loaded_rec", "-"))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
 
     def clear_seg_model(self):
         self.seg_model_path = ""
-        self.btn_seg_model.setText(f"{self._tr('dlg_choose_seg')}-")
+        self.btn_seg_model.setText("Seg-Modell: -")
         self.status_bar.showMessage(self._tr("msg_loaded_seg", "-"))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
@@ -3669,6 +6791,200 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, self._tr("err_title"), str(e))
 
+    def _read_import_lines_file(self, file_path: str) -> List[str]:
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".txt":
+            with open(file_path, "r", encoding="utf-8") as f:
+                return [ln.strip() for ln in f.read().splitlines() if ln.strip()]
+
+        if ext == ".json":
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, list):
+                if all(isinstance(x, str) for x in data):
+                    return [str(x).strip() for x in data if str(x).strip()]
+
+            if isinstance(data, dict):
+                lines = data.get("lines")
+                if isinstance(lines, list) and all(isinstance(x, str) for x in lines):
+                    return [str(x).strip() for x in lines if str(x).strip()]
+
+                rows = data.get("rows")
+                if isinstance(rows, list):
+                    out = []
+                    for row in rows:
+                        if isinstance(row, list):
+                            txt = " ".join(str(x).strip() for x in row if str(x).strip()).strip()
+                            if txt:
+                                out.append(txt)
+                        elif isinstance(row, str):
+                            txt = row.strip()
+                            if txt:
+                                out.append(txt)
+                    return out
+
+        raise ValueError(f"Nicht unterstütztes Importformat: {file_path}")
+
+    def _apply_imported_lines_to_task(self, task: TaskItem, lines: List[str]):
+        lines = [str(x).strip() for x in lines if str(x).strip()]
+        if not lines:
+            raise ValueError("Die Importdatei enthält keine verwertbaren Zeilen.")
+
+        if task.results:
+            old_text, old_kr, old_im, old_recs = task.results
+
+            if len(old_recs) == len(lines):
+                recs = [RecordView(i, lines[i], old_recs[i].bbox) for i in range(len(lines))]
+                im = old_im
+                kr = old_kr
+            else:
+                im = _load_image_gray(task.path)
+                kr = []
+                recs = [RecordView(i, line, None) for i, line in enumerate(lines)]
+        else:
+            im = _load_image_gray(task.path)
+            kr = []
+            recs = [RecordView(i, line, None) for i, line in enumerate(lines)]
+
+        text = "\n".join(lines).strip()
+        task.results = (text, kr, im, recs)
+        task.status = STATUS_DONE
+        task.edited = True
+
+        self._update_queue_row(task.path)
+
+        cur = self._current_task()
+        if cur and cur.path == task.path:
+            self._sync_ui_after_recs_change(task, keep_row=0)
+            if self.list_lines.count() > 0:
+                self.list_lines.setCurrentRow(0)
+                self.list_lines.setFocus()
+                self.canvas.select_idx(0)
+
+    def _match_import_files_to_tasks(self, tasks: List[TaskItem], import_files: List[str]) -> Dict[str, str]:
+        file_map = {}
+        for fp in import_files:
+            stem = os.path.splitext(os.path.basename(fp))[0].lower()
+            file_map[stem] = fp
+
+        matches = {}
+        for task in tasks:
+            path_stem = os.path.splitext(os.path.basename(task.path))[0].lower()
+            display_stem = os.path.splitext(task.display_name)[0].lower()
+
+            normalized_display = (
+                display_stem
+                .replace(" – seite ", "_p")
+                .replace(" - seite ", "_p")
+                .replace(" seite ", "_p")
+            )
+
+            candidates = {
+                path_stem,
+                display_stem,
+                normalized_display,
+            }
+            for c in candidates:
+                if c in file_map:
+                    matches[task.path] = file_map[c]
+                    break
+        return matches
+
+    def import_lines_for_current_image(self):
+        task = self._current_task()
+        if not task:
+            QMessageBox.information(self, self._tr("info_title"), "Kein aktuelles Bild geladen.")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Zeilen importieren",
+            "",
+            "Text/JSON (*.txt *.json)"
+        )
+        if not file_path:
+            return
+
+        try:
+            lines = self._read_import_lines_file(file_path)
+            self._apply_imported_lines_to_task(task, lines)
+        except Exception as e:
+            QMessageBox.warning(self, self._tr("warn_title"), str(e))
+
+    def import_lines_for_selected_images(self):
+        tasks = self._checked_queue_tasks()
+        if not tasks:
+            tasks = self._selected_queue_tasks()
+
+        if not tasks:
+            QMessageBox.information(self, self._tr("info_title"), "Keine Bilder ausgewählt oder markiert.")
+            return
+
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Zeilen-Dateien für ausgewählte Bilder laden",
+            "",
+            "Text/JSON (*.txt *.json)"
+        )
+        if not files:
+            return
+
+        matches = self._match_import_files_to_tasks(tasks, files)
+
+        if not matches:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Keine Importdatei passt zu den ausgewählten Bildern.\n\nDie Dateinamen müssen über den Basisnamen passen."
+            )
+            return
+
+        for task in tasks:
+            fp = matches.get(task.path)
+            if not fp:
+                continue
+            try:
+                lines = self._read_import_lines_file(fp)
+                self._apply_imported_lines_to_task(task, lines)
+            except Exception as e:
+                self._log(f"Import-Fehler: {task.display_name} -> {e}")
+
+    def import_lines_for_all_images(self):
+        if not self.queue_items:
+            QMessageBox.information(self, self._tr("info_title"), "Keine Bilder geladen.")
+            return
+
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Zeilen-Dateien für alle Bilder laden",
+            "",
+            "Text/JSON (*.txt *.json)"
+        )
+        if not files:
+            return
+
+        matches = self._match_import_files_to_tasks(self.queue_items, files)
+
+        if not matches:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Keine Importdatei passt zu den geladenen Bildern.\n\nDie Dateinamen müssen über den Basisnamen passen."
+            )
+            return
+
+        for task in self.queue_items:
+            fp = matches.get(task.path)
+            if not fp:
+                continue
+            try:
+                lines = self._read_import_lines_file(fp)
+                self._apply_imported_lines_to_task(task, lines)
+            except Exception as e:
+                self._log(f"Import-Fehler: {task.display_name} -> {e}")
+
     # -----------------------------
     # OCR-Steuerung
     # -----------------------------
@@ -3676,24 +6992,35 @@ class MainWindow(QMainWindow):
         if not self.model_path or not os.path.exists(self.model_path):
             QMessageBox.critical(self, self._tr("err_title"), self._tr("warn_need_rec"))
             return
-        # NEU: Segmentierung optional -> Fallback auf legacy pageseg, wenn nichts angegeben ist
-        use_pageseg = (not self.seg_model_path) or (not os.path.exists(self.seg_model_path))
+        use_pageseg = False
 
-        if use_pageseg:
-            default_seg = os.path.join(os.path.dirname(__file__), "blla.mlmodel")
-            if os.path.exists(default_seg):
-                self.seg_model_path = default_seg
-                use_pageseg = False
-                name = os.path.basename(self.seg_model_path)
-                self.btn_seg_model.setText(f"{self._tr('dlg_choose_seg')}{name}")
-                self.status_bar.showMessage(self._tr("msg_loaded_seg", name))
-                self._update_models_menu_labels()
-                self._update_model_clear_buttons()
+        if not self.seg_model_path or not os.path.exists(self.seg_model_path):
+            QMessageBox.critical(self, self._tr("err_title"), "blla-Segmentierungsmodell wurde nicht gefunden.")
+            return
 
         segmenter_mode = "pageseg" if use_pageseg else "blla"
         self.current_segmenter_mode = segmenter_mode
 
-        tasks = [i for i in self.queue_items if i.status == STATUS_WAITING]
+        checked_tasks = self._checked_queue_tasks()
+        selected_tasks = self._selected_queue_tasks()
+
+        # Priorität: Checkmarks vor Auswahl
+        target_tasks = checked_tasks if checked_tasks else selected_tasks
+
+        if target_tasks:
+            tasks = []
+            for it in target_tasks:
+                if it.status in (STATUS_WAITING, STATUS_ERROR, STATUS_DONE):
+                    if it.status != STATUS_WAITING:
+                        it.status = STATUS_WAITING
+                        it.results = None
+                        it.edited = False
+                        it.undo_stack.clear()
+                        it.redo_stack.clear()
+                        self._update_queue_row(it.path)
+                    tasks.append(it)
+        else:
+            tasks = [i for i in self.queue_items if i.status == STATUS_WAITING]
         if not tasks:
             QMessageBox.information(self, self._tr("info_title"), self._tr("warn_queue_empty"))
             return
@@ -3746,7 +7073,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_done"))
             return
 
-        path = self.queue_table.item(self.queue_table.currentRow(), 0).data(Qt.UserRole)
+        path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
         item = next((i for i in self.queue_items if i.path == path), None)
 
         if item:
@@ -3785,9 +7112,13 @@ class MainWindow(QMainWindow):
             self._update_queue_row(path)
 
             if self.queue_table.currentRow() >= 0:
-                cur_path = self.queue_table.item(self.queue_table.currentRow(), 0).data(Qt.UserRole)
+                cur_path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
                 if cur_path == path:
                     self.load_results(path)
+                    if self.list_lines.count() > 0:
+                        self.list_lines.setCurrentRow(0)
+                        self.list_lines.setFocus()
+                        self.canvas.select_idx(0)
             self._log(self._tr_log("log_file_done", os.path.basename(path), len(recs)))
 
     def on_file_error(self, path, msg):
@@ -3811,9 +7142,9 @@ class MainWindow(QMainWindow):
 
     def _update_queue_row(self, path):
         for row in range(self.queue_table.rowCount()):
-            item0 = self.queue_table.item(row, 0)
+            item0 = self.queue_table.item(row, QUEUE_COL_FILE)
             if item0 and item0.data(Qt.UserRole) == path:
-                status_item = self.queue_table.item(row, 1)
+                status_item = self.queue_table.item(row, QUEUE_COL_STATUS)
                 task = next((i for i in self.queue_items if i.path == path), None)
                 if task and status_item:
                     status_enum = task.status
@@ -3823,6 +7154,8 @@ class MainWindow(QMainWindow):
                         STATUS_PROCESSING: "status_processing",
                         STATUS_DONE: "status_done",
                         STATUS_ERROR: "status_error",
+                        STATUS_AI_PROCESSING: "status_ai_processing",
+                        STATUS_EXPORTING: "status_exporting",
                     }[status_enum]
                     status_item.setText(f"{status_icon} {self._tr(status_key)}")
 
@@ -3830,6 +7163,10 @@ class MainWindow(QMainWindow):
                         status_item.setForeground(QBrush(QColor("green")))
                     elif status_enum == STATUS_ERROR:
                         status_item.setForeground(QBrush(QColor("red")))
+                    elif status_enum == STATUS_AI_PROCESSING:
+                        status_item.setForeground(QBrush(QColor(128, 0, 128)))
+                    elif status_enum == STATUS_EXPORTING:
+                        status_item.setForeground(QBrush(QColor(180, 120, 0)))
                     else:
                         status_item.setForeground(QBrush(QColor("blue")))
                 break
@@ -3840,7 +7177,7 @@ class MainWindow(QMainWindow):
     def _current_task(self) -> Optional[TaskItem]:
         if self.queue_table.currentRow() < 0:
             return None
-        path = self.queue_table.item(self.queue_table.currentRow(), 0).data(Qt.UserRole)
+        path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
         return next((i for i in self.queue_items if i.path == path), None)
 
     def on_line_selected(self, row):
@@ -3901,9 +7238,47 @@ class MainWindow(QMainWindow):
         self._push_undo(task)
 
         if target_idx != row:
-            rv = recs.pop(row)
-            rv.text = new_text
-            recs.insert(target_idx, rv)
+            self._push_undo(task)
+
+            moved = RecordView(
+                recs[row].idx,
+                new_text,
+                recs[row].bbox
+            )
+
+            recs.pop(row)
+            recs.insert(target_idx, moved)
+
+            task.edited = True
+            self._sync_ui_after_recs_change(task, keep_row=target_idx)
+            return
+
+        # Nur Text ändern, BBox unverändert lassen
+        recs[row].text = new_text
+        task.edited = True
+        self._sync_ui_after_recs_change(task, keep_row=row)
+
+        def normalize_display(selected_row: int):
+            self.list_lines.blockSignals(True)
+            for i, rv in enumerate(recs):
+                it = self.list_lines.item(i)
+                if it:
+                    it.setText(f"{i + 1:04d}  {rv.text}")
+                    it.setData(Qt.UserRole, i)
+            self.list_lines.blockSignals(False)
+            self.list_lines.setCurrentRow(max(0, min(self.list_lines.count() - 1, selected_row)))
+
+        if target_idx == row and new_text == recs[row].text:
+            normalize_display(row)
+            return
+
+        self._push_undo(task)
+
+        if target_idx != row:
+
+            recs[row].text = new_text
+            recs[row], recs[target_idx] = recs[target_idx], recs[row]
+
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=target_idx)
             return
@@ -3937,32 +7312,23 @@ class MainWindow(QMainWindow):
         task = self._current_task()
         if not task or not task.results or task.status != STATUS_DONE:
             return
-        text, kr_records, im, recs = task.results
 
+        _, _, _, recs = task.results
         if not order or len(order) != len(recs):
             return
 
-        try:
-            new_recs = [recs[int(i)] for i in order]
-        except Exception:
-            return
-
-        self._push_undo(task)
-        task.edited = True
-        task.results = (text, kr_records, im, new_recs)
-        self._sync_ui_after_recs_change(task, keep_row=max(0, min(len(new_recs) - 1, int(current_row_after_drop))))
+        keep_row = max(0, min(len(recs) - 1, int(current_row_after_drop)))
+        self._reorder_lines_keep_box_slots(task, order, keep_row=keep_row)
 
     def lines_context_menu(self, pos):
         item = self.list_lines.itemAt(pos)
         if item is None:
             return
+
         row = self.list_lines.row(item)
 
         menu = QMenu()
-        act_up = menu.addAction(self._tr("line_menu_move_up"))
-        act_down = menu.addAction(self._tr("line_menu_move_down"))
-        menu.addSeparator()
-        act_move_to = menu.addAction(self._tr("line_menu_move_to"))
+        act_swap = menu.addAction(self._tr("line_menu_swap_with"))
         menu.addSeparator()
         act_del = menu.addAction(self._tr("line_menu_delete"))
         menu.addSeparator()
@@ -3970,8 +7336,6 @@ class MainWindow(QMainWindow):
         act_add_below = menu.addAction(self._tr("line_menu_add_below"))
         menu.addSeparator()
         act_draw = menu.addAction(self._tr("line_menu_draw_box"))
-        menu.addSeparator()
-        act_edit_box = menu.addAction(self._tr("line_menu_edit_box"))
 
         chosen = menu.exec(self.list_lines.viewport().mapToGlobal(pos))
         if not chosen:
@@ -3981,12 +7345,8 @@ class MainWindow(QMainWindow):
         if not task or not task.results or task.status != STATUS_DONE:
             return
 
-        if chosen == act_up:
-            self._move_line(task, row, -1)
-        elif chosen == act_down:
-            self._move_line(task, row, +1)
-        elif chosen == act_move_to:
-            self._move_line_to_dialog(task, row)
+        if chosen == act_swap:
+            self._swap_line_with_dialog(task, row)
         elif chosen == act_del:
             self._delete_line(task, row)
         elif chosen == act_add_above:
@@ -3994,14 +7354,9 @@ class MainWindow(QMainWindow):
         elif chosen == act_add_below:
             self._add_line(task, insert_row=row + 1)
         elif chosen == act_draw:
-            # Box FÜR DIESE ZEILE zeichnen (unverändert)
             self._pending_new_line_box = False
             self._pending_box_for_row = row
             self.canvas.start_draw_box_mode()
-        elif chosen == act_edit_box:
-            self.show_overlay = True
-            self.act_overlay.setChecked(True)
-            self.refresh_preview()
 
     def _sync_ui_after_recs_change(self, task: TaskItem, keep_row: Optional[int] = None):
         if not task.results:
@@ -4014,7 +7369,8 @@ class MainWindow(QMainWindow):
         new_text = "\n".join([r.text for r in recs]).strip()
         task.results = (new_text, kr_records, im, recs)
 
-        self.canvas.load_pil_image(im, preserve_view=True)
+        preview_im = _load_image_color(task.path)
+        self.canvas.load_pil_image(preview_im, preserve_view=True)
         self.canvas.set_overlay_enabled(task.status == STATUS_DONE)
         if self.show_overlay:
             self.canvas.draw_overlays(recs)
@@ -4042,10 +7398,10 @@ class MainWindow(QMainWindow):
             self,
             self._tr("dlg_move_to_title"),
             self._tr("dlg_move_to_label"),
-            value=row + 1,
-            min=1,
-            max=max(1, len(recs)),
-            step=1
+            row + 1,
+            1,
+            max(1, len(recs)),
+            1
         )
         if not ok:
             return
@@ -4250,20 +7606,52 @@ class MainWindow(QMainWindow):
     # -----------------------------
     # Export
     # -----------------------------
+
+    def on_export_file_started(self, display_name: str, current: int, total: int):
+        task = next((i for i in self.queue_items if i.display_name == display_name), None)
+        if task:
+            task.status = STATUS_EXPORTING
+            self._update_queue_row(task.path)
+
     def export_flow(self, fmt: str):
+        checked_tasks = self._checked_queue_tasks()
+        selected_tasks = self._selected_queue_tasks()
+
+        # Priorität: Checkmarks vor Auswahl
+        target_tasks = checked_tasks if checked_tasks else selected_tasks
+
+        if target_tasks:
+            # genau 1 Datei -> normaler "Speichern unter"-Dialog
+            if len(target_tasks) == 1:
+                it = target_tasks[0]
+                if it.status != STATUS_DONE or not it.results:
+                    QMessageBox.warning(self, self._tr("warn_title"), self._tr("export_need_done"))
+                    return
+                self._export_single_interactive(it, fmt)
+                return
+
+            # mehrere Dateien -> Batch-Export in Ordner
+            items = []
+            for it in target_tasks:
+                if it.status != STATUS_DONE or not it.results:
+                    QMessageBox.warning(self, self._tr("warn_title"), self._tr("export_need_done"))
+                    return
+                items.append(it)
+
+            self._export_batch(items, fmt)
+            return
+
         if len(self.queue_items) == 0:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_queue_empty"))
             return
 
         if len(self.queue_items) == 1:
             it = self.queue_items[0]
-            if len(self.queue_items) == 1:
-                it = self.queue_items[0]
-                if it.status != STATUS_DONE or not it.results:
-                    QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_done"))
-                    return
-                self._export_single_interactive(it, fmt)
+            if it.status != STATUS_DONE or not it.results:
+                QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_done"))
                 return
+            self._export_single_interactive(it, fmt)
+            return
 
         dlg = ExportModeDialog(self._tr, self)
         if dlg.exec() != QDialog.Accepted or dlg.choice is None:
@@ -4280,6 +7668,7 @@ class MainWindow(QMainWindow):
         sel_dlg = ExportSelectFilesDialog(self._tr, self.queue_items, self)
         if sel_dlg.exec() != QDialog.Accepted:
             return
+
         paths = sel_dlg.selected_paths
         if not paths:
             QMessageBox.information(self, self._tr("info_title"), self._tr("export_none_selected"))
@@ -4293,17 +7682,27 @@ class MainWindow(QMainWindow):
                 return
             items.append(it)
 
-        self._export_batch(items, fmt)
+        if len(items) == 1:
+            self._export_single_interactive(items[0], fmt)
+        else:
+            self._export_batch(items, fmt)
 
     def _export_single_interactive(self, item: TaskItem, fmt: str):
         base_name = os.path.splitext(item.display_name)[0]
         base_dir = self.current_export_dir or os.path.dirname(item.path)
 
-        filters = {"txt": "Text (*.txt)", "csv": "CSV (*.csv)", "json": "JSON (*.json)",
-                   "alto": "XML (*.xml)", "hocr": "HTML (*.html)", "pdf": "PDF (*.pdf)"}
+        filters = {
+            "txt": "Text (*.txt)",
+            "csv": "CSV (*.csv)",
+            "json": "JSON (*.json)",
+            "alto": "XML (*.xml)",
+            "hocr": "HTML (*.html)",
+            "pdf": "PDF (*.pdf)"
+        }
 
         dest_path, _ = QFileDialog.getSaveFileName(
-            self, self._tr("dlg_save"),
+            self,
+            self._tr("dlg_save"),
             os.path.join(base_dir, base_name),
             filters.get(fmt, "All (*.*)")
         )
@@ -4312,29 +7711,98 @@ class MainWindow(QMainWindow):
         if not dest_path.lower().endswith(f".{fmt}"):
             dest_path += f".{fmt}"
 
-        self._render_file(dest_path, fmt, item)
+        try:
+            self._render_file(dest_path, fmt, item)
+        except PermissionError:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                f"Die Datei kann nicht geschrieben werden:\n\n{dest_path}\n\n"
+                "Möglicherweise ist sie noch in einem anderen Programm geöffnet."
+            )
+            return
+        except Exception as e:
+            QMessageBox.critical(self, self._tr("err_title"), str(e))
+            return
+
         self._log(self._tr_log("log_export_single", item.display_name, dest_path))
         self.status_bar.showMessage(self._tr("msg_exported", os.path.basename(dest_path)))
 
     def _export_batch(self, items: List[TaskItem], fmt: str):
-        folder = QFileDialog.getExistingDirectory(self, self._tr("export_choose_folder"), self.current_export_dir or "")
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            self._tr("export_choose_folder"),
+            self.current_export_dir or ""
+        )
         if not folder:
             return
+
         self.current_export_dir = folder
 
-        for it in items:
-            base_name = os.path.splitext(it.display_name)[0]
-            dest_path = os.path.join(folder, f"{base_name}.{fmt}")
-            self._render_file(dest_path, fmt, it)
+        self._current_export_count = len(items)
+        self._current_export_format = fmt
 
-        self.status_bar.showMessage(self._tr("msg_exported", folder))
-        self._log(f"Export abgeschlossen: {len(items)} Datei(en) als {fmt} nach {folder}")
+        self.export_dialog = ProgressStatusDialog(f"Export {fmt.upper()}", self)
+        self.export_dialog.set_status("Bereite Export vor…")
+        self.export_dialog.cancel_requested.connect(self._cancel_export_batch)
+        self.export_dialog.show()
+
+        self.export_worker = ExportWorker(
+            render_callback=self._render_file,
+            items=items,
+            fmt=fmt,
+            folder=folder,
+            parent=self
+        )
+        self.export_worker.status_changed.connect(self.export_dialog.set_status)
+        self.export_worker.progress_changed.connect(self.export_dialog.set_progress)
+        self.export_worker.file_done.connect(self.on_export_file_done)
+        self.export_worker.file_started.connect(self.on_export_file_started)
+        self.export_worker.file_error.connect(self.on_export_file_error)
+        self.export_worker.finished_batch.connect(self.on_export_batch_finished)
+        self.export_worker.start()
+
+    def _cancel_export_batch(self):
+        if self.export_worker and self.export_worker.isRunning():
+            self.export_worker.requestInterruption()
+
+    def on_export_file_done(self, display_name: str, dest_path: str, current: int, total: int):
+        task = next((i for i in self.queue_items if i.display_name == display_name), None)
+        if task:
+            task.status = STATUS_DONE
+            self._update_queue_row(task.path)
+
+        self._log(self._tr_log("log_export_single", display_name, dest_path))
+
+    def on_export_file_error(self, display_name: str, msg: str, current: int, total: int):
+        task = next((i for i in self.queue_items if i.display_name == display_name), None)
+        if task:
+            task.status = STATUS_ERROR
+            self._update_queue_row(task.path)
+
+        self._log(f"Export-Fehler: {display_name} -> {msg}")
+
+    def on_export_batch_finished(self):
+        if self.export_dialog:
+            self.export_dialog.close()
+            self.export_dialog = None
+
+        self.status_bar.showMessage(self._tr("msg_exported", self.current_export_dir))
+        self._log(
+            self._tr_log(
+                "log_export_done",
+                getattr(self, "_current_export_count", 0),
+                getattr(self, "_current_export_format", "?"),
+                self.current_export_dir
+            )
+        )
 
     def _render_file(self, path: str, fmt: str, item: TaskItem):
         if not item.results:
             return
 
         text, kr_records, pil_image, record_views = item.results
+        export_image = _load_image_color(item.path)
 
         if fmt == "txt":
             with open(path, "w", encoding="utf-8") as f:
@@ -4368,15 +7836,15 @@ class MainWindow(QMainWindow):
                 pass
 
             img_name = os.path.basename(path)
-            xml = serialization.serialize(kr_records, image_name=img_name, image_size=pil_image.size, template=fmt)
+            xml = serialization.serialize(kr_records, image_name=img_name, image_size=export_image.size, template=fmt)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(xml)
             return
 
         if fmt == "pdf":
-            width, height = pil_image.size
+            width, height = export_image.size
             c = pdf_canvas.Canvas(path, pagesize=(width, height))
-            c.drawImage(ImageReader(pil_image), 0, 0, width=width, height=height)
+            c.drawImage(ImageReader(export_image), 0, 0, width=width, height=height)
 
             for rv in record_views:
                 if not rv.bbox or not rv.text.strip():
@@ -4397,32 +7865,77 @@ class MainWindow(QMainWindow):
                 c.drawString(0, 0, t)
                 c.restoreState()
 
-            c.save()
+            try:
+                c.save()
+            except PermissionError as e:
+                raise PermissionError(
+                    f"PDF konnte nicht gespeichert werden:\n{path}\n\n"
+                    "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
+                ) from e
             return
 
-    # -----------------------------
-    # Tastatur-/Fokus-Handling
-    # -----------------------------
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Space and not getattr(self.canvas, "_draw_mode", False):
-            self._space_panning = True
-            self.canvas.setDragMode(QGraphicsView.ScrollHandDrag)
-            event.accept()
-            return
-        super().keyPressEvent(event)
+    def closeEvent(self, event):
+        try:
+            if self.worker and self.worker.isRunning():
+                self.worker.requestInterruption()
+                self.worker.wait(2000)
 
-    def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key_Space:
-            self._space_panning = False
-            self.canvas.setDragMode(QGraphicsView.NoDrag)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
+            if self.ai_worker and self.ai_worker.isRunning():
+                self.ai_worker.cancel()
+                self.ai_worker.wait(2000)
+
+            if self.ai_batch_worker and self.ai_batch_worker.isRunning():
+                self.ai_batch_worker.cancel()
+                self.ai_batch_worker.wait(2000)
+
+            if self.export_worker and self.export_worker.isRunning():
+                self.export_worker.requestInterruption()
+                self.export_worker.wait(2000)
+
+            if self.pdf_worker and self.pdf_worker.isRunning():
+                self.pdf_worker.requestInterruption()
+                self.pdf_worker.wait(2000)
+
+            self._cleanup_temp_dirs()
+        except Exception:
+            pass
+
+        super().closeEvent(event)
 
 def main():
+    # Windows: sorgt dafür, dass Taskleisten-Icon korrekt zugeordnet wird
+    if sys.platform.startswith("win"):
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bottled.kraken.app")
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    icon_path = resource_path("icon.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
+    splash = QProgressDialog("Programm startet, bitte kurz warten…", None, 0, 0)
+    splash.setWindowTitle("Bottled Kraken")
+    splash.setWindowModality(Qt.ApplicationModal)
+    splash.setCancelButton(None)
+    splash.setMinimumDuration(0)
+    splash.setAutoClose(False)
+    splash.setAutoReset(False)
+    if os.path.exists(icon_path):
+        splash.setWindowIcon(QIcon(icon_path))
+    splash.show()
+    QCoreApplication.processEvents()
+
     w = MainWindow()
+    app.aboutToQuit.connect(w._cleanup_temp_dirs)
+
+    if os.path.exists(icon_path):
+        w.setWindowIcon(QIcon(icon_path))
+
+    splash.close()
     w.show()
     sys.exit(app.exec())
 
