@@ -20,11 +20,17 @@ import base64
 import mimetypes
 import socket
 from io import BytesIO
+import tempfile
+import queue
+import wave
+import numpy as np
+import sounddevice as sd
+
 
 # GUI-Framework
 from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
                             QSize, QPointF, QEvent, QPoint, QDateTime, QLocale,
-                            QCoreApplication)
+                            QCoreApplication, QItemSelectionModel)
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
     QKeySequence, QActionGroup, QIcon, QPalette, QShortcut
@@ -37,7 +43,7 @@ from PySide6.QtWidgets import (
     QMenu, QTableWidget, QTableWidgetItem, QHeaderView, QToolBar,
     QAbstractItemView, QInputDialog, QDialog, QDialogButtonBox, QRadioButton,
     QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit,
-    QToolButton, QProgressDialog, QLineEdit, QTextEdit
+    QToolButton, QProgressDialog, QLineEdit, QTextEdit, QComboBox
 )
 
 # PySide-Helfer zur Objekt-Validitätsprüfung
@@ -111,6 +117,17 @@ SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp
 SUPPORTED_PDF_EXTS = {".pdf"}
 
 KRAKEN_MODELS_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + vLLM\Kraken-Modelle"
+
+STATUS_VOICE_RECORDING = 6
+
+STATUS_ICONS[STATUS_VOICE_RECORDING] = "🎤"
+
+FASTER_WHISPER_MODEL_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + LM + Whisper\whisper-large-v3-ct2"
+VOICE_SAMPLE_RATE = 16000
+VOICE_CHANNELS = 1
+VOICE_BLOCKSIZE = 1024
+FASTER_WHISPER_DEVICE = "cpu"
+FASTER_WHISPER_COMPUTE_TYPE = "int8"
 
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
@@ -318,6 +335,19 @@ TRANSLATIONS = {
         "line_menu_swap_with": "Zeile tauschen mit…",
         "dlg_swap_title": "Zeilen tauschen",
         "dlg_swap_label": "Mit Zeilennummer tauschen (1…):",
+
+        "act_voice_fill": "Audioaufnahme",
+        "act_voice_fill_tip": "Zeilen per Mikrofon mit faster-whisper überschreiben",
+        "act_voice_stop": "Aufnahme stoppen",
+        "msg_voice_started": "Sprachaufnahme gestartet...",
+        "msg_voice_stopped": "Sprachaufnahme beendet. Transkribiere...",
+        "msg_voice_done": "Sprachimport abgeschlossen.",
+        "msg_voice_cancelled": "Sprachaufnahme abgebrochen.",
+        "warn_voice_need_done": "Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.",
+        "warn_voice_model_missing": "Faster-Whisper-Modellordner wurde nicht gefunden.",
+        "status_voice_recording": "Spricht ein...",
+
+        "line_menu_ai_revise_single": "Nur diese Zeile mit LM überarbeiten",
     },
 
     "en": {
@@ -508,6 +538,19 @@ TRANSLATIONS = {
         "line_menu_swap_with": "Swap line with…",
         "dlg_swap_title": "Swap lines",
         "dlg_swap_label": "Swap with line number (1…):",
+
+        "act_voice_fill": "Speak lines",
+        "act_voice_fill_tip": "Overwrite lines from microphone with faster-whisper",
+        "act_voice_stop": "Stop recording",
+        "msg_voice_started": "Voice recording started...",
+        "msg_voice_stopped": "Voice recording stopped. Transcribing...",
+        "msg_voice_done": "Voice import finished.",
+        "msg_voice_cancelled": "Voice recording cancelled.",
+        "warn_voice_need_done": "Please select a finished OCR item first.",
+        "warn_voice_model_missing": "Faster-Whisper model directory was not found.",
+        "status_voice_recording": "Recording...",
+
+        "line_menu_ai_revise_single": "Revise only this line with LM",
     },
 
     "fr": {
@@ -698,6 +741,19 @@ TRANSLATIONS = {
         "line_menu_swap_with": "Échanger la ligne avec…",
         "dlg_swap_title": "Échanger les lignes",
         "dlg_swap_label": "Échanger avec le numéro de ligne (1…) :",
+
+        "act_voice_fill": "Dicter les lignes",
+        "act_voice_fill_tip": "Remplacer les lignes reconnues via le microphone avec faster-whisper",
+        "act_voice_stop": "Arrêter l’enregistrement",
+        "msg_voice_started": "Enregistrement vocal démarré...",
+        "msg_voice_stopped": "Enregistrement terminé. Transcription en cours...",
+        "msg_voice_done": "Import vocal terminé.",
+        "msg_voice_cancelled": "Enregistrement vocal annulé.",
+        "warn_voice_need_done": "Veuillez d'abord sélectionner un fichier OCR terminé.",
+        "warn_voice_model_missing": "Le dossier du modèle Faster-Whisper est introuvable.",
+        "status_voice_recording": "Enregistrement...",
+
+        "line_menu_ai_revise_single": "Réviser uniquement cette ligne avec le LM",
     }
 }
 
@@ -817,7 +873,50 @@ VSEP_RE = re.compile(r'^[|│┃¦︱︳]+$')  # | │ ┃ ¦ ︱ ︳
 
 # Horizontale Separator-Records (Zeilentrenner)
 HSEP_RE = re.compile(r'^[_\-\u2500\u2501\u2504\u2505]{3,}$')  # _ - ─ ━ etc. (mind. 3)
-ONLY_SYMBOL_LINE_RE = re.compile(r'^[\.\,\:\;\-–—_\/\\\|\(\)\[\]\{\}\'"`~^*+=<>!?·•…]+$')
+ONLY_SYMBOL_LINE_RE = re.compile(
+    r'^[\(\)\{\}\?\!\/\\\"\$\%\&\[\]\=,\.\-_:;><\|\+\*#\'~`´\^°]+$'
+)
+
+NOISE_LINE_RE = re.compile(
+    r'^(?:'
+    r'a{3,}|e{3,}|i{3,}|o{3,}|u{3,}|'
+    r'ä{3,}|ö{3,}|ü{3,}|'
+    r'\.{3,}'
+    r')$',
+    re.IGNORECASE
+)
+
+ONLY_SYMBOL_LINE_RE = re.compile(
+    r'^[\(\)\{\}\?\!\/\\\""„“\$\%\&\[\]\=,\.\-—_:;><\|\+\*#\'~`´\^°]+$'
+)
+
+NOISE_REPEAT_RE = re.compile(
+    r'^([aäeéiioöuü])(?:[\s\.\,\-_:;]*\1){2,}$',
+    re.IGNORECASE
+)
+
+DOTS_ONLY_RE = re.compile(r'^(?:\.\s*){3,}$')
+
+def _is_symbol_only_line(text: Any) -> bool:
+    txt = _clean_ocr_text(text)
+    if not txt:
+        return False
+
+    return bool(ONLY_SYMBOL_LINE_RE.fullmatch(txt))
+
+
+def _is_noise_line(text: Any) -> bool:
+    txt = _clean_ocr_text(text)
+    if not txt:
+        return False
+
+    if NOISE_REPEAT_RE.fullmatch(txt):
+        return True
+
+    if DOTS_ONLY_RE.fullmatch(txt):
+        return True
+
+    return False
 
 def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["TB_LR"]):
     """
@@ -1417,19 +1516,6 @@ def _clean_ocr_text(text: Any) -> str:
 def _is_effectively_empty_ocr_text(text: Any) -> bool:
     return _clean_ocr_text(text) == ""
 
-def _is_symbol_only_line(text: Any) -> bool:
-    txt = _clean_ocr_text(text)
-    if not txt:
-        return False
-
-    # nur Symbol-/Trennzeichen
-    if not ONLY_SYMBOL_LINE_RE.fullmatch(txt):
-        return False
-
-    # wirklich "ganze Zeile nur Zeichen"
-    # ein einzelner Punkt, Doppelpunkt, Slash etc. soll weg
-    return True
-
 def _extract_json_string_lines_object(text: str):
     if not text:
         return None
@@ -1573,7 +1659,7 @@ def _extract_json_lines_object(text: str):
 def _pil_to_data_url(
     im: Image.Image,
     max_side: int = 5000,
-    image_format: str = "JPEG",
+    image_format: str = "PNG",
     jpeg_quality: int = 85,
 ) -> str:
     im = im.convert("RGB")
@@ -1585,12 +1671,12 @@ def _pil_to_data_url(
 
     buf = BytesIO()
 
-    fmt = (image_format or "JPEG").upper()
+    fmt = (image_format or "PNG").upper()
     if fmt == "JPEG":
         im.save(buf, format="JPEG", quality=int(jpeg_quality), optimize=True)
         mime = "image/jpeg"
     else:
-        im.save(buf, format="PNG")
+        im.save(buf, format="PNG", optimize=True)
         mime = "image/png"
 
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -1603,7 +1689,7 @@ def _image_to_data_url(path: str) -> str:
 def _page_to_data_url(
     path: str,
     max_side: int = 5000,
-    image_format: str = "JPEG",
+    image_format: str = "PNG",
     jpeg_quality: int = 85,
 ) -> str:
     im = _load_image_color(path)
@@ -1614,10 +1700,9 @@ def _page_to_data_url(
         jpeg_quality=jpeg_quality,
     )
 
-def _page_to_small_jpeg_data_url(
+def _page_to_small_png_data_url(
     path: str,
     max_side: int = 1200,
-    jpeg_quality: int = 65,
 ) -> str:
     im = _load_image_color(path)
 
@@ -1633,8 +1718,7 @@ def _page_to_small_jpeg_data_url(
     return _pil_to_data_url(
         im,
         max_side=max_side,
-        image_format="JPEG",
-        jpeg_quality=jpeg_quality,
+        image_format="PNG",
     )
 
 def _crop_block_to_data_url_context(
@@ -1927,9 +2011,6 @@ def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]
 # SKALIERBARES / VERSCHIEBBARES RECHTECK-ITEM
 # -----------------------------
 class ResizableRectItem(QGraphicsRectItem):
-    #    Verschiebbares + skalierbares Rechteck.
-    #    Ruft on_changed(idx, QRectF(Szenenkoordinaten)) nach dem Loslassen der Maus auf.
-
     HANDLE_PAD = 6.0
 
     def __init__(self, rect: QRectF, idx: int, on_changed: Callable[[int, QRectF], None],
@@ -1945,8 +2026,9 @@ class ResizableRectItem(QGraphicsRectItem):
 
         self._mode = "none"
         self._resize_edges = (False, False, False, False)  # L,T,R,B
-        self._press_item_pos: Optional[QPointF] = None
+        self._press_scene_pos: Optional[QPointF] = None
         self._press_rect: Optional[QRectF] = None
+        self._press_item_pos: Optional[QPointF] = None
 
     def _hit_test_edges(self, pos: QPointF) -> Tuple[bool, bool, bool, bool]:
         r = self.rect()
@@ -1973,46 +2055,68 @@ class ResizableRectItem(QGraphicsRectItem):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._press_scene_pos = event.scenePos()
+            self._press_rect = QRectF(self.rect())
+            self._press_item_pos = QPointF(self.pos())
+
             l, t, r, b = self._hit_test_edges(event.pos())
-            if l or t or r or b:
+            self._resize_edges = (l, t, r, b)
+
+            if any(self._resize_edges):
                 self._mode = "resize"
-                self._resize_edges = (l, t, r, b)
-                self._press_item_pos = QPointF(event.pos())
-                self._press_rect = QRectF(self.rect())
-                self.setFlag(QGraphicsRectItem.ItemIsMovable, False)
                 event.accept()
                 return
             else:
                 self._mode = "move"
-                self.setFlag(QGraphicsRectItem.ItemIsMovable, True)
-                self.setCursor(Qt.ClosedHandCursor)
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._mode == "resize" and self._press_item_pos is not None and self._press_rect is not None:
-            delta = event.pos() - self._press_item_pos
-            r = QRectF(self._press_rect)
+        if self._mode == "resize" and self._press_scene_pos is not None and self._press_rect is not None:
+            delta = event.scenePos() - self._press_scene_pos
+            rect = QRectF(self._press_rect)
 
-            l, t, rr, b = self._resize_edges
+            l, t, r, b = self._resize_edges
+
             if l:
-                r.setLeft(r.left() + delta.x())
-            if rr:
-                r.setRight(r.right() + delta.x())
+                rect.setLeft(rect.left() + delta.x())
+            if r:
+                rect.setRight(rect.right() + delta.x())
             if t:
-                r.setTop(r.top() + delta.y())
+                rect.setTop(rect.top() + delta.y())
             if b:
-                r.setBottom(r.bottom() + delta.y())
+                rect.setBottom(rect.bottom() + delta.y())
 
-            r = r.normalized()
-            if r.width() < 5:
-                r.setWidth(5)
-            if r.height() < 5:
-                r.setHeight(5)
+            min_w = 5.0
+            min_h = 5.0
 
-            self.setRect(r)
+            if rect.width() < min_w:
+                if l:
+                    rect.setLeft(rect.right() - min_w)
+                else:
+                    rect.setRight(rect.left() + min_w)
+
+            if rect.height() < min_h:
+                if t:
+                    rect.setTop(rect.bottom() - min_h)
+                else:
+                    rect.setBottom(rect.top() + min_h)
+
+            self.setRect(rect.normalized())
             event.accept()
             return
+
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+
+        if self._mode in ("resize", "move"):
+            self._mode = "none"
+            if callable(self._on_changed):
+                self._on_changed(self.idx, self.mapRectToScene(self.rect()).boundingRect())
+            event.accept()
+            return
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2024,25 +2128,6 @@ class ResizableRectItem(QGraphicsRectItem):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        self.setCursor(Qt.OpenHandCursor)
-
-        was_resize_or_move = (self._mode in ("resize", "move"))
-        self._mode = "none"
-        self._press_item_pos = None
-        self._press_rect = None
-
-        self.setFlag(QGraphicsRectItem.ItemIsMovable, True)
-
-        if was_resize_or_move:
-            try:
-                if callable(self._on_changed):
-                    scene_rect = self.mapRectToScene(self.rect()).normalized()
-                    self._on_changed(self.idx, scene_rect)
-            except Exception:
-                pass
 
 # -----------------------------
 # WARTEBEREICH-TABELLE MIT DRAG & DROP
@@ -2211,6 +2296,8 @@ class ImageCanvas(QGraphicsView):
     overlay_delete_requested = Signal(int)
     overlay_select_requested = Signal(int)
 
+    overlay_multi_selected = Signal(list)   # Liste von idx
+
     def __init__(self, tr_func=None):
         super().__init__()
         icon_path = resource_path("icon.ico")
@@ -2239,6 +2326,7 @@ class ImageCanvas(QGraphicsView):
         self._rects: Dict[int, QGraphicsRectItem] = {}
         self._labels: Dict[int, QGraphicsSimpleTextItem] = {}
         self._selected_idx: Optional[int] = None
+        self._selected_indices: set[int] = set()
         self._bg_color = QColor("#333")
 
         self._pen_normal = QPen(QColor("#ff3b30"), 2)
@@ -2255,6 +2343,13 @@ class ImageCanvas(QGraphicsView):
         self._draw_rect_item: Optional[QGraphicsRectItem] = None
         self._pen_draw = QPen(QColor("#00ff7f"), 2)
         self._brush_draw = QBrush(QColor(0, 255, 127, 40))
+
+        # Multi-Selection per Mausziehen
+        self._selection_mode = False
+        self._selection_start = None
+        self._selection_rect_item: Optional[QGraphicsRectItem] = None
+        self._pen_selection = QPen(QColor("#0a84ff"), 2, Qt.DashLine)
+        self._brush_selection = QBrush(QColor(10, 132, 255, 40))
 
         # Nur aktiv, nachdem die OCR abgeschlossen ist
         self._overlay_enabled = False
@@ -2361,6 +2456,88 @@ class ImageCanvas(QGraphicsView):
             self._draw_rect_item = None
         self.setDragMode(QGraphicsView.NoDrag)
 
+    def start_selection_mode(self, scene_pos: QPointF):
+        if not self._overlay_enabled:
+            return
+
+        self._selection_mode = True
+        self._selection_start = scene_pos
+
+        if self._selection_rect_item is not None:
+            try:
+                if isValid(self._selection_rect_item) and self._selection_rect_item.scene() is self.scene:
+                    self.scene.removeItem(self._selection_rect_item)
+            except RuntimeError:
+                pass
+            self._selection_rect_item = None
+
+        self._selection_rect_item = QGraphicsRectItem(QRectF(scene_pos, scene_pos))
+        self._selection_rect_item.setPen(self._pen_selection)
+        self._selection_rect_item.setBrush(self._brush_selection)
+        self._selection_rect_item.setZValue(999)
+        self.scene.addItem(self._selection_rect_item)
+
+    def stop_selection_mode(self):
+        self._selection_mode = False
+        self._selection_start = None
+        if self._selection_rect_item is not None:
+            try:
+                if isValid(self._selection_rect_item) and self._selection_rect_item.scene() is self.scene:
+                    self.scene.removeItem(self._selection_rect_item)
+            except RuntimeError:
+                pass
+            self._selection_rect_item = None
+
+    def select_indices(self, indices, center: bool = False):
+        try:
+            idxs = {int(i) for i in indices if i is not None}
+        except Exception:
+            idxs = set()
+
+        self._selected_indices = idxs
+        self._selected_idx = min(idxs) if idxs else None
+
+        for idx, rect in self._rects.items():
+            if not isValid(rect):
+                continue
+            if idx in idxs:
+                rect.setPen(self._pen_selected)
+                rect.setBrush(self._brush_selected)
+            else:
+                rect.setPen(self._pen_normal)
+                rect.setBrush(self._brush_fill)
+
+        if center and idxs:
+            first = min(idxs)
+            rect = self._rects.get(first)
+            if rect and isValid(rect):
+                self.centerOn(rect)
+
+    def _finalize_selection_rect(self, additive: bool = False):
+        if not self._selection_rect_item or not isValid(self._selection_rect_item):
+            self.stop_selection_mode()
+            return
+
+        sel_rect = self._selection_rect_item.rect().normalized()
+
+        hit = []
+        for idx, rect in self._rects.items():
+            if not isValid(rect):
+                continue
+            scene_rect = rect.mapRectToScene(rect.rect()).normalized()
+            center = scene_rect.center()
+            if sel_rect.intersects(scene_rect) or sel_rect.contains(center):
+                hit.append(idx)
+
+        if additive:
+            hit = sorted(set(hit) | self._selected_indices)
+        else:
+            hit = sorted(set(hit))
+
+        self.select_indices(hit, center=False)
+        self.overlay_multi_selected.emit(hit)
+        self.stop_selection_mode()
+
     def contextMenuEvent(self, event):
         pos = event.pos()
         item = self.itemAt(pos)
@@ -2420,41 +2597,60 @@ class ImageCanvas(QGraphicsView):
             self.scene.addItem(self._draw_rect_item)
             return
 
-        if (not self._draw_mode) and event.button() == Qt.LeftButton:
-            it = self.itemAt(self._event_point(event))
-
-            # Wenn gezoomt und NICHT auf Overlay-Box: direkt per Maus pannen (LMB gedrückt halten)
-            if self._zoom > 1.01 and not isinstance(it, ResizableRectItem):
-                self._mouse_panning = True
-                self._pan_start = self._event_point(event)  # viewport coords
-                self._pan_start_h = self.horizontalScrollBar().value()
-                self._pan_start_v = self.verticalScrollBar().value()
-                self.setCursor(Qt.ClosedHandCursor)
-                event.accept()
-                return
-
-        item = self.itemAt(self._event_point(event))
-        if isinstance(item, ResizableRectItem):
-            self.rect_clicked.emit(item.idx)
-            # WICHTIG: nicht return -> Item muss Maus-Events bekommen für Move/Resize
-            super().mousePressEvent(event)
-            return
-
-        if event.button() == Qt.LeftButton and not self._pixmap_item:
-            self.canvas_clicked.emit()
-
-        item = self.itemAt(self._event_point(event))
-        if isinstance(item, ResizableRectItem):
-            self.rect_clicked.emit(item.idx)
-            return
-
-        # Klick auf Bild/Leere Fläche: keine Drag/Pan-Aktion starten
         if event.button() == Qt.LeftButton:
             it = self.itemAt(self._event_point(event))
 
-            # falls Pixmap oder Leere Fläche geklickt -> nur deselect + accept
-            if (it is None) or (self._pixmap_item is not None and it == self._pixmap_item):
-                self.select_idx(None, center=False)
+            # WICHTIG: Klick auf Nummernlabel auf zugehörige Box umbiegen
+            if isinstance(it, QGraphicsSimpleTextItem):
+                txt = it.text().strip()
+                if txt.isdigit():
+                    idx = int(txt) - 1
+                    rect = self._rects.get(idx)
+                    if rect and isValid(rect):
+                        it = rect
+
+            if isinstance(it, ResizableRectItem):
+                ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
+
+                if ctrl_pressed:
+                    new_selection = set(self._selected_indices)
+
+                    if it.idx in new_selection:
+                        new_selection.remove(it.idx)
+                    else:
+                        new_selection.add(it.idx)
+
+                    new_selection = sorted(new_selection)
+
+                    self.select_indices(new_selection, center=False)
+                    self.overlay_multi_selected.emit(new_selection)
+
+                    if new_selection:
+                        self._selected_idx = it.idx if it.idx in new_selection else min(new_selection)
+                    else:
+                        self._selected_idx = None
+
+                    event.accept()
+                    return
+
+                self.select_indices([it.idx], center=False)
+                self.overlay_multi_selected.emit([it.idx])
+                self.rect_clicked.emit(it.idx)
+                super().mousePressEvent(event)
+                return
+
+            if self._overlay_enabled and self._pixmap_item is not None:
+                sp = self.mapToScene(self._event_point(event))
+                self.start_selection_mode(sp)
+                event.accept()
+                return
+
+            if self._zoom > 1.01:
+                self._mouse_panning = True
+                self._pan_start = self._event_point(event)
+                self._pan_start_h = self.horizontalScrollBar().value()
+                self._pan_start_v = self.verticalScrollBar().value()
+                self.setCursor(Qt.ClosedHandCursor)
                 event.accept()
                 return
 
@@ -2469,7 +2665,6 @@ class ImageCanvas(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
-        # NEU: Maus-Panning
         if self._mouse_panning:
             p = self._event_point(event)
             delta = p - self._pan_start
@@ -2478,12 +2673,32 @@ class ImageCanvas(QGraphicsView):
             event.accept()
             return
 
-        # Box-Zeichnen wie gehabt
         if self._draw_mode and self._draw_start and self._draw_rect_item is not None:
             sp = self.mapToScene(self._event_point(event))
             r = QRectF(self._draw_start, sp).normalized()
             if isValid(self._draw_rect_item):
                 self._draw_rect_item.setRect(r)
+            return
+
+        if self._selection_mode and self._selection_start and self._selection_rect_item is not None:
+            sp = self.mapToScene(self._event_point(event))
+            r = QRectF(self._selection_start, sp).normalized()
+
+            if isValid(self._selection_rect_item):
+                self._selection_rect_item.setRect(r)
+
+            # Live-Vorschau: alle getroffenen Boxen sofort blau markieren
+            hit = []
+            for idx, rect in self._rects.items():
+                if not isValid(rect):
+                    continue
+                scene_rect = rect.mapRectToScene(rect.rect()).normalized()
+                center = scene_rect.center()
+                if r.intersects(scene_rect) or r.contains(center):
+                    hit.append(idx)
+
+            self.select_indices(hit, center=False)
+            event.accept()
             return
 
         super().mouseMoveEvent(event)
@@ -2496,6 +2711,11 @@ class ImageCanvas(QGraphicsView):
             self.stop_draw_box_mode()
             if rect and rect.width() >= 5 and rect.height() >= 5:
                 self.box_drawn.emit(rect)
+            return
+
+        if event.button() == Qt.LeftButton and self._selection_mode:
+            self._finalize_selection_rect(additive=False)
+            event.accept()
             return
 
         if event.button() == Qt.LeftButton and self._mouse_panning:
@@ -2511,11 +2731,13 @@ class ImageCanvas(QGraphicsView):
 
     def clear_all(self):
         self.stop_draw_box_mode()
+        self.stop_selection_mode()
         self.scene.clear()
         self._pixmap_item = None
         self._rects.clear()
         self._labels.clear()
         self._selected_idx = None
+        self._selected_indices.clear()
         self._drop_text = None
         self.resetTransform()
         self._zoom = 1.0
@@ -2656,22 +2878,15 @@ class ImageCanvas(QGraphicsView):
             lab.setBrush(QBrush(c_text))
             lab.setZValue(11)
             lab.setPos(x0, max(0, y0 - 16))
+            lab.setAcceptedMouseButtons(Qt.NoButton)
             self.scene.addItem(lab)
             self._labels[rv.idx] = lab
 
     def select_idx(self, idx: Optional[int], center: bool = True):
-        for rect in self._rects.values():
-            if isValid(rect):
-                rect.setPen(self._pen_normal)
-                rect.setBrush(self._brush_fill)
-        self._selected_idx = idx
-        if idx is not None and idx in self._rects:
-            rect = self._rects[idx]
-            if isValid(rect):
-                rect.setPen(self._pen_selected)
-                rect.setBrush(self._brush_selected)
-                if center:
-                    self.centerOn(rect)
+        if idx is None:
+            self.select_indices([], center=False)
+        else:
+            self.select_indices([idx], center=center)
 
     def wheelEvent(self, event):
         if event.angleDelta().y() > 0:
@@ -2953,7 +3168,7 @@ class OCRWorker(QThread):
                     continue
 
                 txt = _clean_ocr_text(pred)
-                if _is_effectively_empty_ocr_text(txt) or _is_symbol_only_line(txt):
+                if _is_effectively_empty_ocr_text(txt) or _is_symbol_only_line(txt) or _is_noise_line(txt):
                     continue
 
                 bb = record_bbox(r)
@@ -3005,7 +3220,7 @@ class OCRWorker(QThread):
 
             for rv in record_views:
                 rv.text = _clean_ocr_text(rv.text)
-                if _is_effectively_empty_ocr_text(rv.text) or _is_symbol_only_line(rv.text):
+                if _is_effectively_empty_ocr_text(rv.text) or _is_symbol_only_line(rv.text) or _is_noise_line(rv.text):
                     continue
 
                 rv.idx = len(filtered_record_views)
@@ -3073,18 +3288,17 @@ class AIBatchRevisionWorker(QThread):
         self.lm_model = lm_model
         self.endpoint = endpoint
         self.enable_thinking = enable_thinking
-        self.temperature = temperature
-        self.top_p = top_p
-        self.top_k = top_k
-        self.presence_penalty = presence_penalty
-        self.repetition_penalty = repetition_penalty
-        self.min_p = min_p
-        self.max_tokens = max_tokens
-        self._current_worker = None
+        self.temperature = float(temperature)
+        self.top_p = float(top_p)
+        self.top_k = int(top_k)
+        self.presence_penalty = float(presence_penalty)
+        self.repetition_penalty = float(repetition_penalty)
+        self.min_p = float(min_p)
+        self.max_tokens = int(max_tokens)
+        self._current_worker: Optional[AIRevisionWorker] = None
 
     def cancel(self):
         self.requestInterruption()
-
         w = self._current_worker
         if w is not None:
             try:
@@ -3092,61 +3306,89 @@ class AIBatchRevisionWorker(QThread):
             except Exception:
                 pass
 
+    def _revise_one_item(self, item: TaskItem) -> List[str]:
+        if self.isInterruptionRequested():
+            raise RuntimeError("Überarbeitung abgebrochen.")
+
+        if not item.results:
+            return []
+
+        _, _, _, recs = item.results
+
+        result_holder: Dict[str, Any] = {}
+        error_holder: Dict[str, Any] = {}
+
+        worker = AIRevisionWorker(
+            path=item.path,
+            recs=recs,
+            lm_model=self.lm_model,
+            endpoint=self.endpoint,
+            enable_thinking=self.enable_thinking,
+            source_kind=item.source_kind,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            top_k=self.top_k,
+            presence_penalty=self.presence_penalty,
+            repetition_penalty=self.repetition_penalty,
+            min_p=self.min_p,
+            max_tokens=self.max_tokens,
+            parent=None
+        )
+
+        self._current_worker = worker
+
+        worker.status_changed.connect(self.status_changed.emit)
+        worker.finished_revision.connect(
+            lambda path, lines: result_holder.setdefault("lines", lines)
+        )
+        worker.failed_revision.connect(
+            lambda path, msg: error_holder.setdefault("msg", msg)
+        )
+
+        # WICHTIG: hier absichtlich synchron im Batch-Thread ausführen
+        worker.run()
+
+        self._current_worker = None
+
+        if self.isInterruptionRequested():
+            raise RuntimeError("Überarbeitung abgebrochen.")
+
+        if "msg" in error_holder:
+            raise RuntimeError(str(error_holder["msg"]))
+
+        return list(result_holder.get("lines", []))
+
     def run(self):
         total = len(self.items)
+
         if total <= 0:
             self.finished_batch.emit()
             return
 
-        for i, task in enumerate(self.items, start=1):
+        for i, item in enumerate(self.items, start=1):
             if self.isInterruptionRequested():
                 break
 
-            self.file_started.emit(task.path, i, total)
-            self.status_changed.emit(f"KI-Datei {i}/{total}: {os.path.basename(task.path)}")
+            self.file_started.emit(item.path, i, total)
+            self.status_changed.emit(f"KI-Batch {i}/{total}: {os.path.basename(item.path)}")
+            self.progress_changed.emit(int(((i - 1) / total) * 100))
 
             try:
-                _, _, _, recs = task.results
-                worker = AIRevisionWorker(
-                    path=task.path,
-                    recs=recs,
-                    lm_model=self.lm_model,
-                    endpoint=self.endpoint,
-                    enable_thinking=self.enable_thinking,
-                    source_kind=task.source_kind,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    top_k=self.top_k,
-                    presence_penalty=self.presence_penalty,
-                    repetition_penalty=self.repetition_penalty,
-                    min_p=self.min_p,
-                    max_tokens=self.max_tokens,
-                )
-                self._current_worker = worker
-                revised_holder = {"lines": None, "error": None}
+                revised_lines = self._revise_one_item(item)
 
-                def _done(path, lines):
-                    revised_holder["lines"] = lines
+                if self.isInterruptionRequested():
+                    break
 
-                def _fail(path, msg):
-                    revised_holder["error"] = msg
-
-                worker.finished_revision.connect(_done)
-                worker.failed_revision.connect(_fail)
-
-                worker.run()  # absichtlich synchron innerhalb des Batch-Threads
-                self._current_worker = None
-
-                if revised_holder["error"] is not None:
-                    self.file_failed.emit(task.path, revised_holder["error"], i, total)
-                else:
-                    self.file_finished.emit(task.path, revised_holder["lines"], i, total)
+                self.file_finished.emit(item.path, revised_lines, i, total)
 
             except Exception as e:
-                self.file_failed.emit(task.path, str(e), i, total)
+                msg = str(e)
+                self.file_failed.emit(item.path, msg, i, total)
 
-            percent = int((i / total) * 100)
-            self.progress_changed.emit(percent)
+                if "abgebrochen" in msg.lower():
+                    break
+
+            self.progress_changed.emit(int((i / total) * 100))
 
         self.status_changed.emit("KI-Batch abgeschlossen.")
         self.finished_batch.emit()
@@ -3230,6 +3472,28 @@ class AIRevisionWorker(QThread):
                 or "image" in msg and "http 400" in msg
         )
 
+    def _looks_like_form_layout(self) -> bool:
+        if not self.recs:
+            return False
+
+        short_lines = 0
+        empty_or_tiny = 0
+        with_bbox = 0
+
+        for rv in self.recs:
+            txt = (rv.text or "").strip()
+            if rv.bbox:
+                with_bbox += 1
+            if len(txt) <= 25:
+                short_lines += 1
+            if len(txt) <= 2:
+                empty_or_tiny += 1
+
+        ratio_short = short_lines / max(1, len(self.recs))
+        ratio_tiny = empty_or_tiny / max(1, len(self.recs))
+
+        return with_bbox >= max(3, len(self.recs) // 2) and ratio_short >= 0.6 and ratio_tiny >= 0.15
+
     def _request_page_ocr_with_fixed_linecount(self, page_data_url: str, recs: List[RecordView]) -> List[str]:
         img_w, img_h = _load_image_color(self.path).size
 
@@ -3241,39 +3505,40 @@ class AIRevisionWorker(QThread):
             })
 
         system_prompt = (
-            "Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche Drucke und Handschriften. "
-            "Du bist spezialisiert auf Fraktur, Sütterlin, Kurrent und verwandte ältere deutsche Schriftformen. "
-            "Lies den Text frei direkt aus dem Bild. "
+            "Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche Drucke, Handschriften und Formulare. "
+            "Du liest den Text direkt aus dem Bild. "
             "Das Bild ist die einzige Wahrheitsquelle. "
-            "Du darfst den OCR-Hinweis nicht rekonstruieren, sondern musst den Text wirklich aus dem Bild lesen. "
-            "Bewahre historische Schreibweisen, Eigennamen, Abkürzungen und alte Orthographie so genau wie möglich. "
-            "Modernisiere oder normalisiere nichts. "
-            "Wenn einzelne Zeichen unsicher sind, nutze den visuellen und sprachlichen Kontext historischer deutscher Texte. "
-            "Die vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
-            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
+            "Du musst den gelesenen Text auf eine bereits vorgegebene Liste von Zielzeilen abbilden. "
+            "Jede Zielzeile entspricht genau einer visuellen Formular- oder Textzeile. "
+            "Du darfst keine zwei Zielzeilen zusammenziehen. "
+            "Du darfst keine zusätzliche Leerzeile halluzinieren. "
+            "Du darfst keinen langen Textblock in eine einzelne Zielzeile schreiben. "
+            "Wenn eine Zielzeile keinen sicher lesbaren Text enthält, gib für genau diese Zeile einen leeren String zurück. "
+            "Du musst die Anzahl der Zielzeilen exakt einhalten. "
             "Antworte ausschließlich mit gültigem JSON. "
             "Kein Markdown. Kein Zusatztext. Kein Kommentar."
         )
 
         user_prompt = (
             "Lies den Text direkt aus dem Bild.\n\n"
-            "Du musst dich exakt an die vorgegebene Kraken-Zeilenstruktur halten.\n"
+            "Du musst die vorgegebene Kraken-Zeilenstruktur EXAKT einhalten.\n"
             f"Es gibt genau {len(recs)} Zielzeilen.\n"
-            "Für jede Zielzeile gibt es einen festen idx.\n"
-            "Gib für jeden idx genau den Text der zugehörigen handschriftlichen Zeile zurück.\n"
-            "Verschiebe keinen Text zwischen den idx-Werten.\n"
-            "Lasse keinen idx aus.\n"
-            "Die bbox dient nur als Orientierung, welche visuelle Zeile gemeint ist.\n\n"
-            "Wichtig:\n"
+            "Jeder idx steht für genau eine visuelle Zielzeile.\n\n"
+            "HARTE REGELN:\n"
             f"- Gib genau {len(recs)} Einträge im Feld lines zurück\n"
             f"- Die idx-Werte müssen exakt 0 bis {len(recs) - 1} sein\n"
-            "- Gib NUR ein JSON-Objekt zurück\n"
+            "- Kein idx darf fehlen\n"
+            "- Kein idx darf doppelt vorkommen\n"
+            "- Keine zwei Zielzeilen dürfen zu einer Zeile zusammengezogen werden\n"
+            "- Kein langer Satzblock darf in einer einzelnen Zielzeile landen\n"
+            "- Wenn eine Zielzeile unklar ist, gib den bestmöglichen kurzen Zeilentext zurück\n"
+            "- Wenn die Zielzeile wirklich leer ist, gib text als leeren String zurück\n"
+            "- Die bbox ist nur Orientierung für die visuelle Zuordnung\n"
+            "- Gib NUR das JSON-Objekt zurück\n"
             "- Kein Markdown\n"
             "- Keine Analyse\n"
-            "- Keine zusätzlichen Sätze\n"
             "- Keine Kommentare\n"
-            "- Wenn eine Zeile unklar ist, gib den bestmöglichen Text zurück\n"
-            "- Wenn eine Zielzeile wirklich leer wäre, gib für diese Zeile text als leeren String zurück\n\n"
+            "- Keine zusätzlichen Sätze\n\n"
             "Kraken-Zielzeilenstruktur:\n"
             f"{json.dumps(line_specs, ensure_ascii=False)}\n\n"
             "Antwortformat exakt so:\n"
@@ -3332,10 +3597,23 @@ class AIRevisionWorker(QThread):
 
         # Wenn fast alles leer ist -> kompletter Fehler
         filled = sum(1 for x in out if str(x).strip())
-        if filled < max(1, int(len(recs) * 0.6)):
+
+        too_long_blocks = sum(1 for x in out if len(str(x).strip()) > 120)
+
+        if too_long_blocks >= 1:
             raise ValueError(
-                f"Seiten-OCR lieferte zu wenig verwertbare Zeilen: {filled}/{len(recs)}"
+                "Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen."
             )
+
+        # Nur komplett unbrauchbare Antworten verwerfen
+        if filled == 0:
+            raise ValueError(
+                f"Seiten-OCR lieferte keine verwertbaren Zeilen: {filled}/{len(recs)}"
+            )
+
+        for i in range(len(out)):
+            if not str(out[i]).strip():
+                out[i] = recs[i].text
 
         # Leere Einzelzeilen gezielt mit Kraken-Original auffüllen,
         # damit die Zeilenstruktur exakt erhalten bleibt
@@ -3352,24 +3630,33 @@ class AIRevisionWorker(QThread):
             current_text: str = "",
     ) -> str:
         system_prompt = (
-            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften. "
-            "Lies den Text frei direkt aus dem Bild. "
+            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften und Formulare. "
+            "Du liest genau eine einzelne Zielzeile aus einem Bildausschnitt. "
             "Das Bild ist die einzige Wahrheitsquelle. "
-            "Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst lesen. "
-            "Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
-            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
+            "Die Zielzeile befindet sich in der Mitte des Ausschnitts. "
+            "Oberhalb oder unterhalb sichtbare Linien, Leerzeilen, Formularlinien, Labels oder Nachbarzeilen sind nur Kontext. "
+            "Du darfst nur den Text der einen Zielzeile zurückgeben. "
+            "Du darfst keinen Text aus Nachbarzeilen übernehmen. "
+            "Du darfst keine zusätzliche Zeile erfinden. "
+            "Du darfst keine lange Passage bilden, wenn im Ausschnitt nur eine kurze Formularzeile steht. "
+            "Wenn die Zielzeile leer ist, gib einen leeren String zurück. "
             "Antworte ausschließlich mit gültigem JSON. "
             "Kein Markdown. Kein Zusatztext. Kein Kommentar."
         )
 
         user_prompt = (
-            "Lies genau die zentrale handschriftliche Zeile aus dem Bildausschnitt.\n"
-            "Gib ausschließlich genau EIN JSON-Objekt zurück.\n"
-            "Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n"
-            "Wichtig:\n"
-            "- doppelte Anführungszeichen innerhalb von text immer als \\\" escapen\n"
-            "- keine Ausgabe vor oder nach dem JSON\n"
-            "Format:\n"
+            "Lies genau die Zielzeile in der Mitte des Bildausschnitts.\n"
+            "WICHTIG:\n"
+            "- Gib nur den Text dieser EINEN Zeile zurück\n"
+            "- Benachbarte Zeilen dürfen nicht übernommen werden\n"
+            "- Formular-Labels, Linien und Leerbereiche dürfen nicht halluziniert ergänzt werden\n"
+            "- Wenn in dieser Zielzeile kein lesbarer Text steht, gib text als leeren String zurück\n"
+            "- Keine zweite Zeile\n"
+            "- Keine Zusammenfassung\n"
+            "- Keine Erklärung\n"
+            "- Kein Markdown\n"
+            "- Keine Ausgabe vor oder nach dem JSON\n\n"
+            "Format exakt:\n"
             "{\"text\":\"...\"}\n\n"
             f"Zeilenindex: {idx}\n"
             f"Aktueller OCR-Text als schwacher Hinweis:\n{current_text}"
@@ -3431,6 +3718,103 @@ class AIRevisionWorker(QThread):
             return lines[0].strip()
 
         return current_text
+
+    def _request_line_decision(
+            self,
+            idx: int,
+            kraken_text: str,
+            page_text: str,
+            box_text: str,
+    ) -> str:
+        system_prompt = (
+            "Du bist ein präziser OCR-Korrekturassistent für historische deutsche Handschriften und Formulare. "
+            "Du bekommst für genau eine Zielzeile drei Kandidaten:\n"
+            "1. Kraken-OCR\n"
+            "2. OCR aus dem Gesamtseiten-Kontext\n"
+            "3. OCR aus der Overlay-Box dieser Zeile\n\n"
+            "WICHTIG:\n"
+            "- Die Overlay-Box-OCR ist die Primärquelle.\n"
+            "- Die Seiten-OCR ist NUR Kontext und darf keine fremden Nachbarzeilen in diese Zielzeile hineinziehen.\n"
+            "- Kraken ist nur schwacher Fallback.\n"
+            "- Du darfst keine zusätzliche Zeile erfinden.\n"
+            "- Du darfst keinen Text aus benachbarten Formularzeilen übernehmen.\n"
+            "- Du darfst keine lange Mehrzeilen-Passage in diese eine Zielzeile packen.\n"
+            "- Wenn die Box-OCR plausibel ist, übernimm sie.\n"
+            "- Nur wenn die Box-OCR klar abgeschnitten, leer oder offensichtlich falsch ist, darfst du mit Kraken korrigieren.\n"
+            "- Die Seiten-OCR darf nur helfen, ein einzelnes unsicheres Wort zu bestätigen, nicht die ganze Zeile zu ersetzen.\n"
+            "- Bewahre historische Schreibweise.\n"
+            "Antworte ausschließlich mit gültigem JSON. "
+            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
+        )
+
+        user_prompt = (
+            f"Zielzeile idx={idx}\n\n"
+            f"Kraken-OCR:\n{kraken_text}\n\n"
+            f"Seitenkontext-OCR (nur Kontext, nicht Primärquelle):\n{page_text}\n\n"
+            f"Overlay-Box-OCR (Primärquelle):\n{box_text}\n\n"
+            "Wähle die beste finale Fassung für GENAU diese eine Zeile.\n"
+            "Bevorzuge die Overlay-Box-OCR.\n"
+            "Gib nur die finale Textzeile zurück.\n"
+            "Format exakt:\n"
+            "{\"text\":\"...\"}"
+        )
+
+        payload = {
+            "model": self.lm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            **self._build_sampling_payload(
+                response_format=self._response_format_single_text()
+            ),
+        }
+
+        data = self._post_json(payload)
+        content = self._extract_message_content(data)
+
+        try:
+            print("RAW LINE DECISION RESPONSE:")
+            print(content[:2000])
+        except Exception:
+            pass
+
+        if "```" in content:
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+        content = content.strip()
+
+        obj = None
+        try:
+            obj = json.loads(content)
+        except Exception:
+            pass
+
+        if obj is None:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    obj = json.loads(content[start:end + 1])
+                except Exception:
+                    pass
+
+        if isinstance(obj, dict):
+            txt = str(obj.get("text", "")).strip()
+            if txt:
+                return txt
+
+        lines = _extract_text_lines(content)
+        if lines:
+            return lines[0].strip()
+
+        # sehr konservativer Fallback:
+        # BOX > KRAKEN > PAGE
+        if str(box_text).strip():
+            return str(box_text).strip()
+        if str(kraken_text).strip():
+            return str(kraken_text).strip()
+        return str(page_text).strip()
 
     def _build_sampling_payload(self, response_format: Optional[dict] = None) -> dict:
         payload = {
@@ -3783,17 +4167,64 @@ class AIRevisionWorker(QThread):
             self.status_changed.emit(f"Starte freie KI-OCR: {os.path.basename(self.path)}")
             self.progress_changed.emit(0)
 
-            self.status_changed.emit(
-                f"Freies Seiten-OCR mit fixer Zeilenanzahl: {os.path.basename(self.path)}"
-            )
+            # -------------------------------------------------
+            # 1/3 BOX-OCR zuerst = Primärquelle
+            # -------------------------------------------------
+            self.status_changed.emit(f"1/3 Zeilenweise Box-OCR: {os.path.basename(self.path)}")
 
-            revised_all = None
+            box_lines: List[str] = []
+            total = max(1, len(self.recs))
+
+            for i, rv in enumerate(self.recs):
+                if self._cancelled or self.isInterruptionRequested():
+                    raise RuntimeError("Überarbeitung abgebrochen.")
+
+                self.status_changed.emit(
+                    f"1/3 Box-OCR Zeile {i + 1}/{total}: {os.path.basename(self.path)}"
+                )
+
+                try:
+                    line_data_url = _crop_single_line_to_data_url(self.path, rv)
+                    box_text = self._request_single_line_reread(
+                        line_data_url=line_data_url,
+                        idx=rv.idx,
+                        current_text=rv.text
+                    )
+                except Exception as e:
+                    print(f"BOX OCR ERROR idx={rv.idx}: {e}")
+                    box_text = rv.text
+
+                if not str(box_text).strip():
+                    box_text = rv.text
+
+                box_lines.append(str(box_text).strip())
+
+                self.progress_changed.emit(int(((i + 1) / total) * 55))
+
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
+
+            is_form_like = self._looks_like_form_layout()
+
+            # -------------------------------------------------
+            # 2/3 Seiten-OCR nur als Kontext
+            # -------------------------------------------------
+            if is_form_like:
+                self.status_changed.emit(
+                    f"2/3 Seiten-OCR stark abgeschwächt (Formular erkannt): {os.path.basename(self.path)}"
+                )
+            else:
+                self.status_changed.emit(
+                    f"2/3 Seiten-OCR nur als Kontext: {os.path.basename(self.path)}"
+                )
+
+            page_lines = None
             last_err = None
 
             retry_configs = [
-                {"max_side": 2000, "image_format": "JPEG", "jpeg_quality": 100},
-                {"max_side": 1500, "image_format": "JPEG", "jpeg_quality": 85},
-                {"max_side": 1000, "image_format": "JPEG", "jpeg_quality": 70},
+                {"max_side": 2000, "image_format": "PNG"},
+                {"max_side": 1500, "image_format": "PNG"},
+                {"max_side": 1000, "image_format": "PNG"},
             ]
 
             for cfg in retry_configs:
@@ -3802,60 +4233,82 @@ class AIRevisionWorker(QThread):
 
                 try:
                     self.status_changed.emit(
-                        f"Vision-OCR Versuch: {cfg['max_side']}px {cfg['image_format']}"
+                        f"2/3 Vision-Kontext Versuch: {cfg['max_side']}px PNG"
                     )
                     page_data_url = _page_to_data_url(
                         self.path,
                         max_side=cfg["max_side"],
                         image_format=cfg["image_format"],
-                        jpeg_quality=cfg["jpeg_quality"],
                     )
 
                     if self._cancelled or self.isInterruptionRequested():
                         raise RuntimeError("Überarbeitung abgebrochen.")
 
-                    revised_all = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
+                    page_lines = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
                     break
                 except Exception as e:
                     last_err = e
                     if self._is_image_processing_error(e):
                         continue
-                    raise
+                    page_lines = None
+                    break
 
-            if revised_all is None:
-                # Spezial-Fallback nur für PDF-Seiten:
-                # nochmal als stark verkleinertes JPEG versuchen
-                if self.source_kind == "pdf_page":
-                    try:
-                        self.status_changed.emit("PDF-Fallback: stark verkleinertes JPEG wird versucht")
-                        page_data_url = _page_to_small_jpeg_data_url(
-                            self.path,
-                            max_side=1200,
-                            jpeg_quality=65,
-                        )
-                        revised_all = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
-                    except Exception as pdf_fallback_err:
-                        last_err = pdf_fallback_err
+            # Kontext ist optional, nicht mehr Pflicht
+            if page_lines is None or len(page_lines) != len(self.recs):
+                page_lines = [rv.text for rv in self.recs]
 
-                if revised_all is None:
-                    raise RuntimeError(f"Bild konnte vom Vision-Modell nicht verarbeitet werden: {last_err}")
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError("Überarbeitung abgebrochen.")
 
-            if len(revised_all) != len(original_lines):
-                raise ValueError(
-                    f"Seiten-OCR gab {len(revised_all)} statt {len(original_lines)} Zeilen zurück."
+            # -------------------------------------------------
+            # 3/3 Merge: BOX klar bevorzugen
+            # -------------------------------------------------
+            self.status_changed.emit(f"3/3 Merge mit Box-Priorität: {os.path.basename(self.path)}")
+
+            final_lines: List[str] = []
+
+            for i, rv in enumerate(self.recs):
+                if self._cancelled or self.isInterruptionRequested():
+                    raise RuntimeError("Überarbeitung abgebrochen.")
+
+                kraken_text = str(rv.text or "").strip()
+                page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
+                box_text = str(box_lines[i] if i < len(box_lines) else "").strip()
+
+                self.status_changed.emit(
+                    f"3/3 Merge Zeile {i + 1}/{total}: {os.path.basename(self.path)}"
                 )
 
-            if len(revised_all) != len(self.recs):
+                try:
+                    best_text = self._request_line_decision(
+                        idx=rv.idx,
+                        kraken_text=kraken_text,
+                        page_text=page_text,
+                        box_text=box_text,
+                    )
+                except Exception as e:
+                    print(f"LINE DECISION ERROR idx={rv.idx}: {e}")
+                    best_text = box_text or kraken_text or page_text
+
+                best_text = str(best_text).strip()
+                if not best_text:
+                    best_text = box_text or kraken_text or page_text
+
+                final_lines.append(best_text)
+
+                self.progress_changed.emit(55 + int(((i + 1) / total) * 45))
+
+            if len(final_lines) != len(self.recs):
                 raise ValueError(
-                    f"LLM gab {len(revised_all)} Zeilen zurück, erwartet wurden {len(self.recs)}."
+                    f"Finale Merge-Ausgabe gab {len(final_lines)} statt {len(self.recs)} Zeilen zurück."
                 )
 
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError("Überarbeitung abgebrochen.")
 
-            self.status_changed.emit(f"Freie KI-OCR abgeschlossen: {os.path.basename(self.path)}")
+            self.status_changed.emit(f"KI-Überarbeitung abgeschlossen: {os.path.basename(self.path)}")
             self.progress_changed.emit(100)
-            self.finished_revision.emit(self.path, revised_all)
+            self.finished_revision.emit(self.path, final_lines)
 
         except urllib.error.HTTPError as e:
             try:
@@ -3872,6 +4325,246 @@ class AIRevisionWorker(QThread):
 
         except Exception as e:
             self.failed_revision.emit(self.path, str(e))
+
+class VoiceLineFillWorker(QThread):
+    progress_changed = Signal(int)
+    status_changed = Signal(str)
+    finished_line = Signal(str, int, str)   # path, line_index, text
+    failed_line = Signal(str, str)          # path, error
+
+    def __init__(
+            self,
+            path: str,
+            line_index: int,
+            model_dir: str,
+            device: str = "cpu",
+            compute_type: str = "int8",
+            language: str = "de",
+            input_device=None,
+            parent=None
+    ):
+        super().__init__(parent)
+        self.path = path
+        self.line_index = int(line_index)
+        self.model_dir = model_dir
+        self.device = device
+        self.compute_type = compute_type
+        self.language = language
+        self.input_device = input_device
+
+        self._stop_requested = False
+        self._audio_chunks = []
+        self._stream = None
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+        try:
+            if self._stream is not None:
+                self._stream.stop()
+                self._stream.close()
+        except Exception:
+            pass
+
+    def _audio_callback(self, indata, frames, time_info, status):
+        if self._stop_requested:
+            raise sd.CallbackStop()
+        self._audio_chunks.append(indata.copy())
+
+    def _record_until_stop(self):
+        self.status_changed.emit("Mikrofon aktiv. Bitte nur die aktuell ausgewählte Zeile diktieren.")
+        self.progress_changed.emit(5)
+
+        with sd.InputStream(
+                device=self.input_device,
+                samplerate=VOICE_SAMPLE_RATE,
+                channels=VOICE_CHANNELS,
+                dtype="float32",
+                blocksize=VOICE_BLOCKSIZE,
+                callback=self._audio_callback
+        ) as stream:
+            self._stream = stream
+            while not self._stop_requested and not self.isInterruptionRequested():
+                self.msleep(100)
+
+        self._stream = None
+
+    def _write_temp_wav(self) -> str:
+        if not self._audio_chunks:
+            raise RuntimeError("Keine Audiodaten aufgenommen.")
+
+        audio = np.concatenate(self._audio_chunks, axis=0).flatten()
+        audio = np.clip(audio, -1.0, 1.0)
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+        pcm16 = (audio * 32767.0).astype(np.int16)
+
+        with wave.open(tmp_path, "wb") as wf:
+            wf.setnchannels(VOICE_CHANNELS)
+            wf.setsampwidth(2)
+            wf.setframerate(VOICE_SAMPLE_RATE)
+            wf.writeframes(pcm16.tobytes())
+
+        return tmp_path
+
+    def _replace_spoken_punctuation_with_placeholders(self, text: str) -> str:
+        txt = (text or "").strip()
+
+        # wichtig: längere Begriffe zuerst
+        replacements = [
+            (r"\bschräg\s*strich\b[.,;:!?]?", " <<SLASH>> "),
+            (r"\bslash\b[.,;:!?]?", " <<SLASH>> "),
+
+            (r"\bdoppel\s*punkt\b[.,;:!?]?", " <<COLON>> "),
+            (r"\bsemi\s*kolon\b[.,;:!?]?", " <<SEMICOLON>> "),
+            (r"\bfrage\s*zeichen\b[.,;:!?]?", " <<QUESTION>> "),
+            (r"\bausrufe\s*zeichen\b[.,;:!?]?", " <<EXCLAMATION>> "),
+            (r"\banführungs\s*zeichen\b[.,;:!?]?", " <<QUOTE>> "),
+            (r"\bgänse\s*füßchen\b[.,;:!?]?", " <<QUOTE>> "),
+            (r"\bgleichheits\s*zeichen\b[.,;:!?]?", " <<EQUALS>> "),
+            (r"\bklammer\s+auf\b[.,;:!?]?", " <<LPAREN>> "),
+            (r"\bklammer\s+zu\b[.,;:!?]?", " <<RPAREN>> "),
+            (r"\bbinde\s*strich\b[.,;:!?]?", " <<HYPHEN>> "),
+            (r"\bunter\s*strich\b[.,;:!?]?", " <<UNDERSCORE>> "),
+
+            (r"\bkomma\b[.,;:!?]?", " <<COMMA>> "),
+            (r"\bpunkt\b[.,;:!?]?", " <<DOT>> "),
+            (r"\bminus\b[.,;:!?]?", " <<HYPHEN>> "),
+            (r"\bgleich\b[.,;:!?]?", " <<EQUALS>> "),
+            (r"\bprozent\b[.,;:!?]?", " <<PERCENT>> "),
+            (r"\beuro\b[.,;:!?]?", " <<EURO>> "),
+            (r"\braute\b[.,;:!?]?", " <<HASH>> "),
+            (r"\bhashtag\b[.,;:!?]?", " <<HASH>> "),
+            (r"\bplus\b[.,;:!?]?", " <<PLUS>> "),
+            (r"\bstern\b[.,;:!?]?", " <<ASTERISK>> "),
+            (r"\basterisk\b[.,;:!?]?", " <<ASTERISK>> "),
+            (r"\bunderscore\b[.,;:!?]?", " <<UNDERSCORE>> "),
+        ]
+
+        for pattern, repl in replacements:
+            txt = re.sub(pattern, repl, txt, flags=re.IGNORECASE)
+
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    def _restore_punctuation_placeholders(self, text: str) -> str:
+        txt = f" {(text or '').strip()} "
+
+        replacements = {
+            "<<SLASH>>": "/",
+            "<<DOT>>": ".",
+            "<<COLON>>": ":",
+            "<<HYPHEN>>": "-",
+            "<<COMMA>>": ",",
+            "<<SEMICOLON>>": ";",
+            "<<QUESTION>>": "?",
+            "<<EXCLAMATION>>": "!",
+            "<<QUOTE>>": "\"",
+            "<<EURO>>": "€",
+            "<<EQUALS>>": "=",
+            "<<PERCENT>>": "%",
+            "<<LPAREN>>": "(",
+            "<<RPAREN>>": ")",
+            "<<HASH>>": "#",
+            "<<PLUS>>": "+",
+            "<<ASTERISK>>": "*",
+            "<<UNDERSCORE>>": "_",
+        }
+
+        for placeholder, char in replacements.items():
+            txt = txt.replace(placeholder, char)
+
+        # Punkt vor Doppelpunkt automatisch entfernen:
+        # "Ort.:" / "Ort. :" / "Ort :" -> "Ort:"
+        txt = re.sub(r"\.\s*:", ":", txt)
+
+        # kein Leerzeichen vor klassischen Satzzeichen
+        txt = re.sub(r"\s+([.,:;?!%€)\]])", r"\1", txt)
+
+        # kein Leerzeichen nach öffnenden Klammern
+        txt = re.sub(r"([(\[\{])\s+", r"\1", txt)
+
+        # keine Leerzeichen um technische Zeichen
+        txt = re.sub(r"\s*([/\-=+*_#])\s*", r"\1", txt)
+
+        # Doppelte Spaces glätten
+        txt = re.sub(r"\s+", " ", txt).strip()
+
+        return txt
+
+    def _postprocess_transcript(self, text: str) -> str:
+        txt = (text or "").strip()
+
+        # gesprochene Satzzeichen zuerst in Platzhalter umwandeln
+        txt = self._replace_spoken_punctuation_with_placeholders(txt)
+
+        # automatische Satzendzeichen von Whisper nur entfernen,
+        # wenn sie NICHT aus einem Platzhalter entstanden sind
+        txt = re.sub(r"[.!?]+$", "", txt).strip()
+
+        # Platzhalter zurückwandeln
+        txt = self._restore_punctuation_placeholders(txt)
+
+        return re.sub(r"\s+", " ", txt).strip()
+
+    def run(self):
+        tmp_wav = None
+        try:
+            if not os.path.isdir(self.model_dir):
+                raise RuntimeError("Faster-Whisper-Modellordner wurde nicht gefunden.")
+
+            self.progress_changed.emit(0)
+            self._record_until_stop()
+
+            if self._stop_requested and not self._audio_chunks:
+                raise RuntimeError("Aufnahme abgebrochen.")
+
+            self.status_changed.emit("Audiodatei wird vorbereitet...")
+            self.progress_changed.emit(20)
+            tmp_wav = self._write_temp_wav()
+
+            self.status_changed.emit("Lade faster-whisper...")
+            self.progress_changed.emit(35)
+
+            from faster_whisper import WhisperModel
+
+            model = WhisperModel(
+                self.model_dir,
+                device=self.device,
+                compute_type=self.compute_type
+            )
+
+            self.status_changed.emit("Transkribiere ausgewählte Zeile lokal...")
+            self.progress_changed.emit(60)
+
+            segments, info = model.transcribe(
+                tmp_wav,
+                language=self.language,
+                beam_size=5,
+                vad_filter=True,
+                condition_on_previous_text=False
+            )
+            segments = list(segments)
+
+            full_text = " ".join((seg.text or "").strip() for seg in segments).strip()
+            full_text = self._postprocess_transcript(full_text)
+
+            if not full_text:
+                raise RuntimeError("Es konnte kein verständlicher Text erkannt werden.")
+
+            self.progress_changed.emit(100)
+            self.finished_line.emit(self.path, self.line_index, full_text)
+
+        except Exception as e:
+            self.failed_line.emit(self.path, str(e))
+        finally:
+            if tmp_wav and os.path.exists(tmp_wav):
+                try:
+                    os.remove(tmp_wav)
+                except Exception:
+                    pass
 
 class ProgressStatusDialog(QDialog):
     cancel_requested = Signal()
@@ -3907,6 +4600,75 @@ class ProgressStatusDialog(QDialog):
     def set_progress(self, value: int):
         self.progress.setValue(max(0, min(100, int(value))))
 
+class VoiceRecordDialog(QDialog):
+    start_requested = Signal(object)   # device_index oder None
+    stop_requested = Signal()
+    cancel_requested = Signal()
+
+    def __init__(self, tr, devices: List[dict], parent=None):
+        super().__init__(parent)
+        self._tr = tr
+        self._devices = devices or []
+
+        self.setWindowTitle("Audioaufnahme")
+        self.setModal(True)
+
+        lay = QVBoxLayout(self)
+
+        self.lbl_info = QLabel("Audioaufnahmegerät auswählen:")
+        lay.addWidget(self.lbl_info)
+
+        self.cmb_devices = QComboBox()
+        lay.addWidget(self.cmb_devices)
+
+        for dev in self._devices:
+            self.cmb_devices.addItem(dev["label"], dev["index"])
+
+        btn_row = QHBoxLayout()
+
+        self.btn_start = QPushButton("Audioaufnahme starten")
+        self.btn_stop = QPushButton("Audioaufnahme beenden")
+        self.btn_cancel = QPushButton("Abbrechen")
+
+        self.btn_stop.setEnabled(False)
+
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_stop)
+        btn_row.addWidget(self.btn_cancel)
+
+        lay.addLayout(btn_row)
+
+        self.btn_start.clicked.connect(self._on_start)
+        self.btn_stop.clicked.connect(self._on_stop)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+
+    def selected_device(self):
+        if self.cmb_devices.count() <= 0:
+            return None
+        return self.cmb_devices.currentData()
+
+    def _on_start(self):
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.cmb_devices.setEnabled(False)
+        self.start_requested.emit(self.selected_device())
+
+    def _on_stop(self):
+        self.btn_stop.setEnabled(False)
+        self.stop_requested.emit()
+
+    def _on_cancel(self):
+        self.cancel_requested.emit()
+        self.reject()
+
+    def set_recording_state(self, recording: bool):
+        self.btn_start.setEnabled(not recording)
+        self.btn_stop.setEnabled(recording)
+        self.cmb_devices.setEnabled(not recording)
+
+    def closeEvent(self, event):
+        self.cancel_requested.emit()
+        super().closeEvent(event)
 # -----------------------------
 # EXPORT-DIALOGE
 # -----------------------------
@@ -4017,13 +4779,23 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900)
         self.setAcceptDrops(True)
 
+        self.current_lang = "de"
+        self.log_lang = self._detect_system_lang()
+
         self.temp_dirs_created = set()
         QApplication.instance().installEventFilter(self)
 
         self.ai_worker: Optional[AIRevisionWorker] = None
+
+        # LM / localhost
         self.ai_model_id = ""
         self.ai_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
         self.ai_base_url = None
+        self.ai_manual_base_url = ""
+        self.ai_available_models: List[str] = []
+        self.ai_mode = ""
+
+        self._ai_single_line_context: Optional[dict] = None
 
         self.project_file_path = ""
 
@@ -4041,8 +4813,9 @@ class MainWindow(QMainWindow):
         self.ai_model_actions: Dict[str, QAction] = {}
         self.ai_model_group: Optional[QActionGroup] = None
 
-        self.current_lang = "de"
-        self.log_lang = self._detect_system_lang()
+        self.voice_worker: Optional[VoiceLineFillWorker] = None
+        self.voice_record_dialog: Optional[VoiceRecordDialog] = None
+
         self.reading_direction = READING_MODES["TB_LR"]
         self.device_str = "cpu"
         self.show_overlay = True
@@ -4086,6 +4859,7 @@ class MainWindow(QMainWindow):
         self.canvas.overlay_edit_requested.connect(self.on_canvas_edit_box)
         self.canvas.overlay_delete_requested.connect(self.on_canvas_delete_box)
         self.canvas.overlay_select_requested.connect(self.on_canvas_select_line)
+        self.canvas.overlay_multi_selected.connect(self.on_canvas_multi_selected)
 
         # Wartebereich-Tabelle
         self.queue_table = DropQueueTable()
@@ -4120,9 +4894,10 @@ class MainWindow(QMainWindow):
 
         # Zeilenliste
         self.list_lines = LinesListWidget()
-        self.list_lines.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list_lines.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_lines.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.list_lines.currentRowChanged.connect(self.on_line_selected)
+        self.list_lines.itemSelectionChanged.connect(self.on_lines_selection_changed)
         self.list_lines.itemChanged.connect(self.on_line_item_edited)
         self.list_lines.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_lines.customContextMenuRequested.connect(self.lines_context_menu)
@@ -4173,6 +4948,8 @@ class MainWindow(QMainWindow):
         self.act_ai_revise = QAction(self._tr("act_ai_revise"), self)
         self.act_ai_revise.setToolTip(self._tr("act_ai_revise_tip"))
         self.act_ai_revise.triggered.connect(self.run_ai_revision)
+
+        self._ai_multi_line_context: Optional[dict] = None
 
         self._ai_server_cache = {
             "ts": 0.0,
@@ -4225,6 +5002,260 @@ class MainWindow(QMainWindow):
 
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
+
+    def _start_voice_line_fill_with_device(self, input_device):
+        task = self._current_task()
+        if not task or task.status != STATUS_DONE or not task.results:
+            return
+
+        current_row = self.list_lines.currentRow()
+        if current_row < 0:
+            return
+
+        _, _, _, recs = task.results
+        if not (0 <= current_row < len(recs)):
+            return
+
+        if self.voice_worker and self.voice_worker.isRunning():
+            return
+
+        fw_device, fw_compute = self._resolve_faster_whisper_device()
+
+        self.voice_worker = VoiceLineFillWorker(
+            path=task.path,
+            line_index=current_row,
+            model_dir=FASTER_WHISPER_MODEL_DIR,
+            device=fw_device,
+            compute_type=fw_compute,
+            language="de",
+            input_device=input_device,
+            parent=self
+        )
+        self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
+        self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
+
+        task.status = STATUS_VOICE_RECORDING
+        self._update_queue_row(task.path)
+        self.status_bar.showMessage(self._tr("msg_voice_started"))
+        self._log(f"Sprachimport gestartet: {os.path.basename(task.path)} | Zeile {current_row + 1}")
+
+        if self.voice_record_dialog:
+            self.voice_record_dialog.set_recording_state(True)
+
+        self.voice_worker.start()
+
+    def _cancel_voice_record_dialog(self):
+        if self.voice_worker and self.voice_worker.isRunning():
+            self.voice_worker.stop()
+
+    def _get_input_audio_devices(self) -> List[dict]:
+        out = []
+        try:
+            devices = sd.query_devices()
+            for i, dev in enumerate(devices):
+                try:
+                    max_in = int(dev.get("max_input_channels", 0))
+                except Exception:
+                    max_in = 0
+
+                if max_in > 0:
+                    name = str(dev.get("name", f"Gerät {i}")).strip()
+                    hostapi_idx = dev.get("hostapi", None)
+
+                    hostapi_name = ""
+                    try:
+                        if hostapi_idx is not None:
+                            hostapi_name = sd.query_hostapis(hostapi_idx).get("name", "")
+                    except Exception:
+                        hostapi_name = ""
+
+                    label = name
+                    if hostapi_name:
+                        label = f"{name} ({hostapi_name})"
+
+                    out.append({
+                        "index": i,
+                        "label": label,
+                    })
+        except Exception:
+            pass
+
+        return out
+
+    def _selected_line_rows(self) -> List[int]:
+        rows = sorted(set(idx.row() for idx in self.list_lines.selectedIndexes()))
+        return [r for r in rows if r >= 0]
+
+    def run_ai_revision_for_selected_lines(self):
+        task = self._current_task()
+        if not task or task.status != STATUS_DONE or not task.results:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+
+        text, kr_records, im, recs = task.results
+        rows = self._selected_line_rows()
+
+        if not rows:
+            QMessageBox.warning(self, self._tr("warn_title"), "Bitte zuerst mehrere Zeilen auswählen.")
+            return
+
+        if len(rows) == 1:
+            self.run_ai_revision_for_single_line(rows[0])
+            return
+
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if self.ai_worker and self.ai_worker.isRunning():
+            return
+
+        selected_recs = [
+            RecordView(
+                idx=i,
+                text=recs[row].text,
+                bbox=recs[row].bbox
+            )
+            for i, row in enumerate(rows)
+        ]
+
+        self._ai_single_line_context = None
+        self._ai_multi_line_context = {
+            "path": task.path,
+            "rows": rows,
+        }
+
+        self.act_ai_revise.setEnabled(False)
+        self.status_bar.showMessage(f"LM-Überarbeitung für {len(rows)} ausgewählte Zeilen gestartet...")
+        self._log(
+            f"LM-Mehrfachzeilenüberarbeitung gestartet: {os.path.basename(task.path)} | "
+            f"Zeilen {', '.join(str(r + 1) for r in rows)}"
+        )
+
+        self.ai_progress_dialog = ProgressStatusDialog("KI-Mehrfachzeilenüberarbeitung", self)
+        self.ai_progress_dialog.set_status(
+            f"Überarbeite {len(rows)} ausgewählte Zeilen …"
+        )
+        self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
+        self.ai_progress_dialog.show()
+
+        self.ai_worker = AIRevisionWorker(
+            path=task.path,
+            recs=selected_recs,
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            source_kind=task.source_kind,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_worker.progress_changed.connect(self.ai_progress_dialog.set_progress)
+        self.ai_worker.status_changed.connect(self.ai_progress_dialog.set_status)
+        self.ai_worker.status_changed.connect(self._log)
+        self.ai_worker.finished_revision.connect(self.on_ai_selected_lines_revision_done)
+        self.ai_worker.failed_revision.connect(self.on_ai_selected_lines_revision_failed)
+        self.ai_worker.start()
+
+    def on_ai_selected_lines_revision_done(self, path: str, revised_lines: list):
+        ctx = getattr(self, "_ai_multi_line_context", None) or {}
+        self._ai_multi_line_context = None
+
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if not task or not task.results:
+            self.act_ai_revise.setEnabled(True)
+            if self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+            return
+
+        rows = list(ctx.get("rows", []))
+        text, kr_records, im, recs = task.results
+
+        if not rows:
+            self.act_ai_revise.setEnabled(True)
+            if self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+            return
+
+        revised_lines = [str(x).strip() for x in revised_lines]
+
+        if len(revised_lines) < len(rows):
+            for i in range(len(revised_lines), len(rows)):
+                revised_lines.append(recs[rows[i]].text)
+        elif len(revised_lines) > len(rows):
+            revised_lines = revised_lines[:len(rows)]
+
+        self._push_undo(task)
+
+        new_recs = [
+            RecordView(i, recs[i].text, recs[i].bbox)
+            for i in range(len(recs))
+        ]
+
+        for local_idx, row in enumerate(rows):
+            if 0 <= row < len(new_recs):
+                new_text = revised_lines[local_idx].strip()
+                if new_text:
+                    new_recs[row].text = new_text
+
+        task.results = (
+            "\n".join(rv.text for rv in new_recs).strip(),
+            kr_records,
+            im,
+            new_recs
+        )
+        task.edited = True
+
+        cur = self._current_task()
+        if cur and cur.path == path:
+            self._sync_ui_after_recs_change(task, keep_row=rows[0] if rows else 0)
+
+            self.list_lines.blockSignals(True)
+            self.list_lines.clearSelection()
+            for row in rows:
+                if 0 <= row < self.list_lines.count():
+                    self.list_lines.item(row).setSelected(True)
+            if rows:
+                self.list_lines.setCurrentRow(rows[0])
+            self.list_lines.blockSignals(False)
+        else:
+            self._update_queue_row(path)
+
+        self.act_ai_revise.setEnabled(True)
+        self.status_bar.showMessage(f"LM-Überarbeitung für {len(rows)} ausgewählte Zeilen abgeschlossen.")
+        self._log(
+            f"LM-Mehrfachzeilenüberarbeitung abgeschlossen: {os.path.basename(path)} | "
+            f"Zeilen {', '.join(str(r + 1) for r in rows)}"
+        )
+
+        if self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
+
+    def on_ai_selected_lines_revision_failed(self, path: str, msg: str):
+        self._ai_multi_line_context = None
+        self.act_ai_revise.setEnabled(True)
+
+        if "abgebrochen" in str(msg).lower():
+            self.status_bar.showMessage("Mehrfachzeilenüberarbeitung abgebrochen.")
+            self._log(f"LM-Mehrfachzeilenüberarbeitung abgebrochen: {os.path.basename(path)}")
+        else:
+            self.status_bar.showMessage("Mehrfachzeilenüberarbeitung fehlgeschlagen.")
+            self._log(f"LM-Mehrfachzeilenüberarbeitung Fehler: {os.path.basename(path)} -> {msg}")
+            QMessageBox.warning(self, self._tr("warn_title"), msg)
+
+        if self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
 
     def _cleanup_temp_dirs(self):
         for d in list(self.temp_dirs_created):
@@ -4299,18 +5330,12 @@ class MainWindow(QMainWindow):
         self._sync_ui_after_recs_change(task, keep_row=keep_row)
 
     def _get_active_ai_model_display(self) -> str:
-        explicit = (self.ai_model_id or "").strip()
-        if explicit:
-            return explicit
-
-        models = self._fetch_loaded_llm_models()
-        if models:
-            return f"AUTO → {models[0]}"
-
-        return "AUTO → -"
+        return (self.ai_model_id or "").strip() or "-"
 
     def _update_ai_model_ui(self):
         display = self._get_active_ai_model_display()
+        mode_label = self._current_ai_mode_label()
+        base_url = self.ai_base_url or "-"
 
         if hasattr(self, "btn_ai_model"):
             self.btn_ai_model.setText(f"KI: {display}")
@@ -4318,90 +5343,232 @@ class MainWindow(QMainWindow):
         if hasattr(self, "act_llm_status"):
             self.act_llm_status.setText(f"LLM: {display}")
 
+        if hasattr(self, "act_lm_status"):
+            self.act_lm_status.setText(f"Status: {display}")
+
+        if hasattr(self, "act_lm_mode"):
+            self.act_lm_mode.setText(f"Modus: {mode_label}")
+
+        if hasattr(self, "act_lm_base_url"):
+            self.act_lm_base_url.setText(f"Server: {base_url}")
+
     def _process_ui(self):
         QCoreApplication.processEvents()
 
-    def _fetch_loaded_llm_models(self) -> List[str]:
-        base_url, _ = self._detect_local_openai_server()
+    def _fetch_loaded_llm_models(self, force: bool = False) -> List[str]:
+        if self.ai_mode == "manual" and self.ai_manual_base_url:
+            base_url = self._normalize_ai_base_url(self.ai_manual_base_url)
+            self.ai_base_url = base_url
+            self.ai_endpoint = base_url + "/chat/completions"
+        else:
+            base_url, _ = self._detect_local_openai_server(force=force)
+            self.ai_mode = "auto"
+            if base_url:
+                self.ai_base_url = base_url
+                self.ai_endpoint = base_url + "/chat/completions"
+            else:
+                self.ai_base_url = None
+
         if not base_url:
+            self.ai_available_models = []
             return []
 
-        url = base_url + "/models"
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"Authorization": "Bearer local"},
-                method="GET"
-            )
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-                data = json.loads(raw)
+        models, _ = self._fetch_models_from_base_url(base_url, timeout=0.6)
+        self.ai_available_models = models
+        return models
 
-            models_data = data.get("data", [])
-            out = []
-            if isinstance(models_data, list):
-                for m in models_data:
-                    if not isinstance(m, dict):
-                        continue
-                    mid = str(m.get("id", "")).strip()
-                    if mid:
-                        out.append(mid)
+    def _normalize_ai_base_url(self, raw: str) -> str:
+        url = (raw or "").strip()
+        if not url:
+            return ""
 
-            # doppelte raus, Reihenfolge behalten
-            seen = set()
-            uniq = []
-            for mid in out:
-                if mid not in seen:
-                    seen.add(mid)
-                    uniq.append(mid)
-            return uniq
+        url = url.rstrip("/")
 
-        except Exception:
-            return []
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "http://" + url
 
-    def _set_ai_model_from_menu(self, model_id: str):
-        self.ai_model_id = (model_id or "").strip()
+        if url.endswith("/v1/chat/completions"):
+            url = url[:-20]
+        elif url.endswith("/v1/models"):
+            url = url[:-10]
+        elif url.endswith("/chat/completions"):
+            url = url[:-17]
+
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+
+        return url
+
+    def set_manual_ai_base_url_dialog(self):
+        text, ok = QInputDialog.getText(
+            self,
+            "Localhost-Pfad",
+            "OpenAI-kompatible Base-URL eingeben:\n\nBeispiele:\nhttp://127.0.0.1:1234/v1\nhttp://localhost:8000/v1",
+            text=self.ai_manual_base_url or ""
+        )
+        if not ok:
+            return
+
+        normalized = self._normalize_ai_base_url(text)
+        if not normalized:
+            return
+
+        self.ai_manual_base_url = normalized
+        self.ai_mode = "manual"
+        self.ai_base_url = normalized
+        self.ai_endpoint = normalized + "/chat/completions"
+
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+
+        models, detected_model_id = self._fetch_models_from_base_url(self.ai_base_url, timeout=0.6)
+        self.ai_available_models = models
+
+        if models:
+            self.ai_model_id = detected_model_id if detected_model_id in models else models[0]
+            self.status_bar.showMessage(f"LM gefunden: {self.ai_model_id}")
+        else:
+            self.ai_model_id = ""
+            self.status_bar.showMessage("Kein Modell unter dem eingetragenen Localhost-Pfad gefunden.")
+
+        self._rebuild_ai_model_submenu()
+        self.refresh_models_menu_status()
+
+    def _fetch_server_active_model_id(self, base_url: str, timeout: float = 0.6) -> str:
+        _, active = self._fetch_models_from_base_url(base_url, timeout=timeout)
+        return active
+
+    def clear_manual_ai_base_url(self):
+        self.ai_manual_base_url = ""
+        self.ai_mode = "auto"
+        self.ai_base_url = None
+        self.ai_available_models = []
+        self.ai_model_id = ""
+        self.refresh_models_menu_status()
+
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+
+        self._rebuild_ai_model_submenu()
         self._update_ai_model_ui()
+        self.refresh_models_menu_status()
+
+    def scan_ai_models_now(self):
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+
+        models = []
+        detected_model_id = ""
+
+        if self.ai_manual_base_url:
+            self.ai_mode = "manual"
+            self.ai_base_url = self._normalize_ai_base_url(self.ai_manual_base_url)
+            self.ai_endpoint = self.ai_base_url + "/chat/completions"
+            models, detected_model_id = self._fetch_models_from_base_url(self.ai_base_url, timeout=0.6)
+        else:
+            self.ai_mode = "auto"
+            base_url, detected_model_id = self._detect_local_openai_server(force=True)
+            self.ai_base_url = base_url
+            if base_url:
+                self.ai_endpoint = base_url + "/chat/completions"
+                models, active = self._fetch_models_from_base_url(base_url, timeout=0.35)
+                if active:
+                    detected_model_id = active
+
+        self.ai_available_models = models
+
+        if models:
+            if detected_model_id and detected_model_id in models:
+                self.ai_model_id = detected_model_id
+            else:
+                self.ai_model_id = models[0]
+            self.status_bar.showMessage(f"LM gefunden: {self.ai_model_id}")
+        else:
+            self.ai_model_id = ""
+            if self.ai_mode == "auto":
+                self.ai_base_url = None
+            self.status_bar.showMessage("Kein localhost-LM gefunden.")
+
+        self._rebuild_ai_model_submenu()
+        self.refresh_models_menu_status()
+
+    def _rebuild_ai_model_submenu(self):
+        if not hasattr(self, "ai_models_submenu"):
+            return
+
+        self.ai_models_submenu.clear()
+        self.ai_model_actions = {}
+
+        if self.ai_model_group is None:
+            self.ai_model_group = QActionGroup(self)
+            self.ai_model_group.setExclusive(True)
+
+        for act in list(self.ai_model_group.actions()):
+            self.ai_model_group.removeAction(act)
+
+        if not self.ai_available_models:
+            empty_act = QAction("(keine Modelle – bitte Scannen)", self)
+            empty_act.setEnabled(False)
+            self.ai_models_submenu.addAction(empty_act)
+            return
+
+        for model_id in self.ai_available_models:
+            act = QAction(model_id, self)
+            act.setCheckable(True)
+            act.setChecked(model_id == self.ai_model_id)
+            act.triggered.connect(lambda checked, mid=model_id: self._set_ai_model(mid))
+            self.ai_model_group.addAction(act)
+            self.ai_models_submenu.addAction(act)
+            self.ai_model_actions[model_id] = act
+
+    def choose_ai_model_dialog(self):
+        models = self._fetch_loaded_llm_models(force=True)
+        if not models:
+            QMessageBox.warning(self, self._tr("warn_title"), "Es wurden keine geladenen LM-Modelle gefunden.")
+            return
+
+        current = self.ai_model_id if self.ai_model_id in models else models[0]
+
+        selected, ok = QInputDialog.getItem(
+            self,
+            "LM-Modell ändern",
+            "Zu nutzendes LM-Modell auswählen:",
+            models,
+            max(0, models.index(current)),
+            False
+        )
+        if not ok or not selected:
+            return
+
+        self._set_ai_model(selected)
+        self.refresh_models_menu_status()
+
+    def _current_ai_mode_label(self) -> str:
+        return "Manuell" if self.ai_mode == "manual" else "Auto"
+
+    def _set_ai_model(self, model_id: str):
+        self.ai_model_id = (model_id or "").strip()
+
+        for mid, act in self.ai_model_actions.items():
+            act.setChecked(mid == self.ai_model_id)
+
+        self._rebuild_ai_model_submenu()
+        self._update_ai_model_ui()
+        self.refresh_models_menu_status()
 
         if self.ai_model_id:
             self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
         else:
-            self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
-
-    def _refresh_ai_models_menu(self):
-        if not hasattr(self, "ai_models_menu"):
-            return
-
-        self.ai_models_menu.clear()
-        self.ai_available_models = self._fetch_loaded_llm_models()
-
-        self.ai_model_group = QActionGroup(self)
-        self.ai_model_group.setExclusive(True)
-        self.ai_model_actions = {}
-
-        if not self.ai_available_models:
-            act = QAction("Keine localhost-Modelle gefunden", self)
-            act.setEnabled(False)
-            self.ai_models_menu.addAction(act)
-            return
-
-        for mid in self.ai_available_models:
-            act = QAction(mid, self)
-            act.setCheckable(True)
-            act.setChecked(mid == self.ai_model_id)
-            act.triggered.connect(lambda checked, m=mid: self._set_ai_model_from_menu(m))
-            self.ai_model_group.addAction(act)
-            self.ai_models_menu.addAction(act)
-            self.ai_model_actions[mid] = act
-
-        self.ai_models_menu.addSeparator()
-
-        act_auto = QAction("AUTO (erstes verfügbares Modell)", self)
-        act_auto.setCheckable(True)
-        act_auto.setChecked(not bool(self.ai_model_id))
-        act_auto.triggered.connect(lambda checked: self._set_ai_model_from_menu(""))
-        self.ai_model_group.addAction(act_auto)
-        self.ai_models_menu.addAction(act_auto)
+            self.status_bar.showMessage("LM-Modellwahl gelöscht.")
 
     def _swap_lines(self, task: TaskItem, row_a: int, row_b: int):
         if not task or not task.results:
@@ -4854,14 +6021,6 @@ class MainWindow(QMainWindow):
                 btn.setMinimumWidth(0)
                 btn.setMaximumWidth(16777215)
 
-        # kleine X-Buttons
-        for btn_name in ("btn_rec_clear", "btn_seg_clear"):
-            btn = getattr(self, btn_name, None)
-            if btn is not None:
-                btn.setMinimumHeight(target_height)
-                btn.setMaximumHeight(target_height)
-                btn.setFixedWidth(clear_width)
-
     def _scan_kraken_models(self):
         self.rec_model_candidates = []
         self.default_seg_model = ""
@@ -4931,58 +6090,20 @@ class MainWindow(QMainWindow):
                 return self._ai_server_cache.get("base_url"), self._ai_server_cache.get("model_id")
 
         candidates = [
-            ("127.0.0.1", 1234),  # LM Studio
-            ("localhost", 1234),
-            ("127.0.0.1", 8000),  # vLLM
-            ("localhost", 8000),
-            ("127.0.0.1", 8080),
-            ("localhost", 8080),
-            ("127.0.0.1", 3000),
-            ("localhost", 3000),
+            "http://127.0.0.1:1234/v1",  # LM Studio
+            "http://127.0.0.1:8000/v1",  # vLLM
+            "http://127.0.0.1:8080/v1",
         ]
 
-        # 1) Erst ultraschnell prüfen, ob überhaupt ein Port offen ist
-        open_candidates = []
-        for host, port in candidates:
-            if self._is_local_port_open(host, port, timeout=0.12):
-                open_candidates.append((host, port))
-
-        if not open_candidates:
-            self._ai_server_cache = {
-                "ts": now,
-                "base_url": None,
-                "model_id": None,
-            }
-            return None, None
-
-        # 2) Nur für offene Ports /v1/models abfragen
-        for host, port in open_candidates:
-            url = f"http://{host}:{port}/v1/models"
-            try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"Authorization": "Bearer local"},
-                    method="GET"
-                )
-                with urllib.request.urlopen(req, timeout=0.35) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
-                    data = json.loads(raw)
-
-                models_data = data.get("data", [])
-                if isinstance(models_data, list) and models_data:
-                    first = models_data[0]
-                    model_id = str(first.get("id", "")).strip() or "-"
-                    base_url = url.rsplit("/models", 1)[0]
-
-                    self._ai_server_cache = {
-                        "ts": now,
-                        "base_url": base_url,
-                        "model_id": model_id,
-                    }
-                    return base_url, model_id
-
-            except Exception:
-                continue
+        for base_url in candidates:
+            models, active = self._fetch_models_from_base_url(base_url, timeout=0.35)
+            if models:
+                self._ai_server_cache = {
+                    "ts": now,
+                    "base_url": base_url,
+                    "model_id": active or models[0],
+                }
+                return base_url, (active or models[0])
 
         self._ai_server_cache = {
             "ts": now,
@@ -4999,48 +6120,99 @@ class MainWindow(QMainWindow):
         base_url, model_id = self._detect_local_openai_server()
         return model_id or "-"
 
-    def _refresh_ai_endpoint_from_localhost(self):
-        base_url, _ = self._detect_local_openai_server()
+    def _refresh_ai_endpoint_from_localhost(self, force: bool = False):
+        if self.ai_manual_base_url:
+            base_url = self._normalize_ai_base_url(self.ai_manual_base_url)
+            self.ai_base_url = base_url
+            self.ai_endpoint = base_url + "/chat/completions"
+            self.ai_mode = "manual"
+            self._update_ai_model_ui()
+            return
+
+        base_url, _ = self._detect_local_openai_server(force=force)
         if base_url:
             self.ai_base_url = base_url
             self.ai_endpoint = base_url + "/chat/completions"
+        else:
+            self.ai_base_url = None
+
+        self.ai_mode = "auto"
         self._update_ai_model_ui()
 
     def _resolve_ai_model_id(self) -> str:
         self._refresh_ai_endpoint_from_localhost()
 
-        # 1) explizit ausgewähltes Modell hat Vorrang
         model_id = (self.ai_model_id or "").strip()
         if model_id:
             return model_id
 
-        # 2) sonst erstes geladenes localhost-Modell
-        models = self._fetch_loaded_llm_models()
-        if models:
-            return models[0]
-
         return ""
 
     def refresh_models_menu_status(self):
-        base_url, _ = self._detect_local_openai_server()
-        server_on = bool(base_url)
+        model_name = self._get_active_ai_model_display()
+        mode_label = self._current_ai_mode_label()
+        base_url = self.ai_base_url or "-"
 
-        if server_on:
-            self.ai_base_url = base_url
-            self.ai_endpoint = base_url + "/chat/completions"
+        if hasattr(self, "act_lm_status"):
+            self.act_lm_status.setText(f"Status: {model_name}")
+
+        if hasattr(self, "act_lm_mode"):
+            self.act_lm_mode.setText(f"Modus: {mode_label}")
+
+        if hasattr(self, "act_lm_base_url"):
+            self.act_lm_base_url.setText(f"Server: {base_url}")
+
+        if hasattr(self, "act_clear_manual_lm_url"):
+            self.act_clear_manual_lm_url.setEnabled(self.ai_mode == "manual" and bool(self.ai_manual_base_url))
 
         self._update_ai_model_ui()
 
-        self.act_server_status.setText(
-            f"Localhost-Server: {'ON' if server_on else 'OFF'}"
-            + (f" ({base_url})" if server_on else "")
-        )
+    def _fetch_models_from_base_url(self, base_url: str, timeout: float = 0.6) -> Tuple[List[str], str]:
+        if not base_url:
+            return [], ""
+
+        try:
+            req = urllib.request.Request(
+                base_url.rstrip("/") + "/models",
+                headers={"Authorization": "Bearer local"},
+                method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                data = json.loads(raw)
+
+            models_data = data.get("data", [])
+            if not isinstance(models_data, list):
+                return [], ""
+
+            out = []
+            for m in models_data:
+                if not isinstance(m, dict):
+                    continue
+                mid = str(m.get("id", "")).strip()
+                if mid:
+                    out.append(mid)
+
+            # Reihenfolge erhalten, Duplikate entfernen
+            seen = set()
+            uniq = []
+            for mid in out:
+                if mid not in seen:
+                    seen.add(mid)
+                    uniq.append(mid)
+
+            active = uniq[0] if uniq else ""
+            return uniq, active
+
+        except Exception:
+            return [], ""
 
     # -----------------------------
     # Übersetzung
     # -----------------------------
     def _tr(self, key: str, *args):
-        txt = TRANSLATIONS.get(self.current_lang, TRANSLATIONS["de"]).get(key, key)
+        lang = getattr(self, "current_lang", "de")
+        txt = TRANSLATIONS.get(lang, TRANSLATIONS["de"]).get(key, key)
         if args:
             return txt.format(*args)
         return txt
@@ -5086,8 +6258,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
             return
 
-        self.act_ai_revise.setEnabled(False)
-        self.act_ai_revise_all.setEnabled(False)
+        self.act_ai_revise.setEnabled(True)
 
         self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
         self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
@@ -5132,8 +6303,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
             return
 
-        self.act_ai_revise.setEnabled(False)
-        self.act_ai_revise_all.setEnabled(False)
+        self.act_ai_revise.setEnabled(True)
 
         self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
         self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
@@ -5264,6 +6434,150 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
 
+    def _resolve_faster_whisper_device(self) -> Tuple[str, str]:
+        caps = self._gpu_capabilities()
+
+        # gleiche Priorität wie OCR:
+        # CUDA > ROCm > MPS > CPU
+        preferred_order = ["cuda", "rocm", "mps", "cpu"]
+
+        chosen = "cpu"
+        for dev in preferred_order:
+            ok, _ = caps.get(dev, (False, ""))
+            if ok:
+                chosen = dev
+                break
+
+        # Wenn in der GUI explizit ein verfügbares Gerät gewählt wurde,
+        # dann dieses bevorzugen
+        user_ok, _ = caps.get(self.device_str, (False, ""))
+        if user_ok:
+            chosen = self.device_str
+
+        # faster-whisper / ctranslate2 Mapping
+        if chosen == "cuda":
+            return "cuda", "float16"
+
+        # stabile Fallbacks
+        if chosen == "rocm":
+            return "cpu", "int8"
+
+        if chosen == "mps":
+            return "cpu", "int8"
+
+        return "cpu", "int8"
+
+    def run_voice_line_fill(self):
+        task = self._current_task()
+        if not task or task.status != STATUS_DONE or not task.results:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_voice_need_done"))
+            return
+
+        if not os.path.isdir(FASTER_WHISPER_MODEL_DIR):
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_voice_model_missing"))
+            return
+
+        current_row = self.list_lines.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, self._tr("warn_title"), "Bitte zuerst eine Zeile auswählen.")
+            return
+
+        _, _, _, recs = task.results
+        if not (0 <= current_row < len(recs)):
+            QMessageBox.warning(self, self._tr("warn_title"), "Die ausgewählte Zeile ist ungültig.")
+            return
+
+        if self.voice_worker and self.voice_worker.isRunning():
+            return
+
+        devices = self._get_input_audio_devices()
+        if not devices:
+            QMessageBox.warning(self, self._tr("warn_title"), "Es wurden keine Audioaufnahmegeräte gefunden.")
+            return
+
+        if self.voice_record_dialog is not None:
+            try:
+                self.voice_record_dialog.close()
+            except Exception:
+                pass
+            self.voice_record_dialog = None
+
+        self.voice_record_dialog = VoiceRecordDialog(self._tr, devices, self)
+        self.voice_record_dialog.start_requested.connect(self._start_voice_line_fill_with_device)
+        self.voice_record_dialog.stop_requested.connect(self.stop_voice_line_fill)
+        self.voice_record_dialog.cancel_requested.connect(self._cancel_voice_record_dialog)
+        self.voice_record_dialog.show()
+
+    def stop_voice_line_fill(self):
+        if self.voice_worker and self.voice_worker.isRunning():
+            self.status_bar.showMessage(self._tr("msg_voice_stopped"))
+            self._log("Sprachaufnahme wird gestoppt...")
+            self.voice_worker.stop()
+
+    def on_voice_line_fill_done(self, path: str, line_index: int, new_text: str):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        self.voice_worker = None
+
+        if not task or not task.results:
+            if self.voice_record_dialog:
+                self.voice_record_dialog.close()
+                self.voice_record_dialog = None
+            return
+
+        text, kr_records, im, recs = task.results
+
+        if not (0 <= line_index < len(recs)):
+            if self.voice_record_dialog:
+                self.voice_record_dialog.close()
+                self.voice_record_dialog = None
+            return
+
+        self._push_undo(task)
+
+        new_recs = [
+            RecordView(i, recs[i].text, recs[i].bbox)
+            for i in range(len(recs))
+        ]
+        new_recs[line_index].text = str(new_text).strip()
+
+        task.results = (
+            "\n".join(rv.text for rv in new_recs).strip(),
+            kr_records,
+            im,
+            new_recs
+        )
+        task.edited = True
+        task.status = STATUS_DONE
+
+        self._sync_ui_after_recs_change(task, keep_row=line_index)
+        self._update_queue_row(path)
+
+        if self.voice_record_dialog:
+            self.voice_record_dialog.close()
+            self.voice_record_dialog = None
+
+        self.status_bar.showMessage(self._tr("msg_voice_done"))
+        self._log(
+            f"Sprachimport abgeschlossen: {os.path.basename(path)} | "
+            f"Zeile {line_index + 1} -> {new_text}"
+        )
+
+    def on_voice_line_fill_failed(self, path: str, msg: str):
+        task = next((i for i in self.queue_items if i.path == path), None)
+        self.voice_worker = None
+
+        if task:
+            task.status = STATUS_DONE if task.results else STATUS_ERROR
+            self._update_queue_row(path)
+
+        if self.voice_record_dialog:
+            self.voice_record_dialog.close()
+            self.voice_record_dialog = None
+
+        self.status_bar.showMessage(self._tr("msg_voice_cancelled"))
+        self._log(f"Sprachimport Fehler: {os.path.basename(path)} -> {msg}")
+        QMessageBox.warning(self, self._tr("warn_title"), msg)
+
     def run_ai_revision(self):
         checked = self._checked_queue_tasks()
         selected = self._selected_queue_tasks()
@@ -5303,8 +6617,7 @@ class MainWindow(QMainWindow):
         if not recs:
             return
 
-        self.act_ai_revise.setEnabled(False)
-        self.act_ai_revise_all.setEnabled(False)
+        self.act_ai_revise.setEnabled(True)
         self.status_bar.showMessage(self._tr("msg_ai_started"))
         self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
 
@@ -5337,6 +6650,70 @@ class MainWindow(QMainWindow):
         self.ai_worker.failed_revision.connect(self.on_ai_revision_failed)
         self.ai_worker.start()
 
+    def run_ai_revision_for_single_line(self, row: int):
+        task = self._current_task()
+        if not task or task.status != STATUS_DONE or not task.results:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+
+        text, kr_records, im, recs = task.results
+
+        if not (0 <= row < len(recs)):
+            QMessageBox.warning(self, self._tr("warn_title"), "Ungültige Zeile.")
+            return
+
+        model_id = self._resolve_ai_model_id()
+        if not model_id:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
+            return
+
+        if self.ai_worker and self.ai_worker.isRunning():
+            return
+
+        single_rec = RecordView(
+            idx=0,
+            text=recs[row].text,
+            bbox=recs[row].bbox
+        )
+
+        self._ai_single_line_context = {
+            "path": task.path,
+            "row": row,
+        }
+
+        self.act_ai_revise.setEnabled(False)
+        self.status_bar.showMessage(f"LM-Überarbeitung für Zeile {row + 1} gestartet...")
+        self._log(f"LM-Zeilenüberarbeitung gestartet: {os.path.basename(task.path)} | Zeile {row + 1}")
+
+        self.ai_progress_dialog = ProgressStatusDialog("KI-Zeilenüberarbeitung", self)
+        self.ai_progress_dialog.set_status(f"Überarbeite nur Zeile {row + 1} …")
+        self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
+        self.ai_progress_dialog.show()
+
+        self.ai_worker = AIRevisionWorker(
+            path=task.path,
+            recs=[single_rec],
+            lm_model=model_id,
+            endpoint=self.ai_endpoint,
+            enable_thinking=self.ai_enable_thinking,
+            source_kind=task.source_kind,
+            temperature=self.ai_temperature,
+            top_p=self.ai_top_p,
+            top_k=self.ai_top_k,
+            presence_penalty=self.ai_presence_penalty,
+            repetition_penalty=self.ai_repetition_penalty,
+            min_p=self.ai_min_p,
+            max_tokens=self.ai_max_tokens,
+            parent=self
+        )
+
+        self.ai_worker.progress_changed.connect(self.ai_progress_dialog.set_progress)
+        self.ai_worker.status_changed.connect(self.ai_progress_dialog.set_status)
+        self.ai_worker.status_changed.connect(self._log)
+        self.ai_worker.finished_revision.connect(self.on_ai_single_line_revision_done)
+        self.ai_worker.failed_revision.connect(self.on_ai_single_line_revision_failed)
+        self.ai_worker.start()
+
     def _run_ai_revision_batch(self, items: List[TaskItem]):
         model_id = self._resolve_ai_model_id()
         if not model_id:
@@ -5346,8 +6723,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
             return
 
-        self.act_ai_revise.setEnabled(False)
-        self.act_ai_revise_all.setEnabled(False)
+        self.act_ai_revise.setEnabled(True)
 
         self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
         self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
@@ -5386,7 +6762,6 @@ class MainWindow(QMainWindow):
         task = next((i for i in self.queue_items if i.path == path), None)
         if not task or not task.results:
             self.act_ai_revise.setEnabled(True)
-            self.act_ai_revise_all.setEnabled(True)
             if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
                 self.ai_progress_dialog.close()
                 self.ai_progress_dialog = None
@@ -5416,18 +6791,24 @@ class MainWindow(QMainWindow):
             for i in range(len(recs))
         ]
 
-        new_text = "\n".join(rv.text for rv in new_recs).strip()
-        task.results = (new_text, kr_records, im, new_recs)
+        task.results = (
+            "\n".join(rv.text for rv in new_recs).strip(),
+            kr_records,
+            im,
+            new_recs
+        )
         task.edited = True
 
         cur = self._current_task()
         if cur and cur.path == path:
-            self._sync_ui_after_recs_change(task, keep_row=self.list_lines.currentRow())
+            keep_row = self.list_lines.currentRow()
+            if keep_row < 0:
+                keep_row = 0 if new_recs else None
+            self._sync_ui_after_recs_change(task, keep_row=keep_row)
         else:
             self._update_queue_row(path)
 
         self.act_ai_revise.setEnabled(True)
-        self.act_ai_revise_all.setEnabled(True)
         self.status_bar.showMessage(self._tr("msg_ai_done"))
         self._log(self._tr_log("log_ai_done", os.path.basename(path)))
 
@@ -5435,9 +6816,83 @@ class MainWindow(QMainWindow):
             self.ai_progress_dialog.close()
             self.ai_progress_dialog = None
 
+    def on_ai_single_line_revision_done(self, path: str, revised_lines: list):
+        ctx = self._ai_single_line_context or {}
+        self._ai_single_line_context = None
+
+        task = next((i for i in self.queue_items if i.path == path), None)
+        if not task or not task.results:
+            self.act_ai_revise.setEnabled(True)
+            if self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+            return
+
+        row = int(ctx.get("row", -1))
+        text, kr_records, im, recs = task.results
+
+        if not (0 <= row < len(recs)):
+            self.act_ai_revise.setEnabled(True)
+            if self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+            return
+
+        new_text = ""
+        if revised_lines:
+            new_text = str(revised_lines[0]).strip()
+
+        if not new_text:
+            new_text = recs[row].text
+
+        self._push_undo(task)
+
+        new_recs = [
+            RecordView(i, recs[i].text, recs[i].bbox)
+            for i in range(len(recs))
+        ]
+        new_recs[row].text = new_text
+
+        task.results = (
+            "\n".join(rv.text for rv in new_recs).strip(),
+            kr_records,
+            im,
+            new_recs
+        )
+        task.edited = True
+
+        cur = self._current_task()
+        if cur and cur.path == path:
+            self._sync_ui_after_recs_change(task, keep_row=row)
+        else:
+            self._update_queue_row(path)
+
+        self.act_ai_revise.setEnabled(True)
+        self.status_bar.showMessage(f"LM-Überarbeitung für Zeile {row + 1} abgeschlossen.")
+        self._log(f"LM-Zeilenüberarbeitung abgeschlossen: {os.path.basename(path)} | Zeile {row + 1}")
+
+        if self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
+
+    def on_ai_single_line_revision_failed(self, path: str, msg: str):
+        self._ai_single_line_context = None
+        self.act_ai_revise.setEnabled(True)
+
+        if "abgebrochen" in str(msg).lower():
+            self.status_bar.showMessage("Zeilenüberarbeitung abgebrochen.")
+            self._log(f"LM-Zeilenüberarbeitung abgebrochen: {os.path.basename(path)}")
+        else:
+            self.status_bar.showMessage("Zeilenüberarbeitung fehlgeschlagen.")
+            self._log(f"LM-Zeilenüberarbeitung Fehler: {os.path.basename(path)} -> {msg}")
+            QMessageBox.warning(self, self._tr("warn_title"), msg)
+
+        if self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
+
     def on_ai_revision_failed(self, path: str, msg: str):
         self.act_ai_revise.setEnabled(True)
-        self.act_ai_revise_all.setEnabled(True)
 
         if "abgebrochen" in str(msg).lower():
             self.status_bar.showMessage("Überarbeitung abgebrochen.")
@@ -5528,11 +6983,17 @@ class MainWindow(QMainWindow):
 
         lines_head = QHBoxLayout()
         lines_head.addWidget(self.lbl_lines)
+        lines_head.addStretch(1)  # sorgt dafür, dass die Buttons rechts sitzen
 
         self.btn_import_lines = QToolButton()
-        self.btn_import_lines.setText("Import")
+        self.btn_import_lines.setText("Zu Zeilen importieren")
         self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
         self.btn_import_lines.setPopupMode(QToolButton.InstantPopup)
+
+        self.btn_voice_fill = QToolButton()
+        self.btn_voice_fill.setText("🎤")
+        self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
+        self.btn_voice_fill.clicked.connect(self.run_voice_line_fill)
 
         import_menu = QMenu(self)
 
@@ -5551,7 +7012,7 @@ class MainWindow(QMainWindow):
         self.btn_import_lines.setMenu(import_menu)
 
         lines_head.addWidget(self.btn_import_lines)
-        lines_head.addStretch(1)
+        lines_head.addWidget(self.btn_voice_fill)
 
         right.addLayout(lines_head)
         right.addWidget(self.list_lines, 3)
@@ -5595,9 +7056,9 @@ class MainWindow(QMainWindow):
         elif len(revised_lines) > len(recs):
             revised_lines = revised_lines[:len(recs)]
 
-            self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
-            self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
-            self._log(f"NEU alle Zeilen: {revised_lines}")
+        self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
+        self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
+        self._log(f"NEU alle Zeilen: {revised_lines}")
 
         self._push_undo(task)
 
@@ -5607,12 +7068,21 @@ class MainWindow(QMainWindow):
             for i in range(len(recs))
         ]
 
-        new_text = "\n".join(rv.text for rv in new_recs).strip()
-        task.results = (new_text, kr_records, im, new_recs)
+        task.results = (
+            "\n".join(rv.text for rv in new_recs).strip(),
+            kr_records,
+            im,
+            new_recs
+        )
         task.edited = True
 
-        keep_row = self.list_lines.currentRow() if self._current_task() and self._current_task().path == path else 0
-        self._sync_ui_after_recs_change(task, keep_row=keep_row)
+        cur = self._current_task()
+        if cur and cur.path == path:
+            keep_row = self.list_lines.currentRow()
+            if keep_row < 0:
+                keep_row = 0 if new_recs else None
+            self._sync_ui_after_recs_change(task, keep_row=keep_row)
+
         self._update_queue_row(path)
 
         self._log(self._tr_log("log_ai_done", os.path.basename(path)))
@@ -5625,8 +7095,8 @@ class MainWindow(QMainWindow):
         self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
 
     def on_ai_batch_finished(self):
+
         self.act_ai_revise.setEnabled(True)
-        self.act_ai_revise_all.setEnabled(True)
 
         if self.ai_batch_dialog:
             self.ai_batch_dialog.close()
@@ -5661,6 +7131,7 @@ class MainWindow(QMainWindow):
 
         self.file_menu = menubar.addMenu(self._tr("menu_file"))
         self.edit_menu = menubar.addMenu(self._tr("menu_edit"))
+        self.options_menu = menubar.addMenu(self._tr("menu_options"))
 
         self.edit_menu.addAction(self.act_undo)
         self.edit_menu.addAction(self.act_redo)
@@ -5717,8 +7188,6 @@ class MainWindow(QMainWindow):
 
         self.models_menu = menubar.addMenu(self._tr("menu_models"))
 
-        self.revision_models_menu = menubar.addMenu("Modelle - Überarbeitung")
-
         # Menüeinträge zeigen immer den aktuell geladenen Namen
         self.act_rec = QAction("Recognition-Modell laden...", self)
         self.act_rec.triggered.connect(self.choose_rec_model)
@@ -5746,18 +7215,40 @@ class MainWindow(QMainWindow):
         self.act_download.triggered.connect(self.open_download_link)
         self.models_menu.addAction(self.act_download)
 
-        self.ai_models_menu = self.revision_models_menu.addMenu("KI-Modell für Überarbeitung")
-        self.revision_models_menu.aboutToShow.connect(self._refresh_ai_models_menu)
+        self.revision_models_menu = menubar.addMenu("LM-Optionen")
+
+        self.act_set_manual_lm_url = QAction("Localhost-Pfad eintragen...", self)
+        self.act_set_manual_lm_url.triggered.connect(self.set_manual_ai_base_url_dialog)
+        self.revision_models_menu.addAction(self.act_set_manual_lm_url)
+
+        self.act_clear_manual_lm_url = QAction("Localhost-Pfad löschen", self)
+        self.act_clear_manual_lm_url.triggered.connect(self.clear_manual_ai_base_url)
+        self.revision_models_menu.addAction(self.act_clear_manual_lm_url)
 
         self.revision_models_menu.addSeparator()
 
-        self.act_server_status = QAction("Localhost-Server: OFF", self)
-        self.act_server_status.setEnabled(False)
-        self.revision_models_menu.addAction(self.act_server_status)
+        self.act_scan_lm = QAction("Scannen", self)
+        self.act_scan_lm.triggered.connect(self.scan_ai_models_now)
+        self.revision_models_menu.addAction(self.act_scan_lm)
 
-        self.revision_models_menu.aboutToShow.connect(self.refresh_models_menu_status)
+        self.ai_models_submenu = self.revision_models_menu.addMenu("LM-Modell")
+        self.ai_model_group = QActionGroup(self)
+        self.ai_model_group.setExclusive(True)
+        self._rebuild_ai_model_submenu()
 
-        self.options_menu = menubar.addMenu(self._tr("menu_options"))
+        self.revision_models_menu.addSeparator()
+
+        self.act_lm_status = QAction("Status: -", self)
+        self.act_lm_status.setEnabled(False)
+        self.revision_models_menu.addAction(self.act_lm_status)
+
+        self.act_lm_mode = QAction("Modus: Auto", self)
+        self.act_lm_mode.setEnabled(False)
+        self.revision_models_menu.addAction(self.act_lm_mode)
+
+        self.act_lm_base_url = QAction("Server: -", self)
+        self.act_lm_base_url.setEnabled(False)
+        self.revision_models_menu.addAction(self.act_lm_base_url)
 
         # Sprachen
         self.lang_menu = self.options_menu.addMenu(self._tr("menu_languages"))
@@ -6070,6 +7561,7 @@ class MainWindow(QMainWindow):
             self.act_ai_revise_all.setText("Alle Überarbeiten")
             self.act_ai_revise_all.setToolTip("Alle fertig erkannten Dateien überarbeiten")
         if hasattr(self, "btn_import_lines"):
+            self.btn_import_lines.setText("Zeilen importieren")
             self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
         if hasattr(self, "act_import_lines_current"):
             self.act_import_lines_current.setText("Für aktuelles Bild")
@@ -6085,6 +7577,8 @@ class MainWindow(QMainWindow):
             self.act_project_load.setText(self._tr("menu_project_load"))
         if hasattr(self, "act_paste_files_menu"):
             self.act_paste_files_menu.setText(self._tr("act_paste_clipboard"))
+        if hasattr(self, "btn_voice_fill"):
+            self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
 
         self.act_undo.setText(self._tr("act_undo"))
         self.act_redo.setText(self._tr("act_redo"))
@@ -6675,6 +8169,10 @@ class MainWindow(QMainWindow):
             self.canvas.draw_overlays(recs)
         self._populate_lines_list(recs)
 
+        rows = self._selected_line_rows()
+        if rows:
+            self.canvas.select_indices(rows, center=False)
+
     def _populate_lines_list(self, recs: List[RecordView], keep_row: Optional[int] = None):
         self.list_lines.blockSignals(True)
         self.list_lines.clear()
@@ -7156,11 +8654,14 @@ class MainWindow(QMainWindow):
                         STATUS_ERROR: "status_error",
                         STATUS_AI_PROCESSING: "status_ai_processing",
                         STATUS_EXPORTING: "status_exporting",
+                        STATUS_VOICE_RECORDING: "status_voice_recording",
                     }[status_enum]
                     status_item.setText(f"{status_icon} {self._tr(status_key)}")
 
                     if status_enum == STATUS_DONE:
                         status_item.setForeground(QBrush(QColor("green")))
+                    elif status_enum == STATUS_VOICE_RECORDING:
+                        status_item.setForeground(QBrush(QColor(180, 0, 180)))
                     elif status_enum == STATUS_ERROR:
                         status_item.setForeground(QBrush(QColor("red")))
                     elif status_enum == STATUS_AI_PROCESSING:
@@ -7169,6 +8670,7 @@ class MainWindow(QMainWindow):
                         status_item.setForeground(QBrush(QColor(180, 120, 0)))
                     else:
                         status_item.setForeground(QBrush(QColor("blue")))
+
                 break
 
     # -----------------------------
@@ -7182,15 +8684,70 @@ class MainWindow(QMainWindow):
 
     def on_line_selected(self, row):
         task = self._current_task()
-        if not task or not task.results or row < 0:
+        if not task or not task.results:
             return
+
+        rows = self._selected_line_rows()
+        if rows:
+            self.canvas.select_indices(rows, center=False)
+            return
+
+        if row < 0:
+            self.canvas.select_indices([], center=False)
+            return
+
         _, _, _, recs = task.results
         if 0 <= row < len(recs):
             self.canvas.select_idx(row)
 
+    def on_lines_selection_changed(self):
+        task = self._current_task()
+        if not task or not task.results:
+            return
+
+        rows = self._selected_line_rows()
+        if not rows:
+            self.canvas.select_indices([], center=False)
+            return
+
+        self.canvas.select_indices(rows, center=False)
+
+    def on_canvas_multi_selected(self, indices: list):
+        self.list_lines.blockSignals(True)
+        self.list_lines.clearSelection()
+
+        clean = sorted(set(int(i) for i in indices if i is not None))
+        first = None
+
+        for idx in clean:
+            if 0 <= idx < self.list_lines.count():
+                it = self.list_lines.item(idx)
+                if it:
+                    it.setSelected(True)
+                    if first is None:
+                        first = idx
+
+        if first is not None:
+            it = self.list_lines.item(first)
+            if it:
+                self.list_lines.setCurrentItem(it, QItemSelectionModel.NoUpdate)
+
+        self.list_lines.blockSignals(False)
+
+        # Canvas-Farben konsistent halten
+        self.canvas.select_indices(clean, center=False)
+
     def on_rect_clicked(self, idx):
         if 0 <= idx < self.list_lines.count():
+            self.list_lines.blockSignals(True)
+            self.list_lines.clearSelection()
             self.list_lines.setCurrentRow(idx)
+            it = self.list_lines.item(idx)
+            if it:
+                it.setSelected(True)
+            self.list_lines.blockSignals(False)
+
+            self.canvas.select_indices([idx], center=False)
             self.list_lines.setFocus()
 
     @staticmethod
@@ -7208,7 +8765,7 @@ class MainWindow(QMainWindow):
         if not task or not task.results or task.status != STATUS_DONE:
             return
 
-        text, kr_records, im, recs = task.results
+        _, _, _, recs = task.results
         row = self.list_lines.row(item)
         if row is None or not (0 <= row < len(recs)):
             return
@@ -7218,87 +8775,32 @@ class MainWindow(QMainWindow):
 
         if target_idx is None:
             target_idx = row
-
         target_idx = max(0, min(len(recs) - 1, int(target_idx)))
 
-        def normalize_display(selected_row: int):
-            self.list_lines.blockSignals(True)
-            for i, rv in enumerate(recs):
-                it = self.list_lines.item(i)
-                if it:
-                    it.setText(f"{i + 1:04d}  {rv.text}")
-                    it.setData(Qt.UserRole, i)
-            self.list_lines.blockSignals(False)
-            self.list_lines.setCurrentRow(max(0, min(self.list_lines.count() - 1, selected_row)))
-
-        if target_idx == row and new_text == recs[row].text:
-            normalize_display(row)
-            return
-
-        self._push_undo(task)
-
-        if target_idx != row:
-            self._push_undo(task)
-
-            moved = RecordView(
-                recs[row].idx,
-                new_text,
-                recs[row].bbox
-            )
-
-            recs.pop(row)
-            recs.insert(target_idx, moved)
-
-            task.edited = True
-            self._sync_ui_after_recs_change(task, keep_row=target_idx)
-            return
-
-        # Nur Text ändern, BBox unverändert lassen
-        recs[row].text = new_text
-        task.edited = True
-        self._sync_ui_after_recs_change(task, keep_row=row)
-
-        def normalize_display(selected_row: int):
-            self.list_lines.blockSignals(True)
-            for i, rv in enumerate(recs):
-                it = self.list_lines.item(i)
-                if it:
-                    it.setText(f"{i + 1:04d}  {rv.text}")
-                    it.setData(Qt.UserRole, i)
-            self.list_lines.blockSignals(False)
-            self.list_lines.setCurrentRow(max(0, min(self.list_lines.count() - 1, selected_row)))
-
-        if target_idx == row and new_text == recs[row].text:
-            normalize_display(row)
-            return
-
-        self._push_undo(task)
-
-        if target_idx != row:
-
-            recs[row].text = new_text
-            recs[row], recs[target_idx] = recs[target_idx], recs[row]
-
-            task.edited = True
-            self._sync_ui_after_recs_change(task, keep_row=target_idx)
-            return
-
         old_text = recs[row].text
-        recs[row].text = new_text
+
+        # Keine echte Änderung -> nur Anzeige zurücknormalisieren
+        if target_idx == row and new_text == old_text:
+            self._sync_ui_after_recs_change(task, keep_row=row)
+            return
+
+        self._push_undo(task)
+
+        # 1) Text + Ziel-BBox der bearbeiteten Zeile zusammenhalten
+        edited = RecordView(
+            idx=0,  # wird in _sync_ui_after_recs_change neu gesetzt
+            text=new_text,
+            bbox=recs[row].bbox
+        )
+
+        # 2) Alte Zeile entfernen
+        recs.pop(row)
+
+        # 3) An neue Position einsetzen
+        recs.insert(target_idx, edited)
+
         task.edited = True
-
-        if recs[row].bbox and im:
-            x0, y0, x1, y1 = recs[row].bbox
-            old_len = max(1, len(old_text))
-            new_len = max(1, len(new_text))
-            w = max(10, x1 - x0)
-            avg_char = w / float(old_len)
-            new_w = int(max(10, avg_char * new_len))
-            img_w, img_h = im.size
-            new_x1 = min(img_w, x0 + new_w)
-            recs[row].bbox = (x0, y0, new_x1, y1)
-
-        self._sync_ui_after_recs_change(task, keep_row=row)
+        self._sync_ui_after_recs_change(task, keep_row=target_idx)
 
     def _delete_current_line_via_key(self):
         task = self._current_task()
@@ -7325,10 +8827,18 @@ class MainWindow(QMainWindow):
         if item is None:
             return
 
+        selected_rows = self._selected_line_rows()
         row = self.list_lines.row(item)
 
         menu = QMenu()
         act_swap = menu.addAction(self._tr("line_menu_swap_with"))
+        menu.addSeparator()
+
+        act_ai_single = menu.addAction(self._tr("line_menu_ai_revise_single"))
+        act_ai_multi = menu.addAction("Ausgewählte Zeilen mit LM überarbeiten")
+        if len(selected_rows) < 2:
+            act_ai_multi.setEnabled(False)
+
         menu.addSeparator()
         act_del = menu.addAction(self._tr("line_menu_delete"))
         menu.addSeparator()
@@ -7345,8 +8855,17 @@ class MainWindow(QMainWindow):
         if not task or not task.results or task.status != STATUS_DONE:
             return
 
+        _, _, _, recs = task.results
+        if 0 <= row < len(recs):
+            if not recs[row].bbox:
+                act_ai_single.setEnabled(False)
+
         if chosen == act_swap:
             self._swap_line_with_dialog(task, row)
+        elif chosen == act_ai_single:
+            self.run_ai_revision_for_single_line(row)
+        elif chosen == act_ai_multi:
+            self.run_ai_revision_for_selected_lines()
         elif chosen == act_del:
             self._delete_line(task, row)
         elif chosen == act_add_above:
@@ -7369,19 +8888,28 @@ class MainWindow(QMainWindow):
         new_text = "\n".join([r.text for r in recs]).strip()
         task.results = (new_text, kr_records, im, recs)
 
-        preview_im = _load_image_color(task.path)
-        self.canvas.load_pil_image(preview_im, preserve_view=True)
-        self.canvas.set_overlay_enabled(task.status == STATUS_DONE)
-        if self.show_overlay:
-            self.canvas.draw_overlays(recs)
-
         self._populate_lines_list(recs, keep_row=keep_row)
 
+        if os.path.exists(task.path):
+            preview_im = _load_image_color(task.path)
+            self.canvas.load_pil_image(preview_im, preserve_view=True)
+            self.canvas.set_overlay_enabled(task.status == STATUS_DONE)
+            if self.show_overlay:
+                self.canvas.draw_overlays(recs)
+        else:
+            self.canvas.clear_all()
+            self.canvas.set_overlay_enabled(False)
+
     def _move_line(self, task: TaskItem, row: int, direction: int):
-        text, kr_records, im, recs = task.results
+        if not task.results:
+            return
+
+        _, _, _, recs = task.results
         new_row = row + direction
+
         if not (0 <= row < len(recs)) or not (0 <= new_row < len(recs)):
             return
+
         self._push_undo(task)
         recs[row], recs[new_row] = recs[new_row], recs[row]
         task.edited = True
@@ -7408,13 +8936,18 @@ class MainWindow(QMainWindow):
         self._move_line_to(task, row, target - 1)
 
     def _move_line_to(self, task: TaskItem, from_row: int, to_row: int):
-        text, kr_records, im, recs = task.results
+        if not task.results:
+            return
+
+        _, _, _, recs = task.results
         if not (0 <= from_row < len(recs)):
             return
+
         to_row = max(0, min(len(recs) - 1, int(to_row)))
         if from_row == to_row:
             self._sync_ui_after_recs_change(task, keep_row=to_row)
             return
+
         self._push_undo(task)
         rv = recs.pop(from_row)
         recs.insert(to_row, rv)
@@ -7422,13 +8955,18 @@ class MainWindow(QMainWindow):
         self._sync_ui_after_recs_change(task, keep_row=to_row)
 
     def _delete_line(self, task: TaskItem, row: int):
-        text, kr_records, im, recs = task.results
+        if not task.results:
+            return
+
+        _, _, _, recs = task.results
         if not (0 <= row < len(recs)):
             return
+
         self._push_undo(task)
         recs.pop(row)
         task.edited = True
-        next_row = min(row, max(0, len(recs) - 1)) if recs else None
+
+        next_row = min(row, len(recs) - 1) if recs else None
         self._sync_ui_after_recs_change(task, keep_row=next_row)
 
     def _add_line(self, task: TaskItem, insert_row: int):
@@ -7895,6 +9433,10 @@ class MainWindow(QMainWindow):
             if self.pdf_worker and self.pdf_worker.isRunning():
                 self.pdf_worker.requestInterruption()
                 self.pdf_worker.wait(2000)
+
+            if self.voice_worker and self.voice_worker.isRunning():
+                self.voice_worker.stop()
+                self.voice_worker.wait(2000)
 
             self._cleanup_temp_dirs()
         except Exception:
