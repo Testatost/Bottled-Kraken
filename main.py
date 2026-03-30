@@ -137,6 +137,12 @@ def is_supported_input(path: str) -> bool:
     ext = os.path.splitext(path)[1].lower()
     return ext in SUPPORTED_IMAGE_EXTS or ext in SUPPORTED_PDF_EXTS
 
+def is_project_file(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() == ".json"
+
+def is_supported_drop_or_paste_file(path: str) -> bool:
+    return is_supported_input(path) or is_project_file(path)
+
 def _load_image_gray(path: str) -> Image.Image:
     return Image.open(path).convert("L")
 
@@ -1087,11 +1093,22 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
     MARGIN_Y = max(10.0, 0.8 * med_h)
 
+    def is_real_page_header_or_footer(dbb):
+        x0, y0, x1, y1 = dbb
+        w = x1 - x0
+        x_center = (x0 + x1) / 2.0
+
+        if w >= 0.72 * W:
+            return True
+        if abs(x_center - (W / 2.0)) <= 0.12 * W and w >= 0.32 * W:
+            return True
+        return False
+
     header, footer, midband = [], [], []
     for r, bb, dbb in items:
-        if dbb[3] < (body_top - MARGIN_Y):
+        if dbb[3] < (body_top - MARGIN_Y) and is_real_page_header_or_footer(dbb):
             header.append((r, bb, dbb))
-        elif dbb[1] > (body_bot + MARGIN_Y):
+        elif dbb[1] > (body_bot + MARGIN_Y) and is_real_page_header_or_footer(dbb):
             footer.append((r, bb, dbb))
         else:
             midband.append((r, bb, dbb))
@@ -1099,8 +1116,57 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     def sort_y_then_x(lst):
         return sorted(lst, key=lambda x: (cy(x[2]), cx(x[2])), reverse=rev_y)
 
-    header_sorted = sort_y_then_x(header)
-    footer_sorted = sort_y_then_x(footer)
+    def sort_region_by_columns(lst):
+        if not lst:
+            return []
+
+        # grobe 2-Spalten-Zuordnung über Seitenmitte
+        mid = W / 2.0
+        gutter = max(20.0, 0.03 * W)
+
+        left = []
+        right = []
+        spanning = []
+
+        for r, bb, dbb in lst:
+            x0, _, x1, _ = dbb
+            w = x1 - x0
+            x_center = (x0 + x1) / 2.0
+
+            # echte zentrierte / breite Überschrift bleibt oben/unten y-sortiert
+            if w >= 0.72 * W or (abs(x_center - mid) <= 0.14 * W and w >= 0.28 * W):
+                spanning.append((r, bb, dbb))
+                continue
+
+            if x1 <= mid - gutter:
+                left.append((r, bb, dbb))
+            elif x0 >= mid + gutter:
+                right.append((r, bb, dbb))
+            else:
+                # Grenzfälle über Mittelpunkt
+                if x_center < mid:
+                    left.append((r, bb, dbb))
+                else:
+                    right.append((r, bb, dbb))
+
+        spanning = sort_y_then_x(spanning)
+        left = sort_y_then_x(left)
+        right = sort_y_then_x(right)
+
+        out = []
+        out.extend(spanning)
+
+        if rev_cols:
+            out.extend(right)
+            out.extend(left)
+        else:
+            out.extend(left)
+            out.extend(right)
+
+        return out
+
+    header_sorted = sort_region_by_columns(header)
+    footer_sorted = sort_region_by_columns(footer)
 
     # ---------- Vertikale Separatoren ('|', '│', '┃') als Spaltengassen erkennen ----------
     sep_x = []
@@ -1187,58 +1253,79 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
     if strong_cols <= 2 and len(sep_x) < 2:
         mid = W / 2.0
 
-        # wie alter Code: finde ab welcher y es wirklich "zweispaltig" wird
-        ys = [it[2][1] for it in mid_text]  # dbb y0
-        if ys:
-            y_min, y_max = min(ys), max(ys)
+        def is_centered_spanner(dbb):
+            w = (dbb[2] - dbb[0])
+            x_center = (dbb[0] + dbb[2]) / 2.0
+
+            # wirklich sehr breite Zeilen
+            if w >= 0.72 * W:
+                return True
+
+            # zentrierte Zwischenüberschrift über beiden Spalten
+            if abs(x_center - (W / 2.0)) <= 0.14 * W and w >= 0.28 * W:
+                return True
+
+            return False
+
+        def assign_two_col(dbb):
+            x0, _, x1, _ = dbb
+            gutter = max(20.0, 0.03 * W)
+
+            if x1 <= mid - gutter:
+                return 0  # links
+            if x0 >= mid + gutter:
+                return 1  # rechts
+
+            x_center = (x0 + x1) / 2.0
+            return 0 if x_center < mid else 1
+
+        # ------------------------------------------
+        # NEU: erst "echten" Beginn der Spalten finden
+        # ------------------------------------------
+        body_candidates = []
+        for r, bb, dbb in midband:
+            if is_fullwidth(dbb):
+                continue
+            if is_centered_spanner(dbb):
+                continue
+
+            h = dbb[3] - dbb[1]
+            if h >= MIN_H:
+                body_candidates.append((r, bb, dbb))
+
+        if body_candidates:
+            first_body_y = min(dbb[1] for _, _, dbb in body_candidates)
         else:
-            y_min, y_max = 0.0, float(image_height)
+            first_body_y = body_top
 
-        step = int(max(60.0, 4.0 * med_h))
-        threshold_y = y_max + 1.0  # fallback: alles "oben"
+        Y_PAD = max(10.0, 0.9 * med_h)
 
-        # "links/rechts aktiv" in einem Band?
-        for y0 in range(int(y_min), int(y_max), step):
-            y1 = y0 + step
-            left = 0
-            right = 0
-            for _, _, dbb in mid_text:
-                if y0 <= dbb[1] < y1:
-                    x_center = (dbb[0] + dbb[2]) / 2.0
-                    if x_center < mid:
-                        left += 1
-                    else:
-                        right += 1
-            if left >= 2 and right >= 2:
-                threshold_y = float(y0)
-                break
-
-        # Split: "top" (Einleitung/Überschrift) + Spaltenbereich
         top_mid = []
         left_col = []
         right_col = []
 
         for r, bb, dbb in midband:
+            # Volle Breite immer oben behalten
             if is_fullwidth(dbb):
-                # volle Breite -> gehört ins "top" bzw. bleibt im Flow oben
                 top_mid.append((r, bb, dbb))
                 continue
 
-            if dbb[1] < threshold_y:
+            # Zentrierte Spanner nur dann oben behalten,
+            # wenn sie wirklich ÜBER dem eigentlichen Spaltenbeginn liegen
+            if is_centered_spanner(dbb) and dbb[3] < (first_body_y - Y_PAD):
                 top_mid.append((r, bb, dbb))
-            else:
-                x_center = (dbb[0] + dbb[2]) / 2.0
-                if x_center < mid:
-                    left_col.append((r, bb, dbb))
-                else:
-                    right_col.append((r, bb, dbb))
+                continue
 
-        # sortieren: wie vorher (rev_y berücksichtigt)
+            col_idx = assign_two_col(dbb)
+            if col_idx == 0:
+                left_col.append((r, bb, dbb))
+            else:
+                right_col.append((r, bb, dbb))
+
         top_mid_sorted = sort_y_then_x(top_mid)
         left_sorted = sort_y_then_x(left_col)
         right_sorted = sort_y_then_x(right_col)
 
-        # Leserichtung: RL -> rechte Spalte zuerst
         core = []
         core.extend(top_mid_sorted)
 
@@ -1260,28 +1347,27 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
         GUTTER = max(18.0, 0.01 * W)  # Schutzbereich um die Trennlinie
 
         def col_index_for(dbb):
-            # Fullwidth immer in "erste Spalte" (Header/Spanner behandeln wir später separat)
             if is_fullwidth(dbb):
                 return 0
-            # Wenn eine Box komplett links von der Trennlinie liegt -> links
-            # (wichtig für rechtsbündige kurze Zeilen wie "w. Koehler.")
+
+            x0, _, x1, _ = dbb
+
+            # 1) harte Kantenentscheidung
             for i, b in enumerate(bounds):
-                if dbb[2] <= b - GUTTER:  # right edge klar links
+                if x1 <= b - GUTTER:
                     return i
 
-            # Wenn komplett rechts -> rechts
             for i, b in enumerate(bounds):
-                if dbb[0] >= b + GUTTER:  # left edge klar rechts
-                    continue
-                # überlappt GUTTER -> entscheide über Center
-                break
+                if x0 < b + GUTTER:
+                    break
+            else:
+                return ncols - 1
 
-            x_center = (dbb[0] + dbb[2]) / 2.0
-            i = 0
-            for b in bounds:
+            # 2) weicher Fallback nur für Grenzfälle
+            x_center = (x0 + x1) / 2.0
+            for i, b in enumerate(bounds):
                 if x_center < b:
                     return i
-                i += 1
             return ncols - 1
 
         cols = [[] for _ in range(ncols)]
@@ -1412,12 +1498,23 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
         bounds = [(col_starts[i] + col_starts[i + 1]) / 2.0 for i in range(len(col_starts) - 1)]
 
         def col_index_for(dbb):
-            x = dbb[0]
             if is_fullwidth(dbb):
                 return 0
+
+            x0, _, x1, _ = dbb
+            gutter = max(18.0, 0.025 * W)
+
+            # zuerst über echte Box-Ausdehnung entscheiden
             for i, b in enumerate(bounds):
-                if x < b:
+                if x1 <= b - gutter:
                     return i
+
+            # dann Grenzfall über Mittelpunkt
+            x_center = (x0 + x1) / 2.0
+            for i, b in enumerate(bounds):
+                if x_center < b:
+                    return i
+
             return len(col_starts) - 1
 
         cols = [[] for _ in range(len(col_starts))]
@@ -1448,7 +1545,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
                 # sehr breit -> eher normaler Absatz; den lassen wir hier in Ruhe
                 return False
             x_center = (dbb[0] + dbb[2]) / 2.0
-            return abs(x_center - (W / 2.0)) <= 0.18 * W  # "zentriert genug"
+            return abs(x_center - (W / 2.0)) <= 0.18 * W and w >= 0.24 * W
 
         promote = []
         keep_mid = []
@@ -1473,7 +1570,7 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
     # ---------- innerhalb jeder Spalte sortieren ----------
     def sort_col(col):
-        return sorted(col, key=lambda x: (cy(x[2]), cx(x[2])), reverse=rev_y)
+        return sorted(col, key=lambda x: cy(x[2]), reverse=rev_y)
 
     cols = [sort_col(c) for c in cols]
 
@@ -1507,6 +1604,11 @@ def _clean_ocr_text(text: Any) -> str:
     txt = txt.replace("\u00a0", " ")   # NBSP
     txt = txt.replace("\u200b", "")    # zero-width space
     txt = txt.replace("\ufeff", "")    # BOM
+
+    # historische Lang-s normalisieren
+    txt = txt.replace("ſ", "s")
+    txt = txt.replace("⸗", "-")
+    txt = txt.replace("±", "+/-")
 
     # Leerraum normalisieren
     txt = re.sub(r"[ \t\r\f\v]+", " ", txt)
@@ -1746,9 +1848,9 @@ def _crop_block_to_data_url_context(
 def _crop_single_line_to_data_url(
     path: str,
     rv: "RecordView",
-    pad_x: int = 80,
-    pad_y: int = 30,
-    extra_context_y: int = 20,
+    pad_x: int = 14,
+    pad_y: int = 6,
+    extra_context_y: int = 0,
 ) -> str:
     im = _load_image_color(path)
 
@@ -2114,7 +2216,7 @@ class ResizableRectItem(QGraphicsRectItem):
         if self._mode in ("resize", "move"):
             self._mode = "none"
             if callable(self._on_changed):
-                self._on_changed(self.idx, self.mapRectToScene(self.rect()).boundingRect())
+                self._on_changed(self.idx, self.sceneBoundingRect())
             event.accept()
             return
 
@@ -2149,33 +2251,45 @@ class DropQueueTable(QTableWidget):
         self.table_resized.emit()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Delete:
-            self.delete_pressed.emit()
-            event.accept()
-            return
         super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasUrls():
             event.ignore()
+            return
+
+        for u in event.mimeData().urls():
+            p = u.toLocalFile()
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasUrls():
             event.ignore()
+            return
+
+        for u in event.mimeData().urls():
+            p = u.toLocalFile()
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
     def dropEvent(self, event: QDropEvent):
         if not event.mimeData().hasUrls():
             event.ignore()
             return
+
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p) and is_supported_input(p):
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
                 files.append(p)
+
         if files:
             self.files_dropped.emit(files)
             event.acceptProposedAction()
@@ -2198,10 +2312,6 @@ class LinesListWidget(QListWidget):
         self.setDragDropMode(QAbstractItemView.InternalMove)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Delete:
-            self.delete_pressed.emit()
-            event.accept()
-            return
         super().keyPressEvent(event)
 
     def dropEvent(self, event):
@@ -2411,26 +2521,42 @@ class ImageCanvas(QGraphicsView):
             self._show_drop_hint()
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasUrls():
             event.ignore()
+            return
+
+        for u in event.mimeData().urls():
+            p = u.toLocalFile()
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasUrls():
             event.ignore()
+            return
+
+        for u in event.mimeData().urls():
+            p = u.toLocalFile()
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
     def dropEvent(self, event: QDropEvent):
         if not event.mimeData().hasUrls():
             event.ignore()
             return
+
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p) and is_supported_input(p):
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
                 files.append(p)
+
         if files:
             self.files_dropped.emit(files)
             event.acceptProposedAction()
@@ -2578,29 +2704,10 @@ class ImageCanvas(QGraphicsView):
             self.overlay_add_draw_requested.emit(self.mapToScene(pos))
 
     def mousePressEvent(self, event):
-        if self._draw_mode and event.button() == Qt.LeftButton:
-            sp = self.mapToScene(self._event_point(event))
-            self._draw_start = sp
-
-            if self._draw_rect_item is not None:
-                try:
-                    if isValid(self._draw_rect_item) and self._draw_rect_item.scene() is self.scene:
-                        self.scene.removeItem(self._draw_rect_item)
-                except RuntimeError:
-                    pass
-                self._draw_rect_item = None
-
-            self._draw_rect_item = QGraphicsRectItem(QRectF(sp, sp))
-            self._draw_rect_item.setPen(self._pen_draw)
-            self._draw_rect_item.setBrush(self._brush_draw)
-            self._draw_rect_item.setZValue(1000)
-            self.scene.addItem(self._draw_rect_item)
-            return
-
         if event.button() == Qt.LeftButton:
             it = self.itemAt(self._event_point(event))
 
-            # WICHTIG: Klick auf Nummernlabel auf zugehörige Box umbiegen
+            # Klick auf Nummernlabel auf die zugehörige Box umlenken
             if isinstance(it, QGraphicsSimpleTextItem):
                 txt = it.text().strip()
                 if txt.isdigit():
@@ -2609,6 +2716,29 @@ class ImageCanvas(QGraphicsView):
                     if rect and isValid(rect):
                         it = rect
 
+            # 1) Zeichenmodus hat höchste Priorität
+            if self._draw_mode and self._overlay_enabled and self._pixmap_item is not None:
+                sp = self.mapToScene(self._event_point(event))
+                self._draw_start = sp
+
+                if self._draw_rect_item is not None:
+                    try:
+                        if isValid(self._draw_rect_item) and self._draw_rect_item.scene() is self.scene:
+                            self.scene.removeItem(self._draw_rect_item)
+                    except RuntimeError:
+                        pass
+                    self._draw_rect_item = None
+
+                self._draw_rect_item = QGraphicsRectItem(QRectF(sp, sp))
+                self._draw_rect_item.setPen(self._pen_draw)
+                self._draw_rect_item.setBrush(self._brush_draw)
+                self._draw_rect_item.setZValue(999)
+                self.scene.addItem(self._draw_rect_item)
+
+                event.accept()
+                return
+
+            # Klick direkt auf eine Overlay-Box
             if isinstance(it, ResizableRectItem):
                 ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
 
@@ -2639,18 +2769,29 @@ class ImageCanvas(QGraphicsView):
                 super().mousePressEvent(event)
                 return
 
-            if self._overlay_enabled and self._pixmap_item is not None:
-                sp = self.mapToScene(self._event_point(event))
-                self.start_selection_mode(sp)
-                event.accept()
-                return
-
-            if self._zoom > 1.01:
+            # Panning nur mit Alt + linker Maustaste
+            if (
+                    self._pixmap_item is not None
+                    and self._zoom > (self._fit_zoom * 1.01)
+                    and (event.modifiers() & Qt.AltModifier)
+            ):
                 self._mouse_panning = True
                 self._pan_start = self._event_point(event)
                 self._pan_start_h = self.horizontalScrollBar().value()
                 self._pan_start_v = self.verticalScrollBar().value()
                 self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+
+            # Rechteckauswahl nur wenn NICHT im Zeichenmodus
+            if (
+                    self._overlay_enabled
+                    and self._pixmap_item is not None
+                    and not self._draw_mode
+                    and not (event.modifiers() & Qt.AltModifier)
+            ):
+                sp = self.mapToScene(self._event_point(event))
+                self.start_selection_mode(sp)
                 event.accept()
                 return
 
@@ -2720,10 +2861,7 @@ class ImageCanvas(QGraphicsView):
 
         if event.button() == Qt.LeftButton and self._mouse_panning:
             self._mouse_panning = False
-            if self._zoom > 1.01 and not self._draw_mode:
-                self.setCursor(Qt.OpenHandCursor)
-            else:
-                self.unsetCursor()
+            self.unsetCursor()
             event.accept()
             return
 
@@ -2741,6 +2879,7 @@ class ImageCanvas(QGraphicsView):
         self._drop_text = None
         self.resetTransform()
         self._zoom = 1.0
+        self._fit_zoom = 1.0
         self._show_drop_hint()
 
     def _center_drop_hint_in_view(self):
@@ -2818,11 +2957,13 @@ class ImageCanvas(QGraphicsView):
             self._restore_view_state(t, center, z)
         else:
             self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-            # Zoom aus der tatsächlichen Transformationsmatrix synchronisieren
+
             try:
                 self._zoom = float(self.transform().m11())
+                self._fit_zoom = self._zoom
             except Exception:
                 self._zoom = 1.0
+                self._fit_zoom = 1.0
 
     def refresh_overlays(self):
         if self._pixmap_item and hasattr(self, "_last_recs"):
@@ -2899,9 +3040,8 @@ class ImageCanvas(QGraphicsView):
         if 0.05 <= new_zoom <= 20.0:
             self.scale(factor, factor)
             self._zoom = new_zoom
-        if self._zoom > 1.01 and not self._draw_mode:
-            self.setCursor(Qt.OpenHandCursor)
-        elif not self._draw_mode:
+
+        if not self._draw_mode and not self._mouse_panning:
             self.unsetCursor()
 
 class PDFRenderWorker(QThread):
@@ -3494,6 +3634,155 @@ class AIRevisionWorker(QThread):
 
         return with_bbox >= max(3, len(self.recs) // 2) and ratio_short >= 0.6 and ratio_tiny >= 0.15
 
+    def _normalize_compare_text(self, text: str) -> str:
+        txt = _clean_ocr_text(text or "")
+        txt = txt.lower()
+
+        # nur sehr leichte Normalisierung
+        txt = txt.replace("ſ", "s")
+        txt = txt.replace("ß", "ss")
+
+        # Satzzeichen weitgehend raus, Leerraum glätten
+        txt = re.sub(r"[^\w\s]", " ", txt, flags=re.UNICODE)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    def _text_similarity_ratio(self, a: str, b: str) -> float:
+        import difflib
+
+        aa = self._normalize_compare_text(a)
+        bb = self._normalize_compare_text(b)
+
+        if not aa and not bb:
+            return 1.0
+        if not aa or not bb:
+            return 0.0
+
+        return difflib.SequenceMatcher(None, aa, bb).ratio()
+
+    def _token_overlap_ratio(self, a: str, b: str) -> float:
+        aa = set(self._normalize_compare_text(a).split())
+        bb = set(self._normalize_compare_text(b).split())
+
+        if not aa and not bb:
+            return 1.0
+        if not aa or not bb:
+            return 0.0
+
+        inter = len(aa & bb)
+        base = max(1, min(len(aa), len(bb)))
+        return inter / base
+
+    def _looks_like_long_block(self, text: str) -> bool:
+        txt = _clean_ocr_text(text or "")
+        if not txt:
+            return False
+
+        # zu lang für eine einzelne Formular-/Kurzzeile
+        if len(txt) > 80:
+            return True
+
+        # ungewöhnlich viele Wörter -> eher zusammengezogene Nachbarzeilen
+        if len(txt.split()) > 12:
+            return True
+
+        # explizite Zeilenumbrüche sind hier verdächtig
+        if "\n" in txt:
+            return True
+
+        return False
+
+    def _page_text_is_safe_context(
+            self,
+            kraken_text: str,
+            box_text: str,
+            page_text: str,
+            prev_final_text: str = "",
+    ) -> bool:
+        pt = _clean_ocr_text(page_text or "")
+        bt = _clean_ocr_text(box_text or "")
+        kt = _clean_ocr_text(kraken_text or "")
+        prev = _clean_ocr_text(prev_final_text or "")
+
+        if not pt:
+            return False
+
+        # Niemals lange Blöcke aus Page-OCR übernehmen
+        if self._looks_like_long_block(pt):
+            return False
+
+        # Niemals Duplikat der vorherigen finalen Zeile erzeugen
+        if prev and self._normalize_compare_text(pt) == self._normalize_compare_text(prev):
+            return False
+
+        # Page darf nur helfen, wenn es lokal ähnlich genug ist
+        sim_box = self._text_similarity_ratio(pt, bt) if bt else 0.0
+        sim_kr = self._text_similarity_ratio(pt, kt) if kt else 0.0
+
+        tok_box = self._token_overlap_ratio(pt, bt) if bt else 0.0
+        tok_kr = self._token_overlap_ratio(pt, kt) if kt else 0.0
+
+        # sicher nur dann, wenn Page zur lokalen Zeile passt
+        if sim_box >= 0.72 or sim_kr >= 0.72:
+            return True
+
+        if tok_box >= 0.75 or tok_kr >= 0.75:
+            return True
+
+        return False
+
+    def _choose_final_line_text(
+            self,
+            kraken_text: str,
+            box_text: str,
+            page_text: str,
+            prev_final_text: str = "",
+    ) -> str:
+        kt = _clean_ocr_text(kraken_text or "")
+        bt = _clean_ocr_text(box_text or "")
+        pt = _clean_ocr_text(page_text or "")
+
+        # 1) Box ist Primärquelle
+        if bt and not self._looks_like_long_block(bt):
+            best = bt
+        else:
+            best = kt
+
+        # 2) Page nur als schwacher Kontext:
+        # nur wenn Box leer/fraglich ist UND Page nicht widerspricht
+        if self._page_text_is_safe_context(
+                kraken_text=kt,
+                box_text=bt,
+                page_text=pt,
+                prev_final_text=prev_final_text,
+        ):
+            # Nur dann auf Page gehen, wenn Box leer ist
+            # oder Box deutlich kürzer/kaputt wirkt als Page,
+            # aber Page trotzdem lokal ähnlich genug blieb.
+            if not bt:
+                best = pt
+            else:
+                sim_box_kr = self._text_similarity_ratio(bt, kt) if kt else 0.0
+                sim_page_kr = self._text_similarity_ratio(pt, kt) if kt else 0.0
+
+                # konservativ: Page nur nehmen, wenn es mindestens so plausibel wie Box wirkt
+                if sim_page_kr > sim_box_kr + 0.10 and len(pt) <= len(bt) + 12:
+                    best = pt
+
+        # 3) harter Schutz gegen Nachbar-Duplikate
+        if prev_final_text:
+            if self._normalize_compare_text(best) == self._normalize_compare_text(prev_final_text):
+                if kt and self._normalize_compare_text(kt) != self._normalize_compare_text(prev_final_text):
+                    best = kt
+                elif bt and self._normalize_compare_text(bt) != self._normalize_compare_text(prev_final_text):
+                    best = bt
+
+        # 4) niemals leer rausfallen, wenn Kraken was hatte
+        if not best:
+            best = bt or kt or pt
+
+        return _clean_ocr_text(best)
+
     def _request_page_ocr_with_fixed_linecount(self, page_data_url: str, recs: List[RecordView]) -> List[str]:
         img_w, img_h = _load_image_color(self.path).size
 
@@ -3611,12 +3900,6 @@ class AIRevisionWorker(QThread):
                 f"Seiten-OCR lieferte keine verwertbaren Zeilen: {filled}/{len(recs)}"
             )
 
-        for i in range(len(out)):
-            if not str(out[i]).strip():
-                out[i] = recs[i].text
-
-        # Leere Einzelzeilen gezielt mit Kraken-Original auffüllen,
-        # damit die Zeilenstruktur exakt erhalten bleibt
         for i in range(len(out)):
             if not str(out[i]).strip():
                 out[i] = recs[i].text
@@ -4261,41 +4544,28 @@ class AIRevisionWorker(QThread):
                 raise RuntimeError("Überarbeitung abgebrochen.")
 
             # -------------------------------------------------
-            # 3/3 Merge: BOX klar bevorzugen
+            # 3/3 Merge: BOX bleibt Primärquelle, PAGE nur schwacher Kontext
             # -------------------------------------------------
-            self.status_changed.emit(f"3/3 Merge mit Box-Priorität: {os.path.basename(self.path)}")
+            self.status_changed.emit(
+                f"3/3 Merge: Box primär, Page nur wenn lokal konsistent: {os.path.basename(self.path)}"
+            )
 
             final_lines: List[str] = []
 
             for i, rv in enumerate(self.recs):
-                if self._cancelled or self.isInterruptionRequested():
-                    raise RuntimeError("Überarbeitung abgebrochen.")
-
                 kraken_text = str(rv.text or "").strip()
-                page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
                 box_text = str(box_lines[i] if i < len(box_lines) else "").strip()
+                page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
+                prev_final = final_lines[i - 1] if i > 0 else ""
 
-                self.status_changed.emit(
-                    f"3/3 Merge Zeile {i + 1}/{total}: {os.path.basename(self.path)}"
+                best_text = self._choose_final_line_text(
+                    kraken_text=kraken_text,
+                    box_text=box_text,
+                    page_text=page_text,
+                    prev_final_text=prev_final,
                 )
 
-                try:
-                    best_text = self._request_line_decision(
-                        idx=rv.idx,
-                        kraken_text=kraken_text,
-                        page_text=page_text,
-                        box_text=box_text,
-                    )
-                except Exception as e:
-                    print(f"LINE DECISION ERROR idx={rv.idx}: {e}")
-                    best_text = box_text or kraken_text or page_text
-
-                best_text = str(best_text).strip()
-                if not best_text:
-                    best_text = box_text or kraken_text or page_text
-
                 final_lines.append(best_text)
-
                 self.progress_changed.emit(55 + int(((i + 1) / total) * 45))
 
             if len(final_lines) != len(self.recs):
@@ -4339,7 +4609,7 @@ class VoiceLineFillWorker(QThread):
             model_dir: str,
             device: str = "cpu",
             compute_type: str = "int8",
-            language: str = "de",
+            language: Optional[str] = None,
             input_device=None,
             parent=None
     ):
@@ -4352,12 +4622,23 @@ class VoiceLineFillWorker(QThread):
         self.language = language
         self.input_device = input_device
 
-        self._stop_requested = False
+        self._finish_requested = False
+        self._cancel_requested = False
         self._audio_chunks = []
         self._stream = None
 
     def stop(self):
-        self._stop_requested = True
+        # normales Ende der Aufnahme -> danach transkribieren
+        self._finish_requested = True
+        try:
+            if self._stream is not None:
+                self._stream.stop()
+        except Exception:
+            pass
+
+    def cancel(self):
+        # echter Abbruch -> nichts mehr transkribieren
+        self._cancel_requested = True
         self.requestInterruption()
         try:
             if self._stream is not None:
@@ -4367,9 +4648,15 @@ class VoiceLineFillWorker(QThread):
             pass
 
     def _audio_callback(self, indata, frames, time_info, status):
-        if self._stop_requested:
+        if self._cancel_requested:
             raise sd.CallbackStop()
-        self._audio_chunks.append(indata.copy())
+
+        # Nur echte Audiodaten puffern
+        if indata is not None and len(indata):
+            self._audio_chunks.append(indata.copy())
+
+        if self._finish_requested:
+            raise sd.CallbackStop()
 
     def _record_until_stop(self):
         self.status_changed.emit("Mikrofon aktiv. Bitte nur die aktuell ausgewählte Zeile diktieren.")
@@ -4384,7 +4671,12 @@ class VoiceLineFillWorker(QThread):
                 callback=self._audio_callback
         ) as stream:
             self._stream = stream
-            while not self._stop_requested and not self.isInterruptionRequested():
+
+            while True:
+                if self._cancel_requested or self.isInterruptionRequested():
+                    break
+                if self._finish_requested:
+                    break
                 self.msleep(100)
 
         self._stream = None
@@ -4509,6 +4801,26 @@ class VoiceLineFillWorker(QThread):
 
         return re.sub(r"\s+", " ", txt).strip()
 
+    def _write_temp_wav(self) -> str:
+        if not self._audio_chunks:
+            raise RuntimeError("Keine Audiodaten aufgenommen.")
+
+        audio = np.concatenate(self._audio_chunks, axis=0).flatten()
+        audio = np.clip(audio, -1.0, 1.0)
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+        pcm16 = (audio * 32767.0).astype(np.int16)
+
+        with wave.open(tmp_path, "wb") as wf:
+            wf.setnchannels(VOICE_CHANNELS)
+            wf.setsampwidth(2)
+            wf.setframerate(VOICE_SAMPLE_RATE)
+            wf.writeframes(pcm16.tobytes())
+
+        return tmp_path
+
     def run(self):
         tmp_wav = None
         try:
@@ -4518,8 +4830,14 @@ class VoiceLineFillWorker(QThread):
             self.progress_changed.emit(0)
             self._record_until_stop()
 
-            if self._stop_requested and not self._audio_chunks:
+            if self._cancel_requested or self.isInterruptionRequested():
                 raise RuntimeError("Aufnahme abgebrochen.")
+
+            if not self._finish_requested:
+                raise RuntimeError("Aufnahme wurde nicht regulär beendet.")
+
+            if not self._audio_chunks:
+                raise RuntimeError("Keine Audiodaten aufgenommen.")
 
             self.status_changed.emit("Audiodatei wird vorbereitet...")
             self.progress_changed.emit(20)
@@ -4539,13 +4857,25 @@ class VoiceLineFillWorker(QThread):
             self.status_changed.emit("Transkribiere ausgewählte Zeile lokal...")
             self.progress_changed.emit(60)
 
-            segments, info = model.transcribe(
-                tmp_wav,
-                language=self.language,
-                beam_size=5,
-                vad_filter=True,
-                condition_on_previous_text=False
-            )
+            kwargs = {
+                "beam_size": 5,
+                "vad_filter": True,
+                "condition_on_previous_text": False,
+                "task": "transcribe",
+            }
+
+            if self.language:
+                kwargs["language"] = self.language
+
+            segments, info = model.transcribe(tmp_wav, **kwargs)
+
+            try:
+                detected_lang = getattr(info, "language", None)
+                if detected_lang:
+                    self.status_changed.emit(f"Erkannte Sprache: {detected_lang}")
+            except Exception:
+                pass
+
             segments = list(segments)
 
             full_text = " ".join((seg.text or "").strip() for seg in segments).strip()
@@ -4873,7 +5203,7 @@ class MainWindow(QMainWindow):
         self.queue_table.customContextMenuRequested.connect(self.queue_context_menu)
         self.queue_table.currentCellChanged.connect(self.on_queue_current_cell_changed)
         self.queue_table.cellDoubleClicked.connect(self.on_queue_double_click)
-        self.queue_table.delete_pressed.connect(self._delete_queue_via_key)
+        self.queue_table.delete_pressed.connect(self.delete_current_context)
         self.queue_table.files_dropped.connect(self.add_files_to_queue)
         self.queue_table.table_resized.connect(self._fit_queue_columns_exact)
 
@@ -4901,7 +5231,7 @@ class MainWindow(QMainWindow):
         self.list_lines.itemChanged.connect(self.on_line_item_edited)
         self.list_lines.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_lines.customContextMenuRequested.connect(self.lines_context_menu)
-        self.list_lines.delete_pressed.connect(self._delete_current_line_via_key)
+        self.list_lines.delete_pressed.connect(self.delete_current_context)
         self.list_lines.reorder_committed.connect(self.on_lines_reordered)
 
         self.progress_bar = QProgressBar()
@@ -4977,6 +5307,94 @@ class MainWindow(QMainWindow):
         self.addAction(self.act_undo)
         self.addAction(self.act_redo)
 
+        # -----------------------------
+        # Globale Shortcuts
+        # -----------------------------
+        self.act_project_save_sc = QAction(self)
+        self.act_project_save_sc.setShortcut(QKeySequence("Ctrl+S"))
+        self.act_project_save_sc.triggered.connect(self.save_project)
+        self.addAction(self.act_project_save_sc)
+
+        self.act_project_save_as_sc = QAction(self)
+        self.act_project_save_as_sc.setShortcut(QKeySequence("Ctrl+Alt+S"))
+        self.act_project_save_as_sc.triggered.connect(self.save_project_as)
+        self.addAction(self.act_project_save_as_sc)
+
+        self.act_export_sc = QAction(self)
+        self.act_export_sc.setShortcut(QKeySequence("Ctrl+E"))
+        self.act_export_sc.triggered.connect(self.export_default_shortcut)
+        self.addAction(self.act_export_sc)
+
+        self.act_quit_sc = QAction(self)
+        self.act_quit_sc.setShortcut(QKeySequence("Ctrl+Q"))
+        self.act_quit_sc.triggered.connect(self.close)
+        self.addAction(self.act_quit_sc)
+
+        self.act_start_ocr_sc = QAction(self)
+        self.act_start_ocr_sc.setShortcut(QKeySequence("Ctrl+K"))
+        self.act_start_ocr_sc.triggered.connect(self.start_ocr)
+        self.addAction(self.act_start_ocr_sc)
+
+        self.act_stop_ocr_sc = QAction(self)
+        self.act_stop_ocr_sc.setShortcut(QKeySequence("Ctrl+P"))
+        self.act_stop_ocr_sc.triggered.connect(self.stop_ocr)
+        self.addAction(self.act_stop_ocr_sc)
+
+        self.act_reocr_sc = QAction(self)
+        self.act_reocr_sc.setShortcut(QKeySequence("Ctrl+W"))
+        self.act_reocr_sc.triggered.connect(self.reprocess_selected)
+        self.addAction(self.act_reocr_sc)
+
+        self.act_ai_revise_sc = QAction(self)
+        self.act_ai_revise_sc.setShortcut(QKeySequence("Ctrl+L"))
+        self.act_ai_revise_sc.triggered.connect(self.run_ai_revision)
+        self.addAction(self.act_ai_revise_sc)
+
+        self.act_voice_fill_sc = QAction(self)
+        self.act_voice_fill_sc.setShortcut(QKeySequence("Ctrl+M"))
+        self.act_voice_fill_sc.triggered.connect(self.run_voice_line_fill)
+        self.addAction(self.act_voice_fill_sc)
+
+        self.act_help_shortcuts_sc = QAction(self)
+        self.act_help_shortcuts_sc.setShortcut(QKeySequence(Qt.Key_F1))
+        self.act_help_shortcuts_sc.triggered.connect(self.show_lm_help_dialog)
+        self.addAction(self.act_help_shortcuts_sc)
+
+        self.act_choose_rec_sc = QAction(self)
+        self.act_choose_rec_sc.setShortcut(QKeySequence(Qt.Key_F2))
+        self.act_choose_rec_sc.triggered.connect(self.choose_rec_model_if_missing)
+        self.addAction(self.act_choose_rec_sc)
+
+        self.act_choose_seg_sc = QAction(self)
+        self.act_choose_seg_sc.setShortcut(QKeySequence(Qt.Key_F3))
+        self.act_choose_seg_sc.triggered.connect(self.choose_seg_model_if_missing)
+        self.addAction(self.act_choose_seg_sc)
+
+        self.act_manual_lm_url_sc = QAction(self)
+        self.act_manual_lm_url_sc.setShortcut(QKeySequence(Qt.Key_F4))
+        self.act_manual_lm_url_sc.triggered.connect(self.set_manual_ai_base_url_dialog)
+        self.addAction(self.act_manual_lm_url_sc)
+
+        self.act_scan_lm_sc = QAction(self)
+        self.act_scan_lm_sc.setShortcut(QKeySequence(Qt.Key_F5))
+        self.act_scan_lm_sc.triggered.connect(self.scan_ai_models_now)
+        self.addAction(self.act_scan_lm_sc)
+
+        self.act_toggle_log_sc = QAction(self)
+        self.act_toggle_log_sc.setShortcut(QKeySequence(Qt.Key_F6))
+        self.act_toggle_log_sc.triggered.connect(lambda: self.act_toggle_log.toggle())
+        self.addAction(self.act_toggle_log_sc)
+
+        self.act_select_all_context_sc = QAction(self)
+        self.act_select_all_context_sc.setShortcut(QKeySequence.SelectAll)
+        self.act_select_all_context_sc.triggered.connect(self.select_all_current_context)
+        self.addAction(self.act_select_all_context_sc)
+
+        self.act_delete_context_sc = QAction(self)
+        self.act_delete_context_sc.setShortcut(QKeySequence.Delete)
+        self.act_delete_context_sc.triggered.connect(self.delete_current_context)
+        self.addAction(self.act_delete_context_sc)
+
         self.btn_rec_model = QPushButton("Rec-Modell: -")
         self.btn_rec_model.setIcon(QIcon.fromTheme("document-open"))
         self.btn_rec_model.clicked.connect(self.choose_rec_model)
@@ -5003,6 +5421,136 @@ class MainWindow(QMainWindow):
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
 
+    def choose_rec_model_if_missing(self):
+        if not self.model_path:
+            self.choose_rec_model()
+
+    def choose_seg_model_if_missing(self):
+        if not self.seg_model_path:
+            self.choose_seg_model()
+
+    def export_default_shortcut(self):
+        items = [
+            ("Text (.txt)", "txt"),
+            ("CSV (.csv)", "csv"),
+            ("JSON (.json)", "json"),
+            ("ALTO (.xml)", "alto"),
+            ("hOCR (.html)", "hocr"),
+            ("PDF (.pdf)", "pdf"),
+        ]
+        names = [x[0] for x in items]
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Export",
+            "Exportformat wählen:",
+            names,
+            0,
+            False
+        )
+        if not ok or not choice:
+            return
+
+        fmt = next(fmt for name, fmt in items if name == choice)
+        self.export_flow(fmt)
+
+    def _overlay_selected_rows(self) -> List[int]:
+        return sorted(set(int(i) for i in getattr(self.canvas, "_selected_indices", set()) if i is not None))
+
+    def _has_overlay_selection(self) -> bool:
+        return len(self._overlay_selected_rows()) > 0
+
+    def _has_line_selection(self) -> bool:
+        return len(self._selected_line_rows()) > 0
+
+    def delete_current_context(self):
+        """
+        Entf:
+        - wenn Overlay-Box(en) ausgewählt -> Box(en) + zugehörige Zeile(n) löschen
+        - sonst wenn Zeile(n) ausgewählt -> Zeile(n) + Box(en) löschen
+        - sonst Queue-Löschen wie bisher
+        """
+        task = self._current_task()
+
+        overlay_rows = self._overlay_selected_rows()
+        line_rows = self._selected_line_rows()
+
+        if task and task.results and task.status == STATUS_DONE:
+            rows = overlay_rows if overlay_rows else line_rows
+            if rows:
+                self._delete_multiple_lines(task, rows)
+                return
+
+        # Fallback wie bisher
+        if self.queue_table.hasFocus():
+            self.delete_selected_queue_items(reset_preview=True)
+
+    def select_all_current_context(self):
+        """
+        Ctrl+A:
+        - wenn Zeilenliste oder Canvas aktiv -> alle Zeilen + alle Overlays auswählen
+        - sonst normales Queue-Verhalten
+        """
+        task = self._current_task()
+        if not task or not task.results:
+            if self.queue_table.rowCount() > 0:
+                self.queue_table.selectAll()
+            return
+
+        fw = QApplication.focusWidget()
+
+        canvas_has_focus = (fw is self.canvas or fw is self.canvas.viewport())
+        lines_has_focus = (fw is self.list_lines or self.list_lines.isAncestorOf(fw))
+
+        if canvas_has_focus or lines_has_focus or self._has_overlay_selection() or self._has_line_selection():
+            _, _, _, recs = task.results
+            indices = list(range(len(recs)))
+
+            self.list_lines.blockSignals(True)
+            self.list_lines.clearSelection()
+            for idx in indices:
+                if 0 <= idx < self.list_lines.count():
+                    it = self.list_lines.item(idx)
+                    if it:
+                        it.setSelected(True)
+            if indices:
+                self.list_lines.setCurrentRow(indices[0])
+            self.list_lines.blockSignals(False)
+
+            self.canvas.select_indices(indices, center=False)
+            self.canvas.overlay_multi_selected.emit(indices)
+            return
+
+        # Fallback: Queue
+        if self.queue_table.rowCount() > 0:
+            self.queue_table.selectAll()
+
+    def _delete_multiple_lines(self, task: TaskItem, rows: List[int]):
+        if not task.results:
+            return
+
+        text, kr_records, im, recs = task.results
+        clean_rows = sorted(set(int(r) for r in rows if 0 <= int(r) < len(recs)), reverse=True)
+        if not clean_rows:
+            return
+
+        self._push_undo(task)
+
+        for row in clean_rows:
+            recs.pop(row)
+
+        task.edited = True
+
+        next_row = None
+        if recs:
+            lowest_removed = min(clean_rows)
+            next_row = max(0, min(lowest_removed, len(recs) - 1))
+
+        self._sync_ui_after_recs_change(task, keep_row=next_row)
+
+    def show_shortcuts_dialog(self):
+        self.show_lm_help_dialog()
+
     def _start_voice_line_fill_with_device(self, input_device):
         task = self._current_task()
         if not task or task.status != STATUS_DONE or not task.results:
@@ -5027,12 +5575,14 @@ class MainWindow(QMainWindow):
             model_dir=FASTER_WHISPER_MODEL_DIR,
             device=fw_device,
             compute_type=fw_compute,
-            language="de",
+            language=None,
             input_device=input_device,
             parent=self
         )
         self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
         self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
+        self.voice_worker.progress_changed.connect(self.on_voice_progress_changed)
+        self.voice_worker.status_changed.connect(self.on_voice_status_changed)
 
         task.status = STATUS_VOICE_RECORDING
         self._update_queue_row(task.path)
@@ -5042,11 +5592,12 @@ class MainWindow(QMainWindow):
         if self.voice_record_dialog:
             self.voice_record_dialog.set_recording_state(True)
 
+        self._set_progress_idle(0)
         self.voice_worker.start()
 
     def _cancel_voice_record_dialog(self):
         if self.voice_worker and self.voice_worker.isRunning():
-            self.voice_worker.stop()
+            self.voice_worker.cancel()
 
     def _get_input_audio_devices(self) -> List[dict]:
         out = []
@@ -5344,7 +5895,7 @@ class MainWindow(QMainWindow):
             self.act_llm_status.setText(f"LLM: {display}")
 
         if hasattr(self, "act_lm_status"):
-            self.act_lm_status.setText(f"Status: {display}")
+            self.act_lm_status.setText(f"Model: {display}")
 
         if hasattr(self, "act_lm_mode"):
             self.act_lm_mode.setText(f"Modus: {mode_label}")
@@ -5519,16 +6070,21 @@ class MainWindow(QMainWindow):
             empty_act = QAction("(keine Modelle – bitte Scannen)", self)
             empty_act.setEnabled(False)
             self.ai_models_submenu.addAction(empty_act)
-            return
+        else:
+            for model_id in self.ai_available_models:
+                act = QAction(model_id, self)
+                act.setCheckable(True)
+                act.setChecked(model_id == self.ai_model_id)
+                act.triggered.connect(lambda checked, mid=model_id: self._set_ai_model(mid))
+                self.ai_model_group.addAction(act)
+                self.ai_models_submenu.addAction(act)
+                self.ai_model_actions[model_id] = act
 
-        for model_id in self.ai_available_models:
-            act = QAction(model_id, self)
-            act.setCheckable(True)
-            act.setChecked(model_id == self.ai_model_id)
-            act.triggered.connect(lambda checked, mid=model_id: self._set_ai_model(mid))
-            self.ai_model_group.addAction(act)
-            self.ai_models_submenu.addAction(act)
-            self.ai_model_actions[model_id] = act
+        self.ai_models_submenu.addSeparator()
+        self.act_clear_ai_model = QAction("LM-Model entfernen", self)
+        self.act_clear_ai_model.triggered.connect(self.clear_ai_model)
+        self.act_clear_ai_model.setEnabled(bool(self.ai_model_id or self.ai_available_models))
+        self.ai_models_submenu.addAction(self.act_clear_ai_model)
 
     def choose_ai_model_dialog(self):
         models = self._fetch_loaded_llm_models(force=True)
@@ -5540,8 +6096,8 @@ class MainWindow(QMainWindow):
 
         selected, ok = QInputDialog.getItem(
             self,
-            "LM-Modell ändern",
-            "Zu nutzendes LM-Modell auswählen:",
+            "LM-Model ändern",
+            "Zu nutzendes LM-Model auswählen:",
             models,
             max(0, models.index(current)),
             False
@@ -5553,6 +6109,8 @@ class MainWindow(QMainWindow):
         self.refresh_models_menu_status()
 
     def _current_ai_mode_label(self) -> str:
+        if not (self.ai_model_id or "").strip():
+            return "-"
         return "Manuell" if self.ai_mode == "manual" else "Auto"
 
     def _set_ai_model(self, model_id: str):
@@ -5569,6 +6127,28 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
         else:
             self.status_bar.showMessage("LM-Modellwahl gelöscht.")
+
+    def clear_ai_model(self):
+        self.ai_model_id = ""
+        self.ai_available_models = []
+
+        # alles zurücksetzen
+        self.ai_base_url = None
+        self.ai_manual_base_url = ""
+        self.ai_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
+        self.ai_mode = ""
+
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+
+        self._rebuild_ai_model_submenu()
+        self._update_ai_model_ui()
+        self.refresh_models_menu_status()
+
+        self.status_bar.showMessage("LM-Model entfernt.")
 
     def _swap_lines(self, task: TaskItem, row_a: int, row_b: int):
         if not task or not task.results:
@@ -5609,6 +6189,60 @@ class MainWindow(QMainWindow):
 
         self._swap_lines(task, row, target - 1)
 
+    def _project_base_dir(self) -> str:
+        if self.project_file_path:
+            return os.path.dirname(os.path.abspath(self.project_file_path))
+        return os.getcwd()
+
+    def _make_hybrid_paths_for_task(self, task: TaskItem) -> tuple[str, str]:
+        abs_path = os.path.abspath(task.path)
+        rel_path = ""
+
+        try:
+            base_dir = self._project_base_dir()
+            rel_candidate = os.path.relpath(abs_path, base_dir)
+
+            # nur sinnvoll, wenn wirklich relativ und nicht auf anderes Laufwerk springt
+            if not os.path.isabs(rel_candidate) and not rel_candidate.startswith(".."):
+                rel_path = rel_candidate
+            else:
+                # auch '../...' ist als relativer Pfad technisch gültig,
+                # wenn du das erlauben willst, nimm stattdessen einfach:
+                # rel_path = rel_candidate
+                rel_path = rel_candidate
+        except Exception:
+            rel_path = os.path.basename(abs_path)
+
+        return abs_path, rel_path
+
+    def _resolve_hybrid_task_path(self, data: dict) -> str:
+        absolute_path = str(data.get("absolute_path", "")).strip()
+        relative_path = str(data.get("relative_path", "")).strip()
+        legacy_path = str(data.get("path", "")).strip()
+
+        # 1) absoluter Pfad
+        if absolute_path and os.path.exists(absolute_path):
+            return os.path.abspath(absolute_path)
+
+        # 2) relativer Pfad zum Projektordner
+        if relative_path:
+            candidate = os.path.normpath(os.path.join(self._project_base_dir(), relative_path))
+            if os.path.exists(candidate):
+                return candidate
+
+        # 3) alter path-Eintrag als Fallback
+        if legacy_path and os.path.exists(legacy_path):
+            return os.path.abspath(legacy_path)
+
+        # 4) best effort: absoluten Pfad zurückgeben, sonst relativen Kandidaten, sonst legacy
+        if absolute_path:
+            return os.path.abspath(absolute_path)
+
+        if relative_path:
+            return os.path.normpath(os.path.join(self._project_base_dir(), relative_path))
+
+        return legacy_path
+
     def _recordview_to_dict(self, rv: RecordView) -> dict:
         return {
             "idx": int(rv.idx),
@@ -5627,13 +6261,16 @@ class MainWindow(QMainWindow):
         )
 
     def _task_to_dict(self, task: TaskItem) -> dict:
+        abs_path, rel_path = self._make_hybrid_paths_for_task(task)
+
         payload = {
-            "path": task.path,
+            "path": abs_path,                 # Legacy/Fallback
+            "absolute_path": abs_path,       # neu
+            "relative_path": rel_path,       # neu: echter relativer Pfad
             "display_name": task.display_name,
             "status": int(task.status),
             "edited": bool(task.edited),
             "source_kind": task.source_kind,
-            "relative_path": os.path.basename(task.path),
             "undo_stack": [],
             "redo_stack": [],
             "results": None,
@@ -5646,13 +6283,18 @@ class MainWindow(QMainWindow):
         return payload
 
     def _task_from_dict(self, data: dict) -> TaskItem:
+        resolved_path = self._resolve_hybrid_task_path(data)
+
+        display_name_default = os.path.basename(resolved_path) if resolved_path else os.path.basename(str(data.get("path", "")))
+        rel_default = str(data.get("relative_path", "")).strip()
+
         task = TaskItem(
-            path=str(data.get("path", "")),
-            display_name=str(data.get("display_name", os.path.basename(str(data.get("path", ""))))),
+            path=resolved_path,
+            display_name=str(data.get("display_name", display_name_default)),
             status=int(data.get("status", STATUS_WAITING)),
             edited=bool(data.get("edited", False)),
             source_kind=str(data.get("source_kind", "image")),
-            relative_path=str(data.get("relative_path", os.path.basename(str(data.get("path", ""))))),
+            relative_path=rel_default,
         )
 
         results = data.get("results")
@@ -5675,7 +6317,8 @@ class MainWindow(QMainWindow):
         current_row = self.queue_table.currentRow()
 
         return {
-            "version": 1,
+            "version": 2,
+            "project_base_dir": self._project_base_dir(),
             "settings": {
                 "language": self.current_lang,
                 "reading_direction": self.reading_direction,
@@ -5723,11 +6366,13 @@ class MainWindow(QMainWindow):
             rel = (task.relative_path or "").strip()
             old_path = (task.path or "").strip()
 
+            # 1) echter relativer Pfad innerhalb des neuen Basisordners
             if rel:
-                candidates.append(os.path.join(new_base_dir, rel))
+                candidates.append(os.path.normpath(os.path.join(new_base_dir, rel)))
 
+            # 2) nur Dateiname als Fallback
             if old_path:
-                candidates.append(os.path.join(new_base_dir, os.path.basename(old_path)))
+                candidates.append(os.path.normpath(os.path.join(new_base_dir, os.path.basename(old_path))))
 
             # doppelte Kandidaten vermeiden
             seen = set()
@@ -5929,6 +6574,12 @@ class MainWindow(QMainWindow):
             self.current_export_dir or os.getcwd(),
             self._tr("dlg_filter_project")
         )
+        if not path:
+            return
+
+        self.load_project_from_path(path)
+
+    def load_project_from_path(self, path: str):
         if not path:
             return
 
@@ -6151,10 +6802,10 @@ class MainWindow(QMainWindow):
     def refresh_models_menu_status(self):
         model_name = self._get_active_ai_model_display()
         mode_label = self._current_ai_mode_label()
-        base_url = self.ai_base_url or "-"
+        base_url = self.ai_base_url if (self.ai_base_url and self.ai_model_id) else "-"
 
         if hasattr(self, "act_lm_status"):
-            self.act_lm_status.setText(f"Status: {model_name}")
+            self.act_lm_status.setText(f"Model: {model_name}")
 
         if hasattr(self, "act_lm_mode"):
             self.act_lm_mode.setText(f"Modus: {mode_label}")
@@ -6508,10 +7159,23 @@ class MainWindow(QMainWindow):
         self.voice_record_dialog.cancel_requested.connect(self._cancel_voice_record_dialog)
         self.voice_record_dialog.show()
 
+    def on_voice_progress_changed(self, value: int):
+        self._set_progress_idle(value)
+
+    def on_voice_status_changed(self, text: str):
+        self.status_bar.showMessage(text)
+        if text.startswith("Erkannte Sprache:"):
+            self._log(text)
+
     def stop_voice_line_fill(self):
         if self.voice_worker and self.voice_worker.isRunning():
             self.status_bar.showMessage(self._tr("msg_voice_stopped"))
             self._log("Sprachaufnahme wird gestoppt...")
+
+            if self.voice_record_dialog:
+                self.voice_record_dialog.set_recording_state(False)
+
+            self._set_progress_idle(0)
             self.voice_worker.stop()
 
     def on_voice_line_fill_done(self, path: str, line_index: int, new_text: str):
@@ -6556,6 +7220,8 @@ class MainWindow(QMainWindow):
             self.voice_record_dialog.close()
             self.voice_record_dialog = None
 
+        self._set_progress_idle(100)
+
         self.status_bar.showMessage(self._tr("msg_voice_done"))
         self._log(
             f"Sprachimport abgeschlossen: {os.path.basename(path)} | "
@@ -6573,6 +7239,8 @@ class MainWindow(QMainWindow):
         if self.voice_record_dialog:
             self.voice_record_dialog.close()
             self.voice_record_dialog = None
+
+        self._set_progress_idle(0)
 
         self.status_bar.showMessage(self._tr("msg_voice_cancelled"))
         self._log(f"Sprachimport Fehler: {os.path.basename(path)} -> {msg}")
@@ -6928,7 +7596,6 @@ class MainWindow(QMainWindow):
         self.toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         self.toolbar.addAction(self.act_add)
-        self.toolbar.addAction(self.act_clear)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.act_play)
         self.toolbar.addAction(self.act_stop)
@@ -6973,7 +7640,19 @@ class MainWindow(QMainWindow):
         self._update_model_clear_buttons()
 
         right = QVBoxLayout()
-        right.addWidget(self.lbl_queue)
+
+        queue_head = QHBoxLayout()
+        queue_head.setContentsMargins(0, 0, 0, 0)
+        queue_head.setSpacing(6)
+
+        queue_head.addWidget(self.lbl_queue)
+        queue_head.addStretch(1)
+
+        self.btn_clear_queue = QPushButton(self._tr("act_clear_queue"))
+        self.btn_clear_queue.clicked.connect(self.clear_queue)
+        queue_head.addWidget(self.btn_clear_queue, 0, Qt.AlignRight)
+
+        right.addLayout(queue_head)
         right.addWidget(self.queue_table, 2)
 
         # NEU: Logbereich unter der Queue
@@ -7217,6 +7896,9 @@ class MainWindow(QMainWindow):
 
         self.revision_models_menu = menubar.addMenu("LM-Optionen")
 
+        self.act_lm_help = menubar.addAction("?")
+        self.act_lm_help.triggered.connect(self.show_lm_help_dialog)
+
         self.act_set_manual_lm_url = QAction("Localhost-Pfad eintragen...", self)
         self.act_set_manual_lm_url.triggered.connect(self.set_manual_ai_base_url_dialog)
         self.revision_models_menu.addAction(self.act_set_manual_lm_url)
@@ -7231,18 +7913,20 @@ class MainWindow(QMainWindow):
         self.act_scan_lm.triggered.connect(self.scan_ai_models_now)
         self.revision_models_menu.addAction(self.act_scan_lm)
 
-        self.ai_models_submenu = self.revision_models_menu.addMenu("LM-Modell")
+        self.revision_models_menu.addSeparator()
+
+        self.ai_models_submenu = self.revision_models_menu.addMenu("verfügbare LM-Model")
         self.ai_model_group = QActionGroup(self)
         self.ai_model_group.setExclusive(True)
         self._rebuild_ai_model_submenu()
 
         self.revision_models_menu.addSeparator()
 
-        self.act_lm_status = QAction("Status: -", self)
+        self.act_lm_status = QAction("Model: -", self)
         self.act_lm_status.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_status)
 
-        self.act_lm_mode = QAction("Modus: Auto", self)
+        self.act_lm_mode = QAction("Modus: -", self)
         self.act_lm_mode.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_mode)
 
@@ -7579,6 +8263,8 @@ class MainWindow(QMainWindow):
             self.act_paste_files_menu.setText(self._tr("act_paste_clipboard"))
         if hasattr(self, "btn_voice_fill"):
             self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
+        if hasattr(self, "btn_clear_queue"):
+            self.btn_clear_queue.setText(self._tr("act_clear_queue"))
 
         self.act_undo.setText(self._tr("act_undo"))
         self.act_redo.setText(self._tr("act_redo"))
@@ -7731,22 +8417,31 @@ class MainWindow(QMainWindow):
     # Drag & Drop im Hauptfenster
     # -----------------------------
     def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasUrls():
             event.ignore()
+            return
+
+        for u in event.mimeData().urls():
+            p = u.toLocalFile()
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
+                event.acceptProposedAction()
+                return
+
+        event.ignore()
 
     def dropEvent(self, event: QDropEvent):
         if not event.mimeData().hasUrls():
             event.ignore()
             return
+
         files = []
         for u in event.mimeData().urls():
             p = u.toLocalFile()
-            if p and os.path.exists(p) and is_supported_input(p):
+            if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
                 files.append(p)
+
         if files:
-            self.add_files_to_queue(files)
+            self.files_dropped.emit(files)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -7765,7 +8460,7 @@ class MainWindow(QMainWindow):
             if md.hasUrls():
                 for url in md.urls():
                     p = url.toLocalFile()
-                    if p and os.path.exists(p) and is_supported_input(p):
+                    if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
                         files.append(p)
 
             # Fallback: Textliste mit Dateipfaden
@@ -7774,7 +8469,7 @@ class MainWindow(QMainWindow):
                 if raw:
                     parts = [x.strip().strip('"') for x in raw.splitlines() if x.strip()]
                     for p in parts:
-                        if os.path.exists(p) and is_supported_input(p):
+                        if os.path.exists(p) and is_supported_drop_or_paste_file(p):
                             files.append(p)
 
             # Windows-Fallback: rohe Mime-Formate prüfen
@@ -7790,7 +8485,7 @@ class MainWindow(QMainWindow):
 
                         for candidate in re.split(r'[\r\n]+', txt):
                             candidate = candidate.strip().strip('"')
-                            if os.path.exists(candidate) and is_supported_input(candidate):
+                            if os.path.exists(candidate) and is_supported_drop_or_paste_file(candidate):
                                 files.append(candidate)
                     except Exception:
                         pass
@@ -7810,11 +8505,20 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 self._tr("info_title"),
-                "In der Zwischenablage wurden keine unterstützten Dateien gefunden."
+                "In der Zwischenablage wurden keine unterstützten Bild-, PDF- oder Projektdateien gefunden."
             )
 
     def choose_files(self):
-        files, _ = QFileDialog.getOpenFileNames(self, self._tr("dlg_load_img"), "", self._tr("dlg_filter_img"))
+        file_filter = (
+            f"{self._tr('dlg_filter_img')};;"
+            f"{self._tr('dlg_filter_project')}"
+        )
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            self._tr("dlg_load_img"),
+            "",
+            file_filter
+        )
         if files:
             self.add_files_to_queue(files)
 
@@ -7922,22 +8626,34 @@ class MainWindow(QMainWindow):
         last_added = None
         added_count = 0
 
+        project_files = []
+        normal_files = []
+
         for p in paths:
             if not p or not os.path.exists(p):
                 continue
-            if not is_supported_input(p):
-                continue
 
+            if is_project_file(p):
+                project_files.append(p)
+            elif is_supported_input(p):
+                normal_files.append(p)
+
+        # Projektdatei hat Vorrang
+        if project_files:
+            self.load_project_from_path(project_files[0])
+            return
+
+        for p in normal_files:
             ext = os.path.splitext(p)[1].lower()
 
             if ext == ".pdf":
                 self._start_pdf_render_async(p, dpi=300)
-                added_any = True  # damit dein Log/Hint-Update unten nicht „vergisst“
+                added_any = True
                 continue
 
-            # normale Bilder
             if any(it.path == p for it in self.queue_items):
                 continue
+
             self._add_file_to_queue_single(p)
             added_any = True
             last_added = p
@@ -9411,6 +10127,77 @@ class MainWindow(QMainWindow):
                     "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
                 ) from e
             return
+
+    def show_lm_help_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("LM-Optionen – Hilfe")
+        dlg.resize(950, 520)
+
+        layout = QVBoxLayout(dlg)
+
+        table = QTableWidget(1, 2, dlg)
+        table.setHorizontalHeaderLabels(["Ablauf", "Shortcuts"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.setWordWrap(True)
+        table.setAlternatingRowColors(True)
+
+        left_text = (
+            "Ablauf:\n"
+            "1. Bild/PDF laden\n"
+            "2. Kraken-Rec-Model laden\n"
+            "3. Kraken-Seg-Model laden\n"
+            "4. Kraken-OCR starten\n\n"
+            "(Optional)\n"
+            "5. LM-Model (per LM-Studio) laden\n"
+            "6. LM-Überarbeitung starten\n\n"
+            "(Optional)\n"
+            "7. einzelne Zeilen mit Mikrofon einsprechen\n"
+            "8. Zeilen (txt-Format) importieren\n\n"
+            "(Zusatz)\n"
+            "- Zeilen und (rote) Overlay-Boxen können jederzeit angepasst/editiert werden"
+        )
+
+        right_text = (
+            "Ctrl+S  → Projekt speichern\n"
+            "Ctrl+Alt+S  → Projekt speichern unter\n"
+            "Ctrl+E  → Export\n"
+            "Ctrl+Q  → Programm beenden\n\n"
+            "Ctrl+K  → Kraken-OCR starten\n"
+            "Ctrl+P  → Kraken-OCR stoppen\n"
+            "Ctrl+W  → Kraken-OCR wiederholen\n"
+            "Ctrl+L  → LM-Überarbeitung starten\n"
+            "Ctrl+M  → Faster-Whisper / Mikrofon starten\n\n"
+            "Ctrl+A  → Alles im aktuellen Kontext auswählen\n"
+            "Entf  → Ausgewählte Zeile(n) / Overlay-Box(en) löschen\n\n"
+            "F1  → Shortcut-Hilfe\n"
+            "F2  → Kraken-Recognition-Modell laden\n"
+            "F3  → Kraken-Segmentierungs-Modell laden\n"
+            "F4  → LM-Localhost-Pfad eingeben\n"
+            "F5  → LM-Scan starten\n"
+            "F6  → Log-Fenster ein/aus"
+        )
+
+        left_item = QTableWidgetItem(left_text)
+        right_item = QTableWidgetItem(right_text)
+
+        left_item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+        right_item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+
+        table.setItem(0, 0, left_item)
+        table.setItem(0, 1, right_item)
+
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        layout.addWidget(table)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(dlg.accept)
+        layout.addWidget(buttons)
+
+        dlg.exec()
 
     def closeEvent(self, event):
         try:
