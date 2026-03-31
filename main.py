@@ -25,6 +25,10 @@ import queue
 import wave
 import numpy as np
 import sounddevice as sd
+try:
+    import pyi_splash
+except Exception:
+    pyi_splash = None
 
 
 # GUI-Framework
@@ -37,13 +41,15 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox,
-    QLabel, QWidget, QPushButton, QProgressBar, QVBoxLayout, QHBoxLayout,
+    QLabel, QWidget, QPushButton, QProgressBar, QProgressDialog,
+    QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QGraphicsView, QGraphicsScene,
     QGraphicsRectItem, QGraphicsSimpleTextItem, QSplitter, QStatusBar,
     QMenu, QTableWidget, QTableWidgetItem, QHeaderView, QToolBar,
     QAbstractItemView, QInputDialog, QDialog, QDialogButtonBox, QRadioButton,
     QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit,
-    QToolButton, QProgressDialog, QLineEdit, QTextEdit, QComboBox
+    QToolButton, QSplashScreen, QLineEdit, QTextEdit, QComboBox,
+    QTextBrowser, QScrollArea
 )
 
 # PySide-Helfer zur Objekt-Validitätsprüfung
@@ -122,7 +128,7 @@ STATUS_VOICE_RECORDING = 6
 
 STATUS_ICONS[STATUS_VOICE_RECORDING] = "🎤"
 
-FASTER_WHISPER_MODEL_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + LM + Whisper\whisper-large-v3-ct2"
+DEFAULT_FASTER_WHISPER_MODEL_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + LM + Whisper"
 VOICE_SAMPLE_RATE = 16000
 VOICE_CHANNELS = 1
 VOICE_BLOCKSIZE = 1024
@@ -4867,7 +4873,14 @@ class VoiceLineFillWorker(QThread):
             if self.language:
                 kwargs["language"] = self.language
 
-            segments, info = model.transcribe(tmp_wav, **kwargs)
+            try:
+                segments, info = model.transcribe(tmp_wav, **kwargs)
+            except Exception as e:
+                if "silero_vad_v6.onnx" in str(e):
+                    kwargs["vad_filter"] = False
+                    segments, info = model.transcribe(tmp_wav, **kwargs)
+                else:
+                    raise
 
             try:
                 detected_lang = getattr(info, "language", None)
@@ -4931,33 +4944,26 @@ class ProgressStatusDialog(QDialog):
         self.progress.setValue(max(0, min(100, int(value))))
 
 class VoiceRecordDialog(QDialog):
-    start_requested = Signal(object)   # device_index oder None
+    start_requested = Signal()
     stop_requested = Signal()
     cancel_requested = Signal()
 
-    def __init__(self, tr, devices: List[dict], parent=None):
+    def __init__(self, tr, parent=None):
         super().__init__(parent)
         self._tr = tr
-        self._devices = devices or []
 
         self.setWindowTitle("Audioaufnahme")
         self.setModal(True)
 
         lay = QVBoxLayout(self)
 
-        self.lbl_info = QLabel("Audioaufnahmegerät auswählen:")
+        self.lbl_info = QLabel("Steuerung der Audioaufnahme:")
         lay.addWidget(self.lbl_info)
-
-        self.cmb_devices = QComboBox()
-        lay.addWidget(self.cmb_devices)
-
-        for dev in self._devices:
-            self.cmb_devices.addItem(dev["label"], dev["index"])
 
         btn_row = QHBoxLayout()
 
-        self.btn_start = QPushButton("Audioaufnahme starten")
-        self.btn_stop = QPushButton("Audioaufnahme beenden")
+        self.btn_start = QPushButton("Aufnahme starten")
+        self.btn_stop = QPushButton("Aufnahme stoppen")
         self.btn_cancel = QPushButton("Abbrechen")
 
         self.btn_stop.setEnabled(False)
@@ -4972,16 +4978,10 @@ class VoiceRecordDialog(QDialog):
         self.btn_stop.clicked.connect(self._on_stop)
         self.btn_cancel.clicked.connect(self._on_cancel)
 
-    def selected_device(self):
-        if self.cmb_devices.count() <= 0:
-            return None
-        return self.cmb_devices.currentData()
-
     def _on_start(self):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
-        self.cmb_devices.setEnabled(False)
-        self.start_requested.emit(self.selected_device())
+        self.start_requested.emit()
 
     def _on_stop(self):
         self.btn_stop.setEnabled(False)
@@ -4994,7 +4994,6 @@ class VoiceRecordDialog(QDialog):
     def set_recording_state(self, recording: bool):
         self.btn_start.setEnabled(not recording)
         self.btn_stop.setEnabled(recording)
-        self.cmb_devices.setEnabled(not recording)
 
     def closeEvent(self, event):
         self.cancel_requested.emit()
@@ -5145,6 +5144,14 @@ class MainWindow(QMainWindow):
 
         self.voice_worker: Optional[VoiceLineFillWorker] = None
         self.voice_record_dialog: Optional[VoiceRecordDialog] = None
+
+        self.whisper_models_base_dir = DEFAULT_FASTER_WHISPER_MODEL_DIR
+        self.whisper_available_models: List[str] = []
+        self.whisper_model_path = ""
+        self.whisper_model_name = ""
+        self.whisper_model_loaded = False
+        self.whisper_selected_input_device = None
+        self.whisper_selected_input_device_label = ""
 
         self.reading_direction = READING_MODES["TB_LR"]
         self.device_str = "cpu"
@@ -5421,6 +5428,160 @@ class MainWindow(QMainWindow):
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
 
+    def _normalize_whisper_base_dir(self, raw: str) -> str:
+        return os.path.abspath((raw or "").strip()) if (raw or "").strip() else ""
+
+    def _scan_whisper_models(self) -> List[str]:
+        self.whisper_available_models = []
+
+        base = self._normalize_whisper_base_dir(self.whisper_models_base_dir)
+        if not base or not os.path.isdir(base):
+            return []
+
+        out = []
+
+        # Fall A: Basisordner selbst ist schon ein Modellordner
+        if os.path.isfile(os.path.join(base, "model.bin")):
+            out.append(base)
+
+        # Fall B: Unterordner enthalten Modelle
+        try:
+            for name in sorted(os.listdir(base)):
+                full = os.path.join(base, name)
+                if os.path.isdir(full) and os.path.isfile(os.path.join(full, "model.bin")):
+                    out.append(full)
+        except Exception:
+            pass
+
+        self.whisper_available_models = out
+        return out
+
+    def _set_whisper_model(self, model_path: str):
+        model_path = os.path.abspath(model_path) if model_path else ""
+        self.whisper_model_path = model_path
+        self.whisper_model_name = os.path.basename(model_path) if model_path else ""
+        self.whisper_model_loaded = bool(model_path)
+        self._rebuild_whisper_model_submenu()
+        self._update_whisper_menu_status()
+
+    def _clear_whisper_model(self):
+        self.whisper_model_path = ""
+        self.whisper_model_name = ""
+        self.whisper_model_loaded = False
+        self._rebuild_whisper_model_submenu()
+        self._update_whisper_menu_status()
+        self.status_bar.showMessage("Whisper-Modell entladen.")
+
+    def _rebuild_whisper_model_submenu(self):
+        if not hasattr(self, "whisper_models_submenu"):
+            return
+
+        self.whisper_models_submenu.clear()
+
+        if not hasattr(self, "whisper_model_group") or self.whisper_model_group is None:
+            self.whisper_model_group = QActionGroup(self)
+            self.whisper_model_group.setExclusive(True)
+
+        for act in list(self.whisper_model_group.actions()):
+            self.whisper_model_group.removeAction(act)
+
+        if not self.whisper_available_models:
+            empty_act = QAction("(keine Modelle – bitte Scannen)", self)
+            empty_act.setEnabled(False)
+            self.whisper_models_submenu.addAction(empty_act)
+        else:
+            for model_path in self.whisper_available_models:
+                name = os.path.basename(model_path)
+                act = QAction(name, self)
+                act.setCheckable(True)
+                act.setChecked(os.path.abspath(model_path) == os.path.abspath(self.whisper_model_path or ""))
+                act.triggered.connect(lambda checked, mp=model_path: self._set_whisper_model(mp))
+                self.whisper_model_group.addAction(act)
+                self.whisper_models_submenu.addAction(act)
+
+    def _update_whisper_menu_status(self):
+        model_txt = self.whisper_model_name if self.whisper_model_name else "-"
+        mic_txt = self.whisper_selected_input_device_label if self.whisper_selected_input_device_label else "-"
+        path_txt = self.whisper_models_base_dir if self.whisper_models_base_dir else "-"
+
+        if hasattr(self, "act_whisper_status_model"):
+            self.act_whisper_status_model.setText(f"Model: {model_txt}")
+        if hasattr(self, "act_whisper_status_mic"):
+            self.act_whisper_status_mic.setText(f"Mikrofon: {mic_txt}")
+        if hasattr(self, "act_whisper_status_path"):
+            self.act_whisper_status_path.setText(f"Pfad: {path_txt}")
+        if hasattr(self, "act_whisper_unload"):
+            self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
+
+    def set_whisper_base_dir_dialog(self):
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Whisper-Modellordner wählen",
+            self.whisper_models_base_dir or os.getcwd()
+        )
+        if not folder:
+            return
+
+        self.whisper_models_base_dir = self._normalize_whisper_base_dir(folder)
+        self._scan_whisper_models()
+
+        # falls bisheriges Modell nicht mehr im Pfad liegt -> entladen
+        if self.whisper_model_path and not os.path.exists(self.whisper_model_path):
+            self._clear_whisper_model()
+        else:
+            self._rebuild_whisper_model_submenu()
+            self._update_whisper_menu_status()
+
+        self.status_bar.showMessage(f"Whisper-Pfad gesetzt: {self.whisper_models_base_dir}")
+
+    def scan_whisper_models_now(self):
+        models = self._scan_whisper_models()
+
+        if models:
+            if not self.whisper_model_path or self.whisper_model_path not in models:
+                self._set_whisper_model(models[0])
+            else:
+                self._rebuild_whisper_model_submenu()
+                self._update_whisper_menu_status()
+            self.status_bar.showMessage(f"{len(models)} Whisper-Modell(e) gefunden.")
+        else:
+            self._clear_whisper_model()
+            self.status_bar.showMessage("Keine Whisper-Modelle gefunden.")
+
+    def choose_whisper_microphone_dialog(self):
+        devices = self._get_input_audio_devices()
+        if not devices:
+            QMessageBox.warning(self, self._tr("warn_title"), "Es wurden keine Audioaufnahmegeräte gefunden.")
+            return
+
+        labels = [d["label"] for d in devices]
+        current_idx = 0
+        if self.whisper_selected_input_device_label:
+            try:
+                current_idx = labels.index(self.whisper_selected_input_device_label)
+            except ValueError:
+                current_idx = 0
+
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Mikrofon auswählen",
+            "Audioaufnahmegerät:",
+            labels,
+            current_idx,
+            False
+        )
+        if not ok or not selected:
+            return
+
+        for dev in devices:
+            if dev["label"] == selected:
+                self.whisper_selected_input_device = dev["index"]
+                self.whisper_selected_input_device_label = dev["label"]
+                break
+
+        self._update_whisper_menu_status()
+        self.status_bar.showMessage(f"Mikrofon gesetzt: {self.whisper_selected_input_device_label}")
+
     def choose_rec_model_if_missing(self):
         if not self.model_path:
             self.choose_rec_model()
@@ -5551,7 +5712,7 @@ class MainWindow(QMainWindow):
     def show_shortcuts_dialog(self):
         self.show_lm_help_dialog()
 
-    def _start_voice_line_fill_with_device(self, input_device):
+    def _start_voice_line_fill(self):
         task = self._current_task()
         if not task or task.status != STATUS_DONE or not task.results:
             return
@@ -5567,18 +5728,53 @@ class MainWindow(QMainWindow):
         if self.voice_worker and self.voice_worker.isRunning():
             return
 
+        if not self.whisper_model_path or not os.path.isdir(self.whisper_model_path):
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Kein geladenes Whisper-Modell gefunden."
+            )
+            return
+
+        if self.whisper_selected_input_device is None:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Kein Mikrofon ausgewählt."
+            )
+            return
+
         fw_device, fw_compute = self._resolve_faster_whisper_device()
 
         self.voice_worker = VoiceLineFillWorker(
             path=task.path,
             line_index=current_row,
-            model_dir=FASTER_WHISPER_MODEL_DIR,
+            model_dir=self.whisper_model_path,
             device=fw_device,
             compute_type=fw_compute,
             language=None,
-            input_device=input_device,
+            input_device=self.whisper_selected_input_device,
             parent=self
         )
+        self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
+        self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
+        self.voice_worker.progress_changed.connect(self.on_voice_progress_changed)
+        self.voice_worker.status_changed.connect(self.on_voice_status_changed)
+
+        task.status = STATUS_VOICE_RECORDING
+        self._update_queue_row(task.path)
+        self.status_bar.showMessage(self._tr("msg_voice_started"))
+        self._log(
+            f"Sprachimport gestartet: {os.path.basename(task.path)} | "
+            f"Zeile {current_row + 1} | Mikrofon: {self.whisper_selected_input_device_label} | "
+            f"Modell: {self.whisper_model_name}"
+        )
+
+        if self.voice_record_dialog:
+            self.voice_record_dialog.set_recording_state(True)
+
+        self._set_progress_idle(0)
+        self.voice_worker.start()
         self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
         self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
         self.voice_worker.progress_changed.connect(self.on_voice_progress_changed)
@@ -6330,6 +6526,10 @@ class MainWindow(QMainWindow):
                 "current_export_dir": self.current_export_dir,
                 "ai_model_id": self.ai_model_id,
                 "current_row": current_row,
+                "whisper_models_base_dir": self.whisper_models_base_dir,
+                "whisper_model_path": self.whisper_model_path,
+                "whisper_selected_input_device": self.whisper_selected_input_device,
+                "whisper_selected_input_device_label": self.whisper_selected_input_device_label,
             },
             "queue_items": [self._task_to_dict(task) for task in self.queue_items],
         }
@@ -6429,6 +6629,21 @@ class MainWindow(QMainWindow):
             self.seg_model_path = settings.get("seg_model_path", self.seg_model_path)
             self.current_export_dir = settings.get("current_export_dir", self.current_export_dir)
             self.ai_model_id = settings.get("ai_model_id", self.ai_model_id)
+
+            self.whisper_models_base_dir = settings.get("whisper_models_base_dir", self.whisper_models_base_dir)
+            self.whisper_model_path = settings.get("whisper_model_path", self.whisper_model_path)
+            self.whisper_model_name = os.path.basename(self.whisper_model_path) if self.whisper_model_path else ""
+            self.whisper_model_loaded = bool(self.whisper_model_path)
+            self.whisper_selected_input_device = settings.get("whisper_selected_input_device",
+                                                              self.whisper_selected_input_device)
+            self.whisper_selected_input_device_label = settings.get(
+                "whisper_selected_input_device_label",
+                self.whisper_selected_input_device_label
+            )
+
+            self._scan_whisper_models()
+            self._rebuild_whisper_model_submenu()
+            self._update_whisper_menu_status()
 
             queue_data = data.get("queue_items", [])
             self.queue_items = []
@@ -7124,10 +7339,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_voice_need_done"))
             return
 
-        if not os.path.isdir(FASTER_WHISPER_MODEL_DIR):
-            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_voice_model_missing"))
-            return
-
         current_row = self.list_lines.currentRow()
         if current_row < 0:
             QMessageBox.warning(self, self._tr("warn_title"), "Bitte zuerst eine Zeile auswählen.")
@@ -7141,9 +7352,20 @@ class MainWindow(QMainWindow):
         if self.voice_worker and self.voice_worker.isRunning():
             return
 
-        devices = self._get_input_audio_devices()
-        if not devices:
-            QMessageBox.warning(self, self._tr("warn_title"), "Es wurden keine Audioaufnahmegeräte gefunden.")
+        if not self.whisper_model_path or not os.path.isdir(self.whisper_model_path):
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Es ist kein geladenes Whisper-Modell aktiv. Bitte unter 'Whisper-Optionen' ein Modell wählen."
+            )
+            return
+
+        if self.whisper_selected_input_device is None:
+            QMessageBox.warning(
+                self,
+                self._tr("warn_title"),
+                "Es ist noch kein Mikrofon ausgewählt. Bitte unter 'Whisper-Optionen' ein Mikrofon festlegen."
+            )
             return
 
         if self.voice_record_dialog is not None:
@@ -7153,8 +7375,8 @@ class MainWindow(QMainWindow):
                 pass
             self.voice_record_dialog = None
 
-        self.voice_record_dialog = VoiceRecordDialog(self._tr, devices, self)
-        self.voice_record_dialog.start_requested.connect(self._start_voice_line_fill_with_device)
+        self.voice_record_dialog = VoiceRecordDialog(self._tr, self)
+        self.voice_record_dialog.start_requested.connect(self._start_voice_line_fill)
         self.voice_record_dialog.stop_requested.connect(self.stop_voice_line_fill)
         self.voice_record_dialog.cancel_requested.connect(self._cancel_voice_record_dialog)
         self.voice_record_dialog.show()
@@ -7895,6 +8117,51 @@ class MainWindow(QMainWindow):
         self.models_menu.addAction(self.act_download)
 
         self.revision_models_menu = menubar.addMenu("LM-Optionen")
+
+        # -----------------------------
+        # Whisper-Optionen
+        # -----------------------------
+        self.whisper_menu = menubar.addMenu("Whisper-Optionen")
+
+        self.act_whisper_set_path = QAction("Whisper-Modellpfad festlegen...", self)
+        self.act_whisper_set_path.triggered.connect(self.set_whisper_base_dir_dialog)
+        self.whisper_menu.addAction(self.act_whisper_set_path)
+
+        self.act_whisper_set_mic = QAction("Mikrofon auswählen...", self)
+        self.act_whisper_set_mic.triggered.connect(self.choose_whisper_microphone_dialog)
+        self.whisper_menu.addAction(self.act_whisper_set_mic)
+
+        self.whisper_menu.addSeparator()
+
+        self.act_whisper_scan = QAction("Scannen", self)
+        self.act_whisper_scan.triggered.connect(self.scan_whisper_models_now)
+        self.whisper_menu.addAction(self.act_whisper_scan)
+
+        self.whisper_models_submenu = self.whisper_menu.addMenu("Verfügbare Whisper-Modelle")
+        self.whisper_model_group = QActionGroup(self)
+        self.whisper_model_group.setExclusive(True)
+
+        self.act_whisper_unload = QAction("Modell entladen", self)
+        self.act_whisper_unload.triggered.connect(self._clear_whisper_model)
+        self.whisper_menu.addAction(self.act_whisper_unload)
+
+        self.whisper_menu.addSeparator()
+
+        self.act_whisper_status_model = QAction("Model: -", self)
+        self.act_whisper_status_model.setEnabled(False)
+        self.whisper_menu.addAction(self.act_whisper_status_model)
+
+        self.act_whisper_status_mic = QAction("Mikrofon: -", self)
+        self.act_whisper_status_mic.setEnabled(False)
+        self.whisper_menu.addAction(self.act_whisper_status_mic)
+
+        self.act_whisper_status_path = QAction("Pfad: -", self)
+        self.act_whisper_status_path.setEnabled(False)
+        self.whisper_menu.addAction(self.act_whisper_status_path)
+
+        self._scan_whisper_models()
+        self._rebuild_whisper_model_submenu()
+        self._update_whisper_menu_status()
 
         self.act_lm_help = menubar.addAction("?")
         self.act_lm_help.triggered.connect(self.show_lm_help_dialog)
@@ -10131,67 +10398,91 @@ class MainWindow(QMainWindow):
     def show_lm_help_dialog(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("LM-Optionen – Hilfe")
-        dlg.resize(950, 520)
+        dlg.resize(1200, 600)
 
         layout = QVBoxLayout(dlg)
 
-        table = QTableWidget(1, 2, dlg)
-        table.setHorizontalHeaderLabels(["Ablauf", "Shortcuts"])
-        table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSelectionMode(QAbstractItemView.NoSelection)
-        table.setWordWrap(True)
-        table.setAlternatingRowColors(True)
+        scroll = QScrollArea(dlg)
+        scroll.setWidgetResizable(True)
 
-        left_text = (
-            "Ablauf:\n"
-            "1. Bild/PDF laden\n"
-            "2. Kraken-Rec-Model laden\n"
-            "3. Kraken-Seg-Model laden\n"
-            "4. Kraken-OCR starten\n\n"
-            "(Optional)\n"
-            "5. LM-Model (per LM-Studio) laden\n"
-            "6. LM-Überarbeitung starten\n\n"
-            "(Optional)\n"
-            "7. einzelne Zeilen mit Mikrofon einsprechen\n"
-            "8. Zeilen (txt-Format) importieren\n\n"
-            "(Zusatz)\n"
-            "- Zeilen und (rote) Overlay-Boxen können jederzeit angepasst/editiert werden"
-        )
+        content = QWidget()
+        content_layout = QHBoxLayout(content)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(12)
 
-        right_text = (
-            "Ctrl+S  → Projekt speichern\n"
-            "Ctrl+Alt+S  → Projekt speichern unter\n"
-            "Ctrl+E  → Export\n"
-            "Ctrl+Q  → Programm beenden\n\n"
-            "Ctrl+K  → Kraken-OCR starten\n"
-            "Ctrl+P  → Kraken-OCR stoppen\n"
-            "Ctrl+W  → Kraken-OCR wiederholen\n"
-            "Ctrl+L  → LM-Überarbeitung starten\n"
-            "Ctrl+M  → Faster-Whisper / Mikrofon starten\n\n"
-            "Ctrl+A  → Alles im aktuellen Kontext auswählen\n"
-            "Entf  → Ausgewählte Zeile(n) / Overlay-Box(en) löschen\n\n"
-            "F1  → Shortcut-Hilfe\n"
-            "F2  → Kraken-Recognition-Modell laden\n"
-            "F3  → Kraken-Segmentierungs-Modell laden\n"
-            "F4  → LM-Localhost-Pfad eingeben\n"
-            "F5  → LM-Scan starten\n"
-            "F6  → Log-Fenster ein/aus"
-        )
+        left_text = """
+                <b><u>Ablauf</u></b><br>
+                1. Bild/PDF laden<br>
+                2. Kraken-Rec-Model laden<br>
+                3. Kraken-Seg-Model laden<br>
+                4. Kraken-OCR starten<br><br>
 
-        left_item = QTableWidgetItem(left_text)
-        right_item = QTableWidgetItem(right_text)
+                (Optional)<br>
+                5. LM-Model (per LM-Studio) laden<br>
+                6. LM-Überarbeitung starten<br><br>
 
-        left_item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
-        right_item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+                (Optional)<br>
+                7. einzelne Zeilen mit Mikrofon einsprechen<br>
+                8. Zeilen (txt-Format) importieren<br><br>
 
-        table.setItem(0, 0, left_item)
-        table.setItem(0, 1, right_item)
+                (Zusatz)<br>
+                - Zeilen und (rote) Overlay-Boxen können jederzeit angepasst/editiert werden<br><br>
 
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+                <b><u>Whisper-Modelle herunterladen</u></b><br><br>
 
-        layout.addWidget(table)
+                <b>Befehl im CMD/Terminal:</b>
+                <pre>hf download Systran/faster-whisper-large-v3 --local-dir HIER DEIN WUNSCH-PFAD</pre><br>
+
+                <b>Falls 'hf' nicht gefunden wird:</b>
+                <pre>python -m pip install -U huggingface_hub</pre><br>
+
+                <b>Hinweis:</b>
+                Im Programm dann unter 'Whisper-Optionen' den Basisordner wählen,
+                danach 'Scannen' klicken und ein Modell laden.
+                """
+
+        right_text = """
+                <b><u>Shortcuts</u></b><br>
+                Ctrl+S  → Projekt speichern<br>
+                Ctrl+Alt+S  → Projekt speichern unter<br>
+                Ctrl+E  → Export<br>
+                Ctrl+Q  → Programm beenden<br><br>
+
+                Ctrl+K  → Kraken-OCR starten<br>
+                Ctrl+P  → Kraken-OCR stoppen<br>
+                Ctrl+W  → Kraken-OCR wiederholen<br>
+                Ctrl+L  → LM-Überarbeitung starten<br>
+                Ctrl+M  → Faster-Whisper / Mikrofon starten<br><br>
+
+                Ctrl+A  → Alles im aktuellen Kontext auswählen<br>
+                Entf  → Ausgewählte Zeile(n) / Overlay-Box(en) löschen<br><br>
+
+                F1  → Shortcut-Hilfe<br>
+                F2  → Kraken-Recognition-Modell laden<br>
+                F3  → Kraken-Segmentierungs-Modell laden<br>
+                F4  → LM-Localhost-Pfad eingeben<br>
+                F5  → LM-Scan starten<br>
+                F6  → Log-Fenster ein/aus
+                """
+
+        left_browser = QTextBrowser()
+        left_browser.setReadOnly(True)
+        left_browser.setOpenExternalLinks(False)
+        left_browser.setHtml(left_text)
+
+        right_browser = QTextBrowser()
+        right_browser.setReadOnly(True)
+        right_browser.setOpenExternalLinks(False)
+        right_browser.setHtml(right_text)
+
+        left_browser.setMinimumWidth(420)
+        right_browser.setMinimumWidth(420)
+
+        content_layout.addWidget(left_browser, 1)
+        content_layout.addWidget(right_browser, 1)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(dlg.accept)
@@ -10232,7 +10523,6 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 def main():
-    # Windows: sorgt dafür, dass Taskleisten-Icon korrekt zugeordnet wird
     if sys.platform.startswith("win"):
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("bottled.kraken.app")
@@ -10246,26 +10536,21 @@ def main():
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
-    splash = QProgressDialog("Programm startet, bitte kurz warten…", None, 0, 0)
-    splash.setWindowTitle("Bottled Kraken")
-    splash.setWindowModality(Qt.ApplicationModal)
-    splash.setCancelButton(None)
-    splash.setMinimumDuration(0)
-    splash.setAutoClose(False)
-    splash.setAutoReset(False)
-    if os.path.exists(icon_path):
-        splash.setWindowIcon(QIcon(icon_path))
-    splash.show()
-    QCoreApplication.processEvents()
-
     w = MainWindow()
     app.aboutToQuit.connect(w._cleanup_temp_dirs)
 
     if os.path.exists(icon_path):
         w.setWindowIcon(QIcon(icon_path))
 
-    splash.close()
     w.show()
+    QCoreApplication.processEvents()
+
+    try:
+        if pyi_splash:
+            pyi_splash.close()
+    except Exception:
+        pass
+
     sys.exit(app.exec())
 
 if __name__ == "__main__":
