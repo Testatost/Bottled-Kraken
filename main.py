@@ -1,5 +1,29 @@
 import os
+
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["LANG"] = "C.UTF-8"
+os.environ["LC_ALL"] = "C.UTF-8"
+
 import sys
+import locale
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+try:
+    locale.setlocale(locale.LC_ALL, "")
+except Exception:
+    pass
+
+try:
+    locale.getpreferredencoding = lambda do_setlocale=True: "UTF-8"
+except Exception:
+    pass
+
 import time
 import math
 import statistics
@@ -7,6 +31,8 @@ import json
 import csv
 import warnings
 import re
+import traceback
+import gc
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Tuple, Dict, Callable
 import fitz
@@ -27,11 +53,11 @@ import wave
 import threading
 import numpy as np
 import sounddevice as sd
+
 try:
     import pyi_splash
 except Exception:
     pyi_splash = None
-
 
 # GUI-Framework
 from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
@@ -39,19 +65,20 @@ from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
                             QCoreApplication, QItemSelectionModel, QSettings)
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
-    QKeySequence, QActionGroup, QIcon, QPalette, QShortcut
+    QKeySequence, QActionGroup, QIcon, QPalette, QShortcut, QDesktopServices
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox,
     QLabel, QWidget, QPushButton, QProgressBar, QProgressDialog,
     QVBoxLayout, QHBoxLayout,
-    QListWidget, QListWidgetItem, QGraphicsView, QGraphicsScene,
+    QListWidget, QListWidgetItem, QStackedWidget, QGraphicsView, QGraphicsScene,
     QGraphicsRectItem, QGraphicsSimpleTextItem, QSplitter, QStatusBar,
     QMenu, QTableWidget, QTableWidgetItem, QHeaderView, QToolBar,
     QAbstractItemView, QInputDialog, QDialog, QDialogButtonBox, QRadioButton,
-    QListWidget as QListWidget2, QSpinBox, QFormLayout, QPlainTextEdit,
+    QSpinBox, QFormLayout, QPlainTextEdit,
     QToolButton, QSplashScreen, QLineEdit, QTextEdit, QComboBox,
-    QTextBrowser, QScrollArea, QTreeWidget, QTreeWidgetItem, QGraphicsLineItem
+    QTextBrowser, QScrollArea, QTreeWidget, QTreeWidgetItem, QGraphicsLineItem,
+    QSizePolicy
 )
 
 # PySide-Helfer zur Objekt-Validitätsprüfung
@@ -124,7 +151,11 @@ ZENODO_URL = "https://zenodo.org/communities/ocr_models/records?q=&l=list&p=1&s=
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 SUPPORTED_PDF_EXTS = {".pdf"}
 
-KRAKEN_MODELS_DIR = r"C:\Users\Entertainment\PycharmProjects\Bottled Kraken + vLLM\Kraken-Modelle"
+KRAKEN_MODELS_DIR = (
+    os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False)
+    else os.path.dirname(os.path.abspath(sys.argv[0]))
+)
 
 STATUS_VOICE_RECORDING = 6
 
@@ -133,29 +164,36 @@ STATUS_ICONS[STATUS_VOICE_RECORDING] = "🎤"
 DEFAULT_FASTER_WHISPER_MODEL_DIR = ""
 VOICE_SAMPLE_RATE = 16000
 VOICE_CHANNELS = 1
-VOICE_BLOCKSIZE = 1024
+VOICE_BLOCKSIZE = 0
 FASTER_WHISPER_DEVICE = "cpu"
 FASTER_WHISPER_COMPUTE_TYPE = "int8"
+
 
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base_path, relative_path)
 
+
 def is_supported_input(path: str) -> bool:
     ext = os.path.splitext(path)[1].lower()
     return ext in SUPPORTED_IMAGE_EXTS or ext in SUPPORTED_PDF_EXTS
 
+
 def is_project_file(path: str) -> bool:
     return os.path.splitext(path)[1].lower() == ".json"
+
 
 def is_supported_drop_or_paste_file(path: str) -> bool:
     return is_supported_input(path) or is_project_file(path)
 
+
 def _load_image_gray(path: str) -> Image.Image:
     return Image.open(path).convert("L")
 
+
 def _load_image_color(path: str) -> Image.Image:
     return Image.open(path).convert("RGB")
+
 
 # -----------------------------
 # ÜBERSETZUNGEN
@@ -171,7 +209,7 @@ TRANSLATIONS = {
         "menu_edit": "&Bearbeiten",
         "menu_export": "Exportieren als...",
         "menu_exit": "Beenden",
-        "menu_models": "&Kraken-Modelle",
+        "menu_models": "&Kraken-Optionen",
         "menu_options": "&Optionen",
         "menu_languages": "Sprachen",
         "menu_hw": "CPU/GPU",
@@ -261,7 +299,7 @@ TRANSLATIONS = {
         "dlg_load_img": "Bilder wählen",
         "dlg_choose_rec": "Recognition-Modell: ",
         "dlg_choose_seg": "Segmentierungs-Modell: ",
-        "dlg_filter_model": "Modelle (*.mlmodel *.pt)",
+        "dlg_filter_model": "Modelle (*.mlmodel)",
 
         "reading_tb_lr": "Oben → Unten + Links → Rechts",
         "reading_tb_rl": "Oben → Unten + Rechts → Links",
@@ -374,7 +412,7 @@ TRANSLATIONS = {
         "menu_edit": "&Edit",
         "menu_export": "Export as...",
         "menu_exit": "Exit",
-        "menu_models": "&Kraken Models",
+        "menu_models": "&Kraken Options",
         "menu_options": "&Options",
         "menu_languages": "Languages",
         "menu_hw": "CPU/GPU",
@@ -464,7 +502,7 @@ TRANSLATIONS = {
         "dlg_load_img": "Choose images",
         "dlg_choose_rec": "recognition model: ",
         "dlg_choose_seg": "segmentation model: ",
-        "dlg_filter_model": "Models (*.mlmodel *.pt)",
+        "dlg_filter_model": "Models (*.mlmodel)",
 
         "reading_tb_lr": "Top → Bottom + Left → Right",
         "reading_tb_rl": "Top → Bottom + Right → Left",
@@ -577,7 +615,7 @@ TRANSLATIONS = {
         "menu_edit": "&Édition",
         "menu_export": "Exporter en tant que...",
         "menu_exit": "Quitter",
-        "menu_models": "&Modèles Kraken",
+        "menu_models": "&Options Kraken",
         "menu_options": "&Options",
         "menu_languages": "Langues",
         "menu_hw": "CPU/GPU",
@@ -667,7 +705,7 @@ TRANSLATIONS = {
         "dlg_load_img": "Choisir des images",
         "dlg_choose_rec": "le modèle de reconnaissance: ",
         "dlg_choose_seg": "le modèle de segmentation: ",
-        "dlg_filter_model": "Modèles (*.mlmodel *.pt)",
+        "dlg_filter_model": "Modèles (*.mlmodel)",
 
         "reading_tb_lr": "Haut → Bas + Gauche → Droite",
         "reading_tb_rl": "Haut → Bas + Droite → Gauche",
@@ -774,6 +812,7 @@ TRANSLATIONS = {
 BBox = Tuple[int, int, int, int]
 Point = Tuple[float, float]
 
+
 # -----------------------------
 # DATENKLASSEN
 # -----------------------------
@@ -783,7 +822,9 @@ class RecordView:
     text: str
     bbox: Optional[BBox]
 
+
 UndoSnapshot = Tuple[List[Tuple[str, Optional[BBox]]], int]
+
 
 @dataclass
 class TaskItem:
@@ -794,9 +835,11 @@ class TaskItem:
     edited: bool = False
     undo_stack: List[UndoSnapshot] = field(default_factory=list)
     redo_stack: List[UndoSnapshot] = field(default_factory=list)
-    source_kind: str = "image"   # "image" oder "pdf_page"
+    source_kind: str = "image"  # "image" oder "pdf_page"
     relative_path: str = ""
     preset_bboxes: List[Optional[BBox]] = field(default_factory=list)
+    lm_locked_bboxes: List[Optional[BBox]] = field(default_factory=list)
+
 
 @dataclass
 class OCRJob:
@@ -810,11 +853,10 @@ class OCRJob:
     segmenter_mode: str = "blla"
     preset_bboxes_by_path: Dict[str, List[Optional[BBox]]] = field(default_factory=dict)
 
+
 # -----------------------------
 # GEOMETRIE & SORTIERUNG
 # -----------------------------
-Point = Tuple[float, float]
-
 def _coerce_points(obj: Any) -> List[Point]:
     if obj is None:
         return []
@@ -834,6 +876,7 @@ def _coerce_points(obj: Any) -> List[Point]:
             return pts
     return []
 
+
 def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, int, int, int]]:
     if not points:
         return None
@@ -846,6 +889,7 @@ def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, 
     if x1 <= x0 or y1 <= y0:
         return None
     return x0, y0, x1, y1
+
 
 def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
     bbox = getattr(r, "bbox", None)
@@ -876,6 +920,7 @@ def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
             return x0, y0 - vpad, x1, y1 + vpad
     return None
 
+
 def baseline_length(bl) -> float:
     pts = _coerce_points(bl)
     if len(pts) < 2:
@@ -884,13 +929,14 @@ def baseline_length(bl) -> float:
     x2, y2 = pts[-1]
     return math.hypot(x2 - x1, y2 - y1)
 
+
 # Vertikale Separator-Records (Spaltentrenner)
 VSEP_RE = re.compile(r'^[|│┃¦︱︳]+$')  # | │ ┃ ¦ ︱ ︳
 
 # Horizontale Separator-Records (Zeilentrenner)
 HSEP_RE = re.compile(r'^[_\-\u2500\u2501\u2504\u2505]{3,}$')  # _ - ─ ━ etc. (mind. 3)
 ONLY_SYMBOL_LINE_RE = re.compile(
-    r'^[\(\)\{\}\?\!\/\\\"\$\%\&\[\]\=,\.\-_:;><\|\+\*#\'~`´\^°]+$'
+    r'^[\(\)\{\}\?\!\/\\\""„“\$\%\&\[\]\=,\.\-—_:;><\|\+\*#\'~`´\^°]+$'
 )
 
 NOISE_LINE_RE = re.compile(
@@ -902,16 +948,13 @@ NOISE_LINE_RE = re.compile(
     re.IGNORECASE
 )
 
-ONLY_SYMBOL_LINE_RE = re.compile(
-    r'^[\(\)\{\}\?\!\/\\\""„“\$\%\&\[\]\=,\.\-—_:;><\|\+\*#\'~`´\^°]+$'
-)
-
 NOISE_REPEAT_RE = re.compile(
     r'^([aäeéiioöuü])(?:[\s\.\,\-_:;]*\1){2,}$',
     re.IGNORECASE
 )
 
 DOTS_ONLY_RE = re.compile(r'^(?:\.\s*){3,}$')
+
 
 def _is_symbol_only_line(text: Any) -> bool:
     txt = _clean_ocr_text(text)
@@ -933,6 +976,7 @@ def _is_noise_line(text: Any) -> bool:
         return True
 
     return False
+
 
 def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["TB_LR"]):
     """
@@ -991,6 +1035,7 @@ def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["
         ordered.extend([r for r, _ in row["items"]])
 
     return ordered
+
 
 def sort_records_reading_order(records, image_width: int, image_height: int,
                                reading_mode: int = READING_MODES["TB_LR"]):
@@ -1594,10 +1639,12 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
     return [r for r, _, _ in header_sorted] + [r for r, _, _ in core] + [r for r, _, _ in footer_sorted]
 
+
 def clamp_bbox(bb: Tuple[int, int, int, int], w: int, h: int) -> Optional[Tuple[int, int, int, int]]:
     x0, y0, x1, y1 = bb
     return (max(0, min(w - 1, x0)), max(0, min(h - 1, y0)),
             max(0, min(w, x1)), max(0, min(h, y1)))
+
 
 def _safe_int(v, default=0):
     try:
@@ -1605,22 +1652,53 @@ def _safe_int(v, default=0):
     except Exception:
         return default
 
+
+def _force_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _install_exception_hook():
+    def handle_exception(exc_type, exc_value, exc_tb):
+        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            with open("bottled_kraken_error.log", "a", encoding="utf-8") as f:
+                f.write("\n\n" + "=" * 80 + "\n")
+                f.write(msg)
+        except Exception:
+            pass
+
+        try:
+            QMessageBox.critical(None, "Fehler", msg)
+        except Exception:
+            try:
+                print(msg)
+            except Exception:
+                pass
+
+    sys.excepthook = handle_exception
+
+
 def _clean_ocr_text(text: Any) -> str:
     if text is None:
         return ""
-    txt = str(text)
 
-    # unsichtbare / störende Zeichen entfernen
-    txt = txt.replace("\u00a0", " ")   # NBSP
-    txt = txt.replace("\u200b", "")    # zero-width space
-    txt = txt.replace("\ufeff", "")    # BOM
+    if isinstance(text, bytes):
+        txt = text.decode("utf-8", errors="replace")
+    else:
+        txt = str(text)
 
-    # historische Lang-s normalisieren
+    txt = txt.replace("\u00a0", " ")
+    txt = txt.replace("\u200b", "")
+    txt = txt.replace("\ufeff", "")
+
     txt = txt.replace("ſ", "s")
     txt = txt.replace("⸗", "-")
     txt = txt.replace("±", "+/-")
 
-    # Leerraum normalisieren
     txt = re.sub(r"[ \t\r\f\v]+", " ", txt)
     return txt.strip()
 
@@ -1628,11 +1706,12 @@ def _clean_ocr_text(text: Any) -> str:
 def _is_effectively_empty_ocr_text(text: Any) -> bool:
     return _clean_ocr_text(text) == ""
 
+
 def _extract_json_string_lines_object(text: str):
     if not text:
         return None
 
-    raw = str(text).strip()
+    raw = _force_text(text).strip()
 
     # fences entfernen
     raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
@@ -1689,11 +1768,12 @@ def _extract_json_string_lines_object(text: str):
 
     return None
 
+
 def _extract_json_lines_object(text: str):
     if not text:
         return None
 
-    raw = str(text).strip()
+    raw = _force_text(text).strip()
 
     # fences entfernen
     raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
@@ -1768,11 +1848,12 @@ def _extract_json_lines_object(text: str):
 
     return None
 
+
 def _pil_to_data_url(
-    im: Image.Image,
-    max_side: int = 5000,
-    image_format: str = "PNG",
-    jpeg_quality: int = 85,
+        im: Image.Image,
+        max_side: int = 5000,
+        image_format: str = "PNG",
+        jpeg_quality: int = 85,
 ) -> str:
     im = im.convert("RGB")
     w, h = im.size
@@ -1794,15 +1875,17 @@ def _pil_to_data_url(
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
+
 def _image_to_data_url(path: str) -> str:
     im = _load_image_gray(path)
     return _pil_to_data_url(im)
 
+
 def _page_to_data_url(
-    path: str,
-    max_side: int = 5000,
-    image_format: str = "PNG",
-    jpeg_quality: int = 85,
+        path: str,
+        max_side: int = 5000,
+        image_format: str = "PNG",
+        jpeg_quality: int = 85,
 ) -> str:
     im = _load_image_color(path)
     return _pil_to_data_url(
@@ -1812,9 +1895,10 @@ def _page_to_data_url(
         jpeg_quality=jpeg_quality,
     )
 
+
 def _page_to_small_png_data_url(
-    path: str,
-    max_side: int = 1200,
+        path: str,
+        max_side: int = 1200,
 ) -> str:
     im = _load_image_color(path)
 
@@ -1833,13 +1917,14 @@ def _page_to_small_png_data_url(
         image_format="PNG",
     )
 
+
 def _crop_block_to_data_url_context(
-    path: str,
-    recs: List["RecordView"],
-    start: int,
-    end: int,
-    pad_x: int = 40,
-    pad_y: int = 35,
+        path: str,
+        recs: List["RecordView"],
+        start: int,
+        end: int,
+        pad_x: int = 40,
+        pad_y: int = 35,
 ) -> str:
     im = _load_image_color(path)
     boxes = [rv.bbox for rv in recs[start:end] if rv.bbox]
@@ -1855,12 +1940,13 @@ def _crop_block_to_data_url_context(
     crop = im.crop((x0, y0, x1, y1))
     return _pil_to_data_url(crop, max_side=1600)
 
+
 def _crop_single_line_to_data_url(
-    path: str,
-    rv: "RecordView",
-    pad_x: int = 14,
-    pad_y: int = 6,
-    extra_context_y: int = 0,
+        path: str,
+        rv: "RecordView",
+        pad_x: int = 14,
+        pad_y: int = 6,
+        extra_context_y: int = 0,
 ) -> str:
     im = _load_image_color(path)
 
@@ -1876,6 +1962,8 @@ def _crop_single_line_to_data_url(
 
     crop = im.crop((x0, y0, x1, y1))
     return _pil_to_data_url(crop, max_side=1600)
+
+
 # -----------------------------
 # HILFSFUNKTIONEN FÜR TABELLEN-EXPORT
 # -----------------------------
@@ -1896,6 +1984,7 @@ def cluster_columns(records: List[RecordView], x_threshold: int = 45):
             cols.append({"x": x0, "items": [r]})
     cols.sort(key=lambda c: c["x"])
     return [c["items"] for c in cols]
+
 
 def is_same_visual_row(a: RecordView, b: RecordView, page_width: int) -> bool:
     if not a.bbox or not b.bbox:
@@ -2005,6 +2094,7 @@ def group_rows_by_y(records: List[RecordView], page_width: int):
         row.sort(key=lambda rv: rv.bbox[0])
     return rows
 
+
 def table_to_rows_two_columns(records: List[RecordView], page_width: int) -> List[List[str]]:
     #   Erzwingt exakt 2 Spalten anhand Seitenmitte.
     #   Verhindert "3. Spalte" durch Einrückungen/Ausreißer.
@@ -2036,6 +2126,7 @@ def table_to_rows_two_columns(records: List[RecordView], page_width: int) -> Lis
         merged.append(r)
 
     return merged
+
 
 def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]:
     # Wenn der Text explizite Trenner enthält, nutze die als "harte" Spalten,
@@ -2119,17 +2210,25 @@ def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]
         grid.append(line)
     return grid
 
+
 # -----------------------------
 # SKALIERBARES / VERSCHIEBBARES RECHTECK-ITEM
 # -----------------------------
 class ResizableRectItem(QGraphicsRectItem):
     HANDLE_PAD = 6.0
 
-    def __init__(self, rect: QRectF, idx: int, on_changed: Callable[[int, QRectF], None],
-                 on_double_clicked: Optional[Callable[[int], None]] = None):
+    def __init__(
+            self,
+            rect: QRectF,
+            idx: int,
+            on_changed: Callable[[int, QRectF], None],
+            on_clicked: Optional[Callable[[int], None]] = None,
+            on_double_clicked: Optional[Callable[[int], None]] = None
+    ):
         super().__init__(rect)
         self.idx = idx
         self._on_changed = on_changed
+        self._on_clicked = on_clicked
         self._on_double_clicked = on_double_clicked
 
         self.setAcceptHoverEvents(True)
@@ -2167,7 +2266,6 @@ class ResizableRectItem(QGraphicsRectItem):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # zuerst intern selektieren
             self.setSelected(True)
 
             self._press_scene_pos = event.scenePos()
@@ -2182,11 +2280,11 @@ class ResizableRectItem(QGraphicsRectItem):
             else:
                 self._mode = "move"
 
-            # danach Callback -> MainWindow/ImageCanvas färbt blau
+            super().mousePressEvent(event)
+
             if callable(self._on_clicked):
                 self._on_clicked(self.idx)
 
-            super().mousePressEvent(event)
             event.accept()
             return
 
@@ -2235,7 +2333,8 @@ class ResizableRectItem(QGraphicsRectItem):
         if self._mode in ("resize", "move"):
             self._mode = "none"
             if callable(self._on_changed):
-                self._on_changed(self.idx, self.sceneBoundingRect())
+                new_scene_rect = self.mapRectToScene(self.rect()).normalized()
+                self._on_changed(self.idx, new_scene_rect)
             event.accept()
             return
 
@@ -2249,6 +2348,10 @@ class ResizableRectItem(QGraphicsRectItem):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def _on_rect_item_clicked(self, idx: int):
+        self.rect_clicked.emit(idx)
+
 
 # -----------------------------
 # WARTEBEREICH-TABELLE MIT DRAG & DROP
@@ -2315,6 +2418,7 @@ class DropQueueTable(QTableWidget):
         else:
             event.ignore()
 
+
 # -----------------------------
 # ZEILENLISTE (Entf + Drag&Drop zum Umordnen)
 # -----------------------------
@@ -2326,7 +2430,7 @@ class LinesTreeWidget(QTreeWidget):
         super().__init__(*args, **kwargs)
 
         self.setColumnCount(2)
-        self.setHeaderLabels(["Nr.", "Inhalt"])
+        self.setHeaderLabels(["#", "Erkannte Zeilen und Wörter"])
         self.setRootIsDecorated(False)
         self.setUniformRowHeights(True)
 
@@ -2341,6 +2445,9 @@ class LinesTreeWidget(QTreeWidget):
         self.header().setStretchLastSection(True)
         self.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.header().setSectionResizeMode(1, QHeaderView.Stretch)
+
+        # NEU:
+        self.header().setDefaultAlignment(Qt.AlignCenter)
 
         # Basisdarstellung wird vom MainWindow-Theme gesetzt
         self.setAlternatingRowColors(True)
@@ -2417,6 +2524,7 @@ class LinesTreeWidget(QTreeWidget):
 
         self.reorder_committed.emit(order, self.currentRow())
 
+
 # -----------------------------
 # DIALOG ZUM BEARBEITEN DER OVERLAY-BOX
 # -----------------------------
@@ -2483,6 +2591,7 @@ class OverlayBoxDialog(QDialog):
         y1 = max(1, min(self._img_h, y1))
         return (x0, y0, x1, y1)
 
+
 # -----------------------------
 # BILD-CANVAS MIT KONTEXTMENÜ + DOPPELKLICK-AUSWAHL
 # -----------------------------
@@ -2497,9 +2606,9 @@ class ImageCanvas(QGraphicsView):
     overlay_edit_requested = Signal(int)
     overlay_delete_requested = Signal(int)
     overlay_select_requested = Signal(int)
-    box_split_requested = Signal(int, float)   # idx, split_x in scene coords
+    box_split_requested = Signal(int, float)  # idx, split_x in scene coords
 
-    overlay_multi_selected = Signal(list)   # Liste von idx
+    overlay_multi_selected = Signal(list)  # Liste von idx
 
     def __init__(self, tr_func=None):
         super().__init__()
@@ -2819,7 +2928,8 @@ class ImageCanvas(QGraphicsView):
         tr = self.tr_func
 
         if not self._overlay_enabled:
-            disabled = menu.addAction(tr("overlay_only_after_ocr") if tr else "Overlay-Bearbeitung erst nach abgeschlossener OCR möglich.")
+            disabled = menu.addAction(
+                tr("overlay_only_after_ocr") if tr else "Overlay-Bearbeitung erst nach abgeschlossener OCR möglich.")
             disabled.setEnabled(False)
             menu.exec(event.globalPos())
             return
@@ -2923,15 +3033,11 @@ class ImageCanvas(QGraphicsView):
                     event.accept()
                     return
 
-                # einfacher Linksklick = genau diese Box selektieren
-                self.select_indices([it.idx], center=False)
-                self.overlay_multi_selected.emit([it.idx])
-                self.rect_clicked.emit(it.idx)
-
-                self.scene.update()
-                self.viewport().update()
-
-                event.accept()
+                # WICHTIG:
+                # Nicht hier den Event "schlucken".
+                # Die ResizableRectItem muss den Mausklick selbst bekommen,
+                # damit Move/Resize funktioniert.
+                super().mousePressEvent(event)
                 return
 
             # Panning nur mit Alt + linker Maustaste
@@ -3170,6 +3276,9 @@ class ImageCanvas(QGraphicsView):
     def _on_rect_item_changed(self, idx: int, scene_rect: QRectF):
         self.rect_changed.emit(idx, scene_rect)
 
+    def _on_rect_item_clicked(self, idx: int):
+        self.rect_clicked.emit(idx)
+
     def _on_rect_item_double_clicked(self, idx: int):
         self.rect_clicked.emit(idx)
 
@@ -3189,6 +3298,7 @@ class ImageCanvas(QGraphicsView):
                 rectf,
                 rv.idx,
                 self._on_rect_item_changed,
+                on_clicked=self._on_rect_item_clicked,
                 on_double_clicked=self._on_rect_item_double_clicked
             )
             ritem.setPen(self._pen_normal)
@@ -3228,10 +3338,11 @@ class ImageCanvas(QGraphicsView):
         if not self._draw_mode and not self._mouse_panning:
             self.unsetCursor()
 
+
 class PDFRenderWorker(QThread):
-    progress = Signal(int, int, str)          # current, total, pdf_path
-    finished_pdf = Signal(str, list)          # pdf_path, out_paths
-    failed_pdf = Signal(str, str)             # pdf_path, error_message
+    progress = Signal(int, int, str)  # current, total, pdf_path
+    finished_pdf = Signal(str, list)  # pdf_path, out_paths
+    failed_pdf = Signal(str, str)  # pdf_path, error_message
 
     def __init__(self, pdf_path: str, dpi: int = 300, parent=None):
         super().__init__(parent)
@@ -3272,8 +3383,9 @@ class PDFRenderWorker(QThread):
             # auch wenn abgebrochen -> "fertig" mit dem was da ist
             self.finished_pdf.emit(pdf_path, out_paths)
 
-        except Exception as e:
-            self.failed_pdf.emit(self.pdf_path, str(e))
+        except Exception:
+            self.failed_pdf.emit(self.pdf_path, traceback.format_exc())
+
 
 # -----------------------------
 # OCR-WORKER
@@ -3295,6 +3407,28 @@ class OCRWorker(QThread):
         self._rec_model: Any = None
         self._seg_model: Any = None
         self._device_label: str = (job.device or "cpu").lower().strip()
+
+    def _release_torch_resources(self):
+        self._rec_model = None
+        self._seg_model = None
+        self._device = None
+
+        try:
+            gc.collect()
+        except Exception:
+            pass
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     def _resolve_device(self) -> torch.device:
         dev = (self.job.device or "cpu").lower().strip()
@@ -3576,8 +3710,8 @@ class OCRWorker(QThread):
 
                     if self.isInterruptionRequested():
                         break
-            except Exception as e:
-                self.file_error.emit(img_path, str(e))
+            except Exception:
+                self.file_error.emit(img_path, traceback.format_exc())
                 return
 
             if self.isInterruptionRequested():
@@ -3694,8 +3828,8 @@ class OCRWorker(QThread):
             text = "\n".join(lines).strip()
             self.file_done.emit(img_path, text, kr_sorted, im, record_views)
 
-        except Exception as e:
-            self.file_error.emit(img_path, str(e))
+        except Exception:
+            self.file_error.emit(img_path, traceback.format_exc())
 
     def run(self):
         try:
@@ -3717,14 +3851,17 @@ class OCRWorker(QThread):
 
             self.progress.emit(100)
             self.finished_batch.emit()
-        except Exception as e:
-            self.failed.emit(str(e))
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+        finally:
+            self._release_torch_resources()
+
 
 class AIBatchRevisionWorker(QThread):
-    file_started = Signal(str, int, int)          # path, current, total
-    file_finished = Signal(str, list, int, int)   # path, revised_lines, current, total
-    file_failed = Signal(str, str, int, int)      # path, error, current, total
-    progress_changed = Signal(int)                # overall 0..100
+    file_started = Signal(str, int, int)  # path, current, total
+    file_finished = Signal(str, list, int, int)  # path, revised_lines, current, total
+    file_failed = Signal(str, str, int, int)  # path, error, current, total
+    progress_changed = Signal(int)  # overall 0..100
     status_changed = Signal(str)
     finished_batch = Signal()
 
@@ -3756,13 +3893,16 @@ class AIBatchRevisionWorker(QThread):
         self.min_p = float(min_p)
         self.max_tokens = int(max_tokens)
         self._current_worker: Optional[AIRevisionWorker] = None
+        self._cancel_requested = False
 
     def cancel(self):
+        self._cancel_requested = True
         self.requestInterruption()
-        w = self._current_worker
-        if w is not None:
+
+        worker = self._current_worker
+        if worker is not None:
             try:
-                w.cancel()
+                worker.cancel()
             except Exception:
                 pass
 
@@ -3775,12 +3915,23 @@ class AIBatchRevisionWorker(QThread):
 
         _, _, _, recs = item.results
 
+        live_boxes = (
+            list(item.preset_bboxes)
+            if len(item.preset_bboxes) == len(recs)
+            else [rv.bbox for rv in recs]
+        )
+
+        recs_for_ai = [
+            RecordView(i, recs[i].text, tuple(live_boxes[i]) if live_boxes[i] else None)
+            for i in range(len(recs))
+        ]
+
         result_holder: Dict[str, Any] = {}
         error_holder: Dict[str, Any] = {}
 
         worker = AIRevisionWorker(
             path=item.path,
-            recs=recs,
+            recs=recs_for_ai,
             lm_model=self.lm_model,
             endpoint=self.endpoint,
             enable_thinking=self.enable_thinking,
@@ -3797,18 +3948,20 @@ class AIBatchRevisionWorker(QThread):
 
         self._current_worker = worker
 
-        worker.status_changed.connect(self.status_changed.emit)
-        worker.finished_revision.connect(
-            lambda path, lines: result_holder.setdefault("lines", lines)
-        )
-        worker.failed_revision.connect(
-            lambda path, msg: error_holder.setdefault("msg", msg)
-        )
+        try:
+            worker.status_changed.connect(self.status_changed.emit)
+            worker.finished_revision.connect(
+                lambda path, lines: result_holder.setdefault("lines", lines)
+            )
+            worker.failed_revision.connect(
+                lambda path, msg: error_holder.setdefault("msg", msg)
+            )
 
-        # WICHTIG: hier absichtlich synchron im Batch-Thread ausführen
-        worker.run()
+            # synchron im Batch-Thread
+            worker.run()
 
-        self._current_worker = None
+        finally:
+            self._current_worker = None
 
         if self.isInterruptionRequested():
             raise RuntimeError("Überarbeitung abgebrochen.")
@@ -3853,6 +4006,7 @@ class AIBatchRevisionWorker(QThread):
         self.status_changed.emit("KI-Batch abgeschlossen.")
         self.finished_batch.emit()
 
+
 def _normalize_bbox(bb: Optional[BBox], img_w: int, img_h: int) -> Optional[List[float]]:
     if not bb or img_w <= 0 or img_h <= 0:
         return None
@@ -3870,11 +4024,12 @@ def _extract_text_lines(text: str) -> List[str]:
         return []
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
+
 class AIRevisionWorker(QThread):
-    finished_revision = Signal(str, list)   # path, revised_lines
-    failed_revision = Signal(str, str)      # path, error
-    progress_changed = Signal(int)          # 0..100
-    status_changed = Signal(str)            # live text
+    finished_revision = Signal(str, list)  # path, revised_lines
+    failed_revision = Signal(str, str)  # path, error
+    progress_changed = Signal(int)  # 0..100
+    status_changed = Signal(str)  # live text
 
     def __init__(
             self,
@@ -3895,7 +4050,11 @@ class AIRevisionWorker(QThread):
     ):
         super().__init__(parent)
         self.path = path
-        self.recs = recs
+        self.recs = [
+            RecordView(i, rv.text, tuple(rv.bbox) if rv.bbox else None)
+            for i, rv in enumerate(recs)
+        ]
+        self._frozen_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in self.recs]
         self.lm_model = lm_model
         self.endpoint = endpoint
         self.source_kind = source_kind
@@ -4008,6 +4167,21 @@ class AIRevisionWorker(QThread):
 
         # explizite Zeilenumbrüche sind hier verdächtig
         if "\n" in txt:
+            return True
+
+        return False
+
+    def _is_suspicious_box_result(self, text: str) -> bool:
+        txt = _clean_ocr_text(text or "")
+        if not txt:
+            return True
+        if "\n" in txt:
+            return True
+        if len(txt) <= 2:
+            return True
+
+        # typische "komische" OCR-Reste wie KURAVA
+        if txt.isupper() and len(txt) >= 5 and " " not in txt:
             return True
 
         return False
@@ -4200,7 +4374,7 @@ class AIRevisionWorker(QThread):
             if not isinstance(item, dict):
                 continue
             idx = item.get("idx")
-            txt = str(item.get("text", "")).strip()
+            txt = _force_text(item.get("text", "")).strip()
             if isinstance(idx, int) and 0 <= idx < len(recs):
                 out[idx] = txt
 
@@ -4261,8 +4435,7 @@ class AIRevisionWorker(QThread):
             "- Keine Ausgabe vor oder nach dem JSON\n\n"
             "Format exakt:\n"
             "{\"text\":\"...\"}\n\n"
-            f"Zeilenindex: {idx}\n"
-            f"Aktueller OCR-Text als schwacher Hinweis:\n{current_text}"
+            f"Zeilenindex: {idx}"
         )
 
         payload = {
@@ -4312,7 +4485,7 @@ class AIRevisionWorker(QThread):
                     pass
 
         if isinstance(obj, dict):
-            txt = str(obj.get("text", "")).strip()
+            txt = _force_text(obj.get("text", "")).strip()
             if txt or txt == "":
                 return txt
 
@@ -4320,7 +4493,7 @@ class AIRevisionWorker(QThread):
         if lines:
             return lines[0].strip()
 
-        return current_text
+        return ""
 
     def _request_line_decision(
             self,
@@ -4403,7 +4576,7 @@ class AIRevisionWorker(QThread):
                     pass
 
         if isinstance(obj, dict):
-            txt = str(obj.get("text", "")).strip()
+            txt = _force_text(obj.get("text", "")).strip()
             if txt:
                 return txt
 
@@ -4413,11 +4586,11 @@ class AIRevisionWorker(QThread):
 
         # sehr konservativer Fallback:
         # BOX > KRAKEN > PAGE
-        if str(box_text).strip():
-            return str(box_text).strip()
-        if str(kraken_text).strip():
-            return str(kraken_text).strip()
-        return str(page_text).strip()
+        if _force_text(box_text).strip():
+            return _force_text(box_text).strip()
+        if _force_text(kraken_text).strip():
+            return _force_text(kraken_text).strip()
+        return _force_text(page_text).strip()
 
     def _build_sampling_payload(self, response_format: Optional[dict] = None) -> dict:
         payload = {
@@ -4585,26 +4758,39 @@ class AIRevisionWorker(QThread):
         def flatten(val):
             if val is None:
                 return ""
+            if isinstance(val, bytes):
+                return val.decode("utf-8", errors="replace").strip()
             if isinstance(val, str):
                 return val.strip()
             if isinstance(val, list):
                 parts = []
                 for part in val:
-                    if isinstance(part, str) and part.strip():
+                    if isinstance(part, bytes):
+                        txt = part.decode("utf-8", errors="replace").strip()
+                        if txt:
+                            parts.append(txt)
+                    elif isinstance(part, str) and part.strip():
                         parts.append(part.strip())
                     elif isinstance(part, dict):
-                        # NUR echte Antwortfelder, KEIN reasoning_content
                         for key in ("text", "content", "output_text"):
                             v = part.get(key)
-                            if isinstance(v, str) and v.strip():
+                            if isinstance(v, bytes):
+                                txt = v.decode("utf-8", errors="replace").strip()
+                                if txt:
+                                    parts.append(txt)
+                            elif isinstance(v, str) and v.strip():
                                 parts.append(v.strip())
                 return "\n".join(parts).strip()
             if isinstance(val, dict):
                 for key in ("text", "content", "output_text"):
                     v = val.get(key)
-                    if isinstance(v, str) and v.strip():
+                    if isinstance(v, bytes):
+                        txt = v.decode("utf-8", errors="replace").strip()
+                        if txt:
+                            return txt
+                    elif isinstance(v, str) and v.strip():
                         return v.strip()
-            return str(val).strip()
+            return _force_text(val).strip()
 
         # 1) ZUERST nur echte Ausgabe lesen
         candidates = []
@@ -4678,7 +4864,7 @@ class AIRevisionWorker(QThread):
         )
 
         joined_hint = "\n".join(
-            f"{start_idx + i}: {txt}" for i, txt in enumerate(current_lines)
+            f"{i}: {txt}" for i, txt in enumerate(current_lines)
         )
 
         user_prompt = (
@@ -4732,7 +4918,7 @@ class AIRevisionWorker(QThread):
             if not isinstance(item, dict):
                 continue
             idx = item.get("idx")
-            txt = str(item.get("text", "")).strip()
+            txt = _force_text(item.get("text", "")).strip()
             if isinstance(idx, int) and 0 <= idx < count:
                 out[idx] = txt
 
@@ -4787,11 +4973,17 @@ class AIRevisionWorker(QThread):
                 )
 
                 try:
-                    line_data_url = _crop_single_line_to_data_url(self.path, rv)
+                    line_data_url = _crop_single_line_to_data_url(
+                        self.path,
+                        rv,
+                        pad_x=3,
+                        pad_y=3,
+                        extra_context_y=1,
+                    )
                     box_text = self._request_single_line_reread(
                         line_data_url=line_data_url,
                         idx=rv.idx,
-                        current_text=rv.text
+                        current_text=""
                     )
                 except Exception as e:
                     print(f"BOX OCR ERROR idx={rv.idx}: {e}")
@@ -4810,55 +5002,59 @@ class AIRevisionWorker(QThread):
             is_form_like = self._looks_like_form_layout()
 
             # -------------------------------------------------
-            # 2/3 Seiten-OCR nur als Kontext
+            # 2/3 Block-OCR als Kontext (statt kompletter Seite)
             # -------------------------------------------------
             if is_form_like:
                 self.status_changed.emit(
-                    f"2/3 Seiten-OCR stark abgeschwächt (Formular erkannt): {os.path.basename(self.path)}"
+                    f"2/3 Block-Kontext-OCR (Formularmodus): {os.path.basename(self.path)}"
                 )
             else:
                 self.status_changed.emit(
-                    f"2/3 Seiten-OCR nur als Kontext: {os.path.basename(self.path)}"
+                    f"2/3 Block-Kontext-OCR: {os.path.basename(self.path)}"
                 )
 
-            page_lines = None
-            last_err = None
+            # Startwert: Kraken-Zeilen als Fallback
+            page_lines = [rv.text for rv in self.recs]
 
-            retry_configs = [
-                {"max_side": 2000, "image_format": "PNG"},
-                {"max_side": 1500, "image_format": "PNG"},
-                {"max_side": 1000, "image_format": "PNG"},
-            ]
+            # kleine Blöcke halten den Prompt sicher unter dem Kontextlimit
+            chunks = self._chunk_records(self.recs, block_size=3)
 
-            for cfg in retry_configs:
+            for chunk_idx, (start, end) in enumerate(chunks, start=1):
                 if self._cancelled or self.isInterruptionRequested():
                     raise RuntimeError("Überarbeitung abgebrochen.")
 
+                self.status_changed.emit(
+                    f"2/3 Block-Kontext {chunk_idx}/{len(chunks)}: Zeilen {start + 1}-{end}"
+                )
+
                 try:
-                    self.status_changed.emit(
-                        f"2/3 Vision-Kontext Versuch: {cfg['max_side']}px PNG"
-                    )
-                    page_data_url = _page_to_data_url(
+                    block_data_url = _crop_block_to_data_url_context(
                         self.path,
-                        max_side=cfg["max_side"],
-                        image_format=cfg["image_format"],
+                        self.recs,
+                        start,
+                        end,
+                        pad_x=40,
+                        pad_y=35,
                     )
 
-                    if self._cancelled or self.isInterruptionRequested():
-                        raise RuntimeError("Überarbeitung abgebrochen.")
+                    reread = self._request_block_reread(
+                        block_data_url=block_data_url,
+                        start_idx=start,
+                        end_idx=end,
+                        current_lines=page_lines[start:end],
+                    )
 
-                    page_lines = self._request_page_ocr_with_fixed_linecount(page_data_url, self.recs)
-                    break
+                    if isinstance(reread, list) and len(reread) == (end - start):
+                        for local_i, txt in enumerate(reread):
+                            txt = _clean_ocr_text(txt)
+                            if txt:
+                                page_lines[start + local_i] = txt
+
                 except Exception as e:
-                    last_err = e
-                    if self._is_image_processing_error(e):
-                        continue
-                    page_lines = None
-                    break
+                    print(f"BLOCK OCR ERROR {start}-{end}: {e}")
 
-            # Kontext ist optional, nicht mehr Pflicht
-            if page_lines is None or len(page_lines) != len(self.recs):
-                page_lines = [rv.text for rv in self.recs]
+                # leichter Fortschritt im Kontext-Schritt
+                self.progress_changed.emit(55 + int((chunk_idx / max(1, len(chunks))) * 15))
 
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError("Überarbeitung abgebrochen.")
@@ -4878,12 +5074,48 @@ class AIRevisionWorker(QThread):
                 page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
                 prev_final = final_lines[i - 1] if i > 0 else ""
 
-                best_text = self._choose_final_line_text(
-                    kraken_text=kraken_text,
-                    box_text=box_text,
-                    page_text=page_text,
-                    prev_final_text=prev_final,
-                )
+                has_locked_bbox = self._frozen_bboxes[i] is not None
+
+                if has_locked_bbox:
+                    # Manuell gesetzte Overlay-Box ist die einzige geometrische Wahrheitsquelle.
+                    # Kein Block-/Page-Kontext darf diese Zeile überschreiben.
+                    best_text = _clean_ocr_text(box_text)
+
+                    if not best_text:
+                        best_text = _clean_ocr_text(kraken_text)
+                else:
+                    need_lm_decision = (
+                            self._is_suspicious_box_result(box_text)
+                            or (
+                                    box_text
+                                    and page_text
+                                    and self._normalize_compare_text(box_text) != self._normalize_compare_text(
+                                page_text)
+                            )
+                    )
+
+                    if need_lm_decision:
+                        best_text = self._request_line_decision(
+                            idx=i,
+                            kraken_text=kraken_text,
+                            page_text=page_text,
+                            box_text=box_text,
+                        ).strip()
+
+                        if not best_text:
+                            best_text = self._choose_final_line_text(
+                                kraken_text=kraken_text,
+                                box_text=box_text,
+                                page_text=page_text,
+                                prev_final_text=prev_final,
+                            )
+                    else:
+                        best_text = self._choose_final_line_text(
+                            kraken_text=kraken_text,
+                            box_text=box_text,
+                            page_text=page_text,
+                            prev_final_text=prev_final,
+                        )
 
                 final_lines.append(best_text)
                 self.progress_changed.emit(55 + int(((i + 1) / total) * 45))
@@ -4914,24 +5146,37 @@ class AIRevisionWorker(QThread):
             self.failed_revision.emit(self.path, "Zeitüberschreitung beim Warten auf LM Studio.")
 
         except Exception as e:
-            self.failed_revision.emit(self.path, str(e))
+            msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+            self.failed_revision.emit(self.path, msg)
+
 
 class HFDownloadWorker(QThread):
     progress_changed = Signal(int)
     status_changed = Signal(str)
-    finished_download = Signal(str)      # local_dir
-    failed_download = Signal(str)        # error text
+    finished_download = Signal(str)
+    failed_download = Signal(str)
 
-    def __init__(self, repo_id: str, local_dir: str, parent=None):
+    def __init__(
+            self,
+            repo_id: str,
+            local_dir: str,
+            prepare_cmds: List[List[str]],
+            install_cmd: List[str],
+            download_cmd: List[str],
+            parent=None
+    ):
         super().__init__(parent)
         self.repo_id = repo_id
         self.local_dir = local_dir
+        self.prepare_cmds = prepare_cmds or []
+        self.install_cmd = install_cmd
+        self.download_cmd = download_cmd
         self._proc = None
         self._cancel_requested = False
         self._last_status_line = ""
         self._current_file = ""
         self._last_finished_file = ""
-        self._repo_files: List[Tuple[str, int]] = []   # [(rel_path, size), ...]
+        self._repo_files: List[Tuple[str, int]] = []  # [(rel_path, size), ...]
 
     def cancel(self):
         self._cancel_requested = True
@@ -4943,8 +5188,70 @@ class HFDownloadWorker(QThread):
             except Exception:
                 pass
 
+    def _run_simple_command(self, cmd: List[str], status_text: str):
+        self.status_changed.emit(status_text)
+
+        creationflags = 0
+        if sys.platform.startswith("win"):
+            creationflags = subprocess.CREATE_NO_WINDOW
+
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            universal_newlines=True,
+            creationflags=creationflags
+        )
+
+        output_queue = queue.Queue()
+
+        def _reader():
+            try:
+                if self._proc.stdout is None:
+                    return
+                for line in self._proc.stdout:
+                    output_queue.put(line)
+            except Exception:
+                pass
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
+        while True:
+            if self._cancel_requested or self.isInterruptionRequested():
+                break
+
+            while True:
+                try:
+                    line = output_queue.get_nowait()
+                except queue.Empty:
+                    break
+                self._consume_output_line(line)
+
+            ret = self._proc.poll()
+            if ret is not None:
+                break
+
+            self.msleep(100)
+
+        if self._cancel_requested or self.isInterruptionRequested():
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+            raise RuntimeError("Download abgebrochen.")
+
+        ret = self._proc.wait()
+        if ret != 0:
+            raise RuntimeError(f"Befehl wurde mit Exit-Code {ret} beendet:\n{' '.join(cmd)}")
+
     def _consume_output_line(self, line: str):
-        txt = (line or "").strip()
+        txt = _force_text(line).strip()
         if not txt:
             return
 
@@ -5061,13 +5368,8 @@ class HFDownloadWorker(QThread):
         try:
             os.makedirs(self.local_dir, exist_ok=True)
 
-            cmd = [
-                "hf",
-                "download",
-                self.repo_id,
-                "--local-dir",
-                self.local_dir,
-            ]
+            install_cmd = list(self.install_cmd)
+            download_cmd = list(self.download_cmd)
 
             self.progress_changed.emit(0)
             self.status_changed.emit("Ermittle Dateiliste und Gesamtgröße des Modells …")
@@ -5082,10 +5384,31 @@ class HFDownloadWorker(QThread):
             if sys.platform.startswith("win"):
                 creationflags = subprocess.CREATE_NO_WINDOW
 
-            self.status_changed.emit("Starte: " + " ".join(cmd))
+            # 1) Vorbereitende Befehle (z. B. venv) ausführen
+            for cmd in self.prepare_cmds:
+                cmd_text = " ".join(cmd).lower()
+                if "-m venv" in cmd_text:
+                    self._run_simple_command(cmd, "Erzeuge geschützte Python-Umgebung für Whisper …")
+                else:
+                    self._run_simple_command(cmd, "Bereite Whisper-Umgebung vor …")
 
+            # 2) Requirements installieren
+            self._run_simple_command(
+                install_cmd,
+                "Installiere Python-Requirements für Whisper …"
+            )
+
+            # 3) Dateiliste/Gesamtgröße ermitteln
+            self.status_changed.emit("Ermittle Dateiliste und Gesamtgröße des Modells …")
+            self._repo_files = self._fetch_repo_files()
+            total_bytes = self._repo_total_bytes()
+            total_files = len(self._repo_files)
+            start_time = time.time()
+
+            # 3) Download starten
+            self.status_changed.emit("Starte Modell-Download …")
             self._proc = subprocess.Popen(
-                cmd,
+                download_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
@@ -5099,7 +5422,7 @@ class HFDownloadWorker(QThread):
 
             output_queue = queue.Queue()
 
-            def _reader():
+            def _reader_download():
                 try:
                     if self._proc.stdout is None:
                         return
@@ -5108,7 +5431,7 @@ class HFDownloadWorker(QThread):
                 except Exception:
                     pass
 
-            reader_thread = threading.Thread(target=_reader, daemon=True)
+            reader_thread = threading.Thread(target=_reader_download, daemon=True)
             reader_thread.start()
 
             last_emit_ts = 0.0
@@ -5117,7 +5440,6 @@ class HFDownloadWorker(QThread):
                 if self._cancel_requested or self.isInterruptionRequested():
                     break
 
-                # stdout-Zeilen abholen
                 while True:
                     try:
                         line = output_queue.get_nowait()
@@ -5199,22 +5521,52 @@ class HFDownloadWorker(QThread):
             self.status_changed.emit("Download abgeschlossen.")
             self.finished_download.emit(self.local_dir)
 
+
         except FileNotFoundError:
             self.failed_download.emit(
-                "Die Hugging-Face-CLI 'hf' wurde nicht gefunden.\n\n"
-                "Bitte zuerst installieren, z. B. mit:\n"
-                "pip install -U huggingface_hub"
+                "Python oder ein benötigtes Modul wurde nicht gefunden.\n\n"
+                "Bitte prüfen, ob die Anwendung mit einer funktionsfähigen Python-Umgebung läuft."
             )
+
+
         except Exception as e:
-            self.failed_download.emit(str(e))
+
+            msg = str(e)
+
+            low = msg.lower()
+
+            if "externally-managed-environment" in low:
+                msg = (
+                    "Die Python-Installation des Systems darf nicht direkt verändert werden.\n\n"
+                    "Die App sollte dafür automatisch eine eigene Umgebung benutzen.\n"
+                    "Falls das trotzdem passiert ist, fehlt wahrscheinlich python3-venv.\n\n"
+                    "Bitte einmal ausführen:\n"
+                    "sudo apt update\n"
+                    "sudo apt install -y python3-venv python3-pip"
+                )
+            elif "no module named venv" in low or "ensurepip" in low:
+                msg = (
+                    "Auf diesem System fehlt die Unterstützung für Python-venv.\n\n"
+                    "Bitte einmal ausführen:\n"
+                    "sudo apt update\n"
+                    "sudo apt install -y python3-venv python3-pip"
+                )
+            elif "no such file or directory" in low and "python3" in low:
+                msg = (
+                    "python3 wurde nicht gefunden.\n\n"
+                    "Bitte prüfen, ob Python 3 installiert ist."
+                )
+
+            self.failed_download.emit(msg)
         finally:
             self._proc = None
 
+
 class VoiceLineFillWorker(QThread):
-    progress_changed = Signal(int)
-    status_changed = Signal(str)
-    finished_line = Signal(str, int, str)   # path, line_index, text
-    failed_line = Signal(str, str)          # path, error
+    finished_line = Signal(str, int, str)  # path, line_index, text
+    failed_line = Signal(str, str)  # path, error_message
+    progress_changed = Signal(int)  # 0..100
+    status_changed = Signal(str)  # status text
 
     def __init__(
             self,
@@ -5225,6 +5577,7 @@ class VoiceLineFillWorker(QThread):
             compute_type: str = "int8",
             language: Optional[str] = None,
             input_device=None,
+            input_samplerate: Optional[int] = None,
             parent=None
     ):
         super().__init__(parent)
@@ -5235,6 +5588,7 @@ class VoiceLineFillWorker(QThread):
         self.compute_type = compute_type
         self.language = language
         self.input_device = input_device
+        self.input_samplerate = int(input_samplerate) if input_samplerate else None
 
         self._finish_requested = False
         self._cancel_requested = False
@@ -5242,75 +5596,137 @@ class VoiceLineFillWorker(QThread):
         self._stream = None
 
     def stop(self):
-        # normales Ende der Aufnahme -> danach transkribieren
+        # normales Ende der Aufnahme -> Worker beendet den Stream selbst
         self._finish_requested = True
-        try:
-            if self._stream is not None:
-                self._stream.stop()
-        except Exception:
-            pass
 
     def cancel(self):
-        # echter Abbruch -> nichts mehr transkribieren
+        # echter Abbruch -> Worker beendet den Stream selbst
         self._cancel_requested = True
         self.requestInterruption()
-        try:
-            if self._stream is not None:
-                self._stream.stop()
-                self._stream.close()
-        except Exception:
-            pass
+        self._finish_requested = False
 
     def _audio_callback(self, indata, frames, time_info, status):
-        if self._cancel_requested:
-            raise sd.CallbackStop()
+        if status:
+            # optional für Debug
+            try:
+                self.status_changed.emit(f"Audio-Status: {status}")
+            except Exception:
+                pass
 
-        # Nur echte Audiodaten puffern
         if indata is not None and len(indata):
             self._audio_chunks.append(indata.copy())
 
-        if self._finish_requested:
+        if self._cancel_requested or self._finish_requested:
             raise sd.CallbackStop()
 
     def _record_until_stop(self):
+        self.status_changed.emit(
+            f"Aufnahmegerät: {self.input_device} | Samplerate: {self.input_samplerate or 'auto'}"
+        )
         self.status_changed.emit("Mikrofon aktiv. Bitte nur die aktuell ausgewählte Zeile diktieren.")
         self.progress_changed.emit(5)
 
-        with sd.InputStream(
+        samplerate = self.input_samplerate
+        if not samplerate:
+            try:
+                dev_info = sd.query_devices(self.input_device, "input")
+                samplerate = int(dev_info.get("default_samplerate", VOICE_SAMPLE_RATE))
+            except Exception:
+                samplerate = VOICE_SAMPLE_RATE
+
+        try:
+            sd.check_input_settings(
                 device=self.input_device,
-                samplerate=VOICE_SAMPLE_RATE,
+                samplerate=samplerate,
+                channels=VOICE_CHANNELS,
+                dtype="float32",
+            )
+        except Exception:
+            samplerate = VOICE_SAMPLE_RATE
+
+        self._record_samplerate = int(samplerate)
+        self._stream = None
+
+        stream = None
+        try:
+            stream = sd.InputStream(
+                device=self.input_device,
+                samplerate=self._record_samplerate,
                 channels=VOICE_CHANNELS,
                 dtype="float32",
                 blocksize=VOICE_BLOCKSIZE,
                 callback=self._audio_callback
-        ) as stream:
+            )
             self._stream = stream
+            stream.start()
 
-            while True:
+            while stream.active:
                 if self._cancel_requested or self.isInterruptionRequested():
+                    try:
+                        stream.abort(ignore_errors=True)
+                    except Exception:
+                        pass
                     break
-                if self._finish_requested:
-                    break
-                self.msleep(100)
 
-        self._stream = None
+                if self._finish_requested:
+                    try:
+                        stream.abort(ignore_errors=True)
+                    except Exception:
+                        pass
+                    break
+
+                self.msleep(20)
+
+        finally:
+            try:
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    except Exception:
+                        pass
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+            finally:
+                self._stream = None
+
+    def _safe_ascii_temp_root(self) -> str:
+        if sys.platform.startswith("win"):
+            base = r"C:\bk_temp"
+        else:
+            base = "/tmp/bk_temp"
+
+        os.makedirs(base, exist_ok=True)
+        return base
 
     def _write_temp_wav(self) -> str:
         if not self._audio_chunks:
             raise RuntimeError("Keine Audiodaten aufgenommen.")
 
         audio = np.concatenate(self._audio_chunks, axis=0).flatten()
+
+        min_samples = int(0.35 * max(1, getattr(self, "_record_samplerate", VOICE_SAMPLE_RATE)))
+        if len(audio) < min_samples:
+            raise RuntimeError("Aufnahme zu kurz. Bitte etwas länger sprechen.")
+
         audio = np.clip(audio, -1.0, 1.0)
 
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
+        tmp_dir = os.path.join(self._safe_ascii_temp_root(), "voice")
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        tmp_path = os.path.join(
+            tmp_dir,
+            f"voice_{int(time.time() * 1000)}.wav"
+        )
 
         pcm16 = (audio * 32767.0).astype(np.int16)
+        samplerate = int(getattr(self, "_record_samplerate", VOICE_SAMPLE_RATE))
 
         with wave.open(tmp_path, "wb") as wf:
             wf.setnchannels(VOICE_CHANNELS)
             wf.setsampwidth(2)
-            wf.setframerate(VOICE_SAMPLE_RATE)
+            wf.setframerate(samplerate)
             wf.writeframes(pcm16.tobytes())
 
         return tmp_path
@@ -5415,29 +5831,10 @@ class VoiceLineFillWorker(QThread):
 
         return re.sub(r"\s+", " ", txt).strip()
 
-    def _write_temp_wav(self) -> str:
-        if not self._audio_chunks:
-            raise RuntimeError("Keine Audiodaten aufgenommen.")
-
-        audio = np.concatenate(self._audio_chunks, axis=0).flatten()
-        audio = np.clip(audio, -1.0, 1.0)
-
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-
-        pcm16 = (audio * 32767.0).astype(np.int16)
-
-        with wave.open(tmp_path, "wb") as wf:
-            wf.setnchannels(VOICE_CHANNELS)
-            wf.setsampwidth(2)
-            wf.setframerate(VOICE_SAMPLE_RATE)
-            wf.writeframes(pcm16.tobytes())
-
-        return tmp_path
-
     def run(self):
         tmp_wav = None
         try:
+            self._audio_chunks = []
             if not os.path.isdir(self.model_dir):
                 raise RuntimeError("Faster-Whisper-Modellordner wurde nicht gefunden.")
 
@@ -5462,31 +5859,58 @@ class VoiceLineFillWorker(QThread):
 
             from faster_whisper import WhisperModel
 
-            model = WhisperModel(
-                self.model_dir,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-
-            self.status_changed.emit("Transkribiere ausgewählte Zeile lokal...")
-            self.progress_changed.emit(60)
+            safe_model_dir = os.path.abspath(self.model_dir)
+            safe_wav_path = os.path.abspath(tmp_wav)
 
             kwargs = {
                 "beam_size": 5,
-                "vad_filter": True,
+                "vad_filter": False,
                 "condition_on_previous_text": False,
                 "task": "transcribe",
+                "language": None,
             }
 
-            if self.language:
-                kwargs["language"] = self.language
+            active_device = self.device
+            active_compute = self.compute_type
 
             try:
-                segments, info = model.transcribe(tmp_wav, **kwargs)
+                model = WhisperModel(
+                    safe_model_dir,
+                    device=active_device,
+                    compute_type=active_compute
+                )
+
+                self.status_changed.emit(
+                    f"Transkribiere ausgewählte Zeile lokal ({active_device}/{active_compute})..."
+                )
+                self.progress_changed.emit(60)
+
+                segments, info = model.transcribe(safe_wav_path, **kwargs)
+
             except Exception as e:
-                if "silero_vad_v6.onnx" in str(e):
-                    kwargs["vad_filter"] = False
-                    segments, info = model.transcribe(tmp_wav, **kwargs)
+                msg = str(e).lower()
+
+                if active_device == "cuda" and ("out of memory" in msg or "cuda failed" in msg):
+                    try:
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+
+                    self.status_changed.emit(
+                        "CUDA-Speicher voll – Whisper wechselt automatisch auf CPU..."
+                    )
+
+                    model = WhisperModel(
+                        safe_model_dir,
+                        device="cpu",
+                        compute_type="int8"
+                    )
+
+                    self.status_changed.emit("Transkribiere ausgewählte Zeile lokal (cpu/int8)...")
+                    self.progress_changed.emit(60)
+
+                    segments, info = model.transcribe(safe_wav_path, **kwargs)
                 else:
                     raise
 
@@ -5516,6 +5940,7 @@ class VoiceLineFillWorker(QThread):
                     os.remove(tmp_wav)
                 except Exception:
                     pass
+
 
 class ProgressStatusDialog(QDialog):
     cancel_requested = Signal()
@@ -5559,6 +5984,7 @@ class ProgressStatusDialog(QDialog):
     def set_progress(self, value: int):
         self.progress.setValue(max(0, min(100, int(value))))
 
+
 class VoiceRecordDialog(QDialog):
     start_requested = Signal()
     stop_requested = Signal()
@@ -5568,6 +5994,7 @@ class VoiceRecordDialog(QDialog):
         super().__init__(parent)
         self._tr = tr
         self._recording = False
+        self._processing = False
 
         self.setWindowTitle("🎤 Zeile mit Audio verändern")
         self.setModal(True)
@@ -5597,15 +6024,37 @@ class VoiceRecordDialog(QDialog):
         self.btn_cancel.setAutoDefault(False)
         self.btn_toggle.setFocus(Qt.OtherFocusReason)
 
+    def _keep_start_button_primary(self):
+        # Start-Button soll optisch/fokusmäßig immer der primäre Button bleiben
+        self.btn_toggle.setDefault(True)
+        self.btn_toggle.setAutoDefault(True)
+        self.btn_cancel.setDefault(False)
+        self.btn_cancel.setAutoDefault(False)
+        self.btn_toggle.setFocus(Qt.OtherFocusReason)
+
     def _on_toggle(self):
+        # Während Whisper verarbeitet, Klicks auf "Aufnahme starten" ignorieren
+        if self._processing:
+            return
+
         if not self._recording:
             self._recording = True
+            self._processing = False
             self.btn_toggle.setText("Aufnahme stoppen")
+            self.lbl_info.setText("Steuerung der Audioaufnahme:")
+            self._keep_start_button_primary()
             self.start_requested.emit()
         else:
+            # Aufnahme endet jetzt, ab hier blockieren bis Whisper fertig ist
             self._recording = False
-            self.btn_toggle.setEnabled(False)   # Doppel-Klick verhindern bis Worker fertig ist
-            self.btn_toggle.setText("Aufnahme startet …")
+            self._processing = True
+
+            # Button soll optisch wieder "Aufnahme starten" zeigen,
+            # aber intern noch gesperrt bleiben
+            self.btn_toggle.setText("Aufnahme starten")
+            self.lbl_info.setText("Whisper verarbeitet Audio … bitte kurz warten.")
+            self._keep_start_button_primary()
+
             self.stop_requested.emit()
 
     def _on_cancel(self):
@@ -5614,28 +6063,25 @@ class VoiceRecordDialog(QDialog):
 
     def set_recording_state(self, recording: bool):
         self._recording = bool(recording)
+        self._processing = False
+
         self.btn_toggle.setEnabled(True)
         self.btn_toggle.setText("Aufnahme stoppen" if self._recording else "Aufnahme starten")
+        self.lbl_info.setText("Steuerung der Audioaufnahme:")
 
-        # Immer den Hauptbutton als aktiven/default Button halten
-        self.btn_toggle.setDefault(True)
-        self.btn_toggle.setAutoDefault(True)
-        self.btn_cancel.setDefault(False)
-        self.btn_cancel.setAutoDefault(False)
-
-        # Nach Ende einer Aufnahme wieder direkt auf "Aufnahme starten" fokussieren
-        self.btn_toggle.setFocus(Qt.OtherFocusReason)
+        self._keep_start_button_primary()
 
     def closeEvent(self, event):
-        self.cancel_requested.emit()
         super().closeEvent(event)
+
+
 # -----------------------------
 # EXPORT-DIALOGE
 # -----------------------------
 
 class ExportWorker(QThread):
-    file_started = Signal(str, int, int)   # display_name, current, total
-    file_done = Signal(str, str, int, int) # display_name, dest_path, current, total
+    file_started = Signal(str, int, int)  # display_name, current, total
+    file_done = Signal(str, str, int, int)  # display_name, dest_path, current, total
     file_error = Signal(str, str, int, int)
     progress_changed = Signal(int)
     status_changed = Signal(str)
@@ -5675,6 +6121,7 @@ class ExportWorker(QThread):
         self.status_changed.emit("Export abgeschlossen.")
         self.finished_batch.emit()
 
+
 # -----------------------------
 # EXPORT-DIALOGE
 # -----------------------------
@@ -5700,6 +6147,7 @@ class ExportModeDialog(QDialog):
     def accept(self):
         self.choice = "all" if self.rb_all.isChecked() else "selected"
         super().accept()
+
 
 class ExportSelectFilesDialog(QDialog):
     def __init__(self, tr, items: List[TaskItem], parent=None):
@@ -5729,6 +6177,7 @@ class ExportSelectFilesDialog(QDialog):
         paths = [i.data(Qt.UserRole) for i in self.listw.selectedItems()]
         self.selected_paths = [p for p in paths if p]
         self.accept()
+
 
 # -----------------------------
 # HAUPTFENSTER
@@ -5783,7 +6232,6 @@ class MainWindow(QMainWindow):
         self.ai_min_p = 0.0
         self.ai_max_tokens = 8000
 
-        self.ai_available_models: List[str] = []
         self.ai_model_actions: Dict[str, QAction] = {}
         self.ai_model_group: Optional[QActionGroup] = None
 
@@ -5808,8 +6256,9 @@ class MainWindow(QMainWindow):
         self.show_overlay = True
         self.model_path = ""
         self.seg_model_path = ""
-        self.rec_model_candidates = []
-        self.default_seg_model = ""
+        self.kraken_rec_models: List[str] = []
+        self.kraken_seg_models: List[str] = []
+        self.kraken_unknown_models: List[str] = []
         self.current_export_dir = ""
         self.current_theme = "bright"
         self.current_segmenter_mode = "blla"
@@ -5977,7 +6426,7 @@ class MainWindow(QMainWindow):
         self.addAction(self.act_project_save_sc)
 
         self.act_project_save_as_sc = QAction(self)
-        self.act_project_save_as_sc.setShortcut(QKeySequence("Ctrl+Alt+S"))
+        self.act_project_save_as_sc.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.act_project_save_as_sc.triggered.connect(self.save_project_as)
         self.addAction(self.act_project_save_as_sc)
 
@@ -6082,6 +6531,215 @@ class MainWindow(QMainWindow):
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
 
+        self._is_closing = False
+        self._shutdown_force_timer = QTimer(self)
+        self._shutdown_force_timer.setSingleShot(True)
+        self._shutdown_force_timer.timeout.connect(self._force_kill_process)
+
+        self._shutdown_poll_timer = QTimer(self)
+        self._shutdown_poll_timer.setInterval(100)
+        self._shutdown_poll_timer.timeout.connect(self._check_shutdown_complete)
+
+    def _scene_rect_to_bbox(self, scene_rect: QRectF, im: Optional[Image.Image]) -> Optional[BBox]:
+        if im is None:
+            return None
+
+        img_w, img_h = im.size
+        r = scene_rect.normalized()
+
+        x0 = max(0, min(img_w - 1, int(round(r.left()))))
+        y0 = max(0, min(img_h - 1, int(round(r.top()))))
+        x1 = max(1, min(img_w, int(round(r.right()))))
+        y1 = max(1, min(img_h, int(round(r.bottom()))))
+
+        if x1 <= x0:
+            x1 = min(img_w, x0 + 1)
+        if y1 <= y0:
+            y1 = min(img_h, y0 + 1)
+
+        return (x0, y0, x1, y1)
+
+    def _persist_live_canvas_bboxes(self, task: Optional[TaskItem]):
+        if not task or not task.results:
+            return
+
+        text, kr_records, im, recs = task.results
+        changed = False
+
+        for idx, rv in enumerate(recs):
+            rect_item = self.canvas._rects.get(idx)
+            if not rect_item or not isValid(rect_item):
+                continue
+
+            scene_rect = rect_item.mapRectToScene(rect_item.rect()).normalized()
+            bb = self._scene_rect_to_bbox(scene_rect, im)
+            if bb and rv.bbox != bb:
+                rv.bbox = bb
+                changed = True
+
+        if changed:
+            task.results = (
+                "\n".join(r.text for r in recs).strip(),
+                kr_records,
+                im,
+                recs
+            )
+
+        self._update_task_preset_bboxes(task)
+
+    def _all_workers(self):
+        return [
+            self.worker,
+            self.ai_worker,
+            self.ai_batch_worker,
+            self.export_worker,
+            self.pdf_worker,
+            self.hf_download_worker,
+            self.voice_worker,
+        ]
+
+    def _request_all_workers_stop(self):
+        workers = []
+
+        if self.worker and self.worker.isRunning():
+            try:
+                self.worker.requestInterruption()
+                workers.append(self.worker)
+            except Exception:
+                pass
+
+        if self.ai_worker and self.ai_worker.isRunning():
+            try:
+                self.ai_worker.cancel()
+                workers.append(self.ai_worker)
+            except Exception:
+                pass
+
+        if self.ai_batch_worker and self.ai_batch_worker.isRunning():
+            try:
+                self.ai_batch_worker.cancel()
+                workers.append(self.ai_batch_worker)
+            except Exception:
+                pass
+
+        if self.export_worker and self.export_worker.isRunning():
+            try:
+                self.export_worker.requestInterruption()
+                workers.append(self.export_worker)
+            except Exception:
+                pass
+
+        if self.pdf_worker and self.pdf_worker.isRunning():
+            try:
+                self.pdf_worker.requestInterruption()
+                workers.append(self.pdf_worker)
+            except Exception:
+                pass
+
+        if self.hf_download_worker and self.hf_download_worker.isRunning():
+            try:
+                self.hf_download_worker.cancel()
+                workers.append(self.hf_download_worker)
+            except Exception:
+                pass
+
+        if self.voice_worker and self.voice_worker.isRunning():
+            try:
+                self.voice_worker.cancel()
+                workers.append(self.voice_worker)
+            except Exception:
+                pass
+
+        for w in workers:
+            try:
+                w.wait(1500)
+            except Exception:
+                pass
+
+    def _workers_still_running(self) -> bool:
+        for w in self._all_workers():
+            try:
+                if w and w.isRunning():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _check_shutdown_complete(self):
+        if not self._workers_still_running():
+            self._shutdown_poll_timer.stop()
+            self._shutdown_force_timer.stop()
+            self._cleanup_temp_dirs()
+            self._final_close()
+
+    def _final_close(self):
+        try:
+            if self.voice_record_dialog:
+                self.voice_record_dialog.close()
+                self.voice_record_dialog = None
+        except Exception:
+            pass
+
+        try:
+            if self.ai_progress_dialog:
+                self.ai_progress_dialog.close()
+                self.ai_progress_dialog = None
+        except Exception:
+            pass
+
+        try:
+            if self.ai_batch_dialog:
+                self.ai_batch_dialog.close()
+                self.ai_batch_dialog = None
+        except Exception:
+            pass
+
+        try:
+            if self.export_dialog:
+                self.export_dialog.close()
+                self.export_dialog = None
+        except Exception:
+            pass
+
+        try:
+            if self.pdf_progress_dlg:
+                self.pdf_progress_dlg.close()
+                self.pdf_progress_dlg = None
+        except Exception:
+            pass
+
+        try:
+            if self.hf_download_dialog:
+                self.hf_download_dialog.close()
+                self.hf_download_dialog = None
+        except Exception:
+            pass
+
+        self._shutdown_poll_timer.stop()
+        self._shutdown_force_timer.stop()
+
+        # Fenster wirklich schließen, ohne self.close() erneut auszulösen
+        super().close()
+
+    def _force_kill_process(self):
+        # Kein harter Kill mehr.
+        # Nur Diagnose, falls doch noch etwas hängt.
+        running = []
+        for w in self._all_workers():
+            try:
+                if w and w.isRunning():
+                    running.append(type(w).__name__)
+            except Exception:
+                pass
+
+        if running:
+            print("Shutdown wartet noch auf:", ", ".join(running))
+
+        # Letzter Versuch: regulär quitten
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def _normalize_whisper_base_dir(self, raw: str) -> str:
         return os.path.abspath((raw or "").strip()) if (raw or "").strip() else ""
 
@@ -6140,7 +6798,7 @@ class MainWindow(QMainWindow):
             self.whisper_model_group.removeAction(act)
 
         if not self.whisper_available_models:
-            empty_act = QAction("(keine Modelle – bitte Scannen)", self)
+            empty_act = QAction("(keine Modelle – bitte scannen)", self)
             empty_act.setEnabled(False)
             self.whisper_models_submenu.addAction(empty_act)
         else:
@@ -6153,13 +6811,20 @@ class MainWindow(QMainWindow):
                 self.whisper_model_group.addAction(act)
                 self.whisper_models_submenu.addAction(act)
 
+        self.whisper_models_submenu.addSeparator()
+
+        self.act_whisper_unload = QAction("Modell entladen", self)
+        self.act_whisper_unload.triggered.connect(self._clear_whisper_model)
+        self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
+        self.whisper_models_submenu.addAction(self.act_whisper_unload)
+
     def _update_whisper_menu_status(self):
         model_txt = self.whisper_model_name if self.whisper_model_name else "-"
         mic_txt = self.whisper_selected_input_device_label if self.whisper_selected_input_device_label else "-"
         path_txt = self.whisper_models_base_dir if self.whisper_models_base_dir else "-"
 
         if hasattr(self, "act_whisper_status_model"):
-            self.act_whisper_status_model.setText(f"Model: {model_txt}")
+            self.act_whisper_status_model.setText(f"Modell: {model_txt}")
         if hasattr(self, "act_whisper_status_mic"):
             self.act_whisper_status_mic.setText(f"Mikrofon: {mic_txt}")
         if hasattr(self, "act_whisper_status_path"):
@@ -6401,6 +7066,12 @@ class MainWindow(QMainWindow):
 
         fw_device, fw_compute = self._resolve_faster_whisper_device()
 
+        devices = self._get_input_audio_devices()
+        dev_meta = next(
+            (d for d in devices if d["index"] == self.whisper_selected_input_device),
+            None
+        )
+
         self.voice_worker = VoiceLineFillWorker(
             path=task.path,
             line_index=current_row,
@@ -6409,8 +7080,10 @@ class MainWindow(QMainWindow):
             compute_type=fw_compute,
             language=None,
             input_device=self.whisper_selected_input_device,
+            input_samplerate=(dev_meta.get("default_samplerate") if dev_meta else None),
             parent=self
         )
+
         self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
         self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
         self.voice_worker.progress_changed.connect(self.on_voice_progress_changed)
@@ -6430,21 +7103,6 @@ class MainWindow(QMainWindow):
 
         self._set_progress_idle(0)
         self.voice_worker.start()
-        self.voice_worker.finished_line.connect(self.on_voice_line_fill_done)
-        self.voice_worker.failed_line.connect(self.on_voice_line_fill_failed)
-        self.voice_worker.progress_changed.connect(self.on_voice_progress_changed)
-        self.voice_worker.status_changed.connect(self.on_voice_status_changed)
-
-        task.status = STATUS_VOICE_RECORDING
-        self._update_queue_row(task.path)
-        self.status_bar.showMessage(self._tr("msg_voice_started"))
-        self._log(f"Sprachimport gestartet: {os.path.basename(task.path)} | Zeile {current_row + 1}")
-
-        if self.voice_record_dialog:
-            self.voice_record_dialog.set_recording_state(True)
-
-        self._set_progress_idle(0)
-        self.voice_worker.start()
 
     def _cancel_voice_record_dialog(self):
         if self.voice_worker and self.voice_worker.isRunning():
@@ -6452,6 +7110,18 @@ class MainWindow(QMainWindow):
 
     def _audio_backend_priority(self, hostapi_name: str) -> int:
         n = (hostapi_name or "").lower()
+
+        # Linux
+        if "pipewire" in n:
+            return 500
+        if "pulse" in n or "pulseaudio" in n:
+            return 450
+        if "alsa" in n:
+            return 350
+        if "jack" in n:
+            return 250
+
+        # Windows
         if "wasapi" in n:
             return 400
         if "directsound" in n:
@@ -6460,6 +7130,11 @@ class MainWindow(QMainWindow):
             return 200
         if "wdm-ks" in n:
             return 100
+
+        # macOS
+        if "core audio" in n:
+            return 450
+
         return 0
 
     def _normalize_audio_device_name(self, name: str) -> str:
@@ -6528,6 +7203,8 @@ class MainWindow(QMainWindow):
                 "hostapi": hostapi_name,
                 "score": score,
                 "is_default": (i == default_in),
+                "default_samplerate": int(float(dev.get("default_samplerate", VOICE_SAMPLE_RATE))),
+                "max_input_channels": max_in,
             }
 
             # pro Hauptgerät nur die beste Variante behalten
@@ -6552,6 +7229,7 @@ class MainWindow(QMainWindow):
 
     def run_ai_revision_for_selected_lines(self):
         task = self._current_task()
+        self._persist_live_canvas_bboxes(task)
         if not task or task.status != STATUS_DONE or not task.results:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
@@ -6575,16 +7253,17 @@ class MainWindow(QMainWindow):
         if self.ai_worker and self.ai_worker.isRunning():
             return
 
+        live_recs = self._current_recs_for_ai(task)
+
         selected_recs = [
             RecordView(
                 idx=i,
-                text=recs[row].text,
-                bbox=recs[row].bbox
+                text=live_recs[row].text,
+                bbox=live_recs[row].bbox
             )
             for i, row in enumerate(rows)
         ]
 
-        self._ai_single_line_context = None
         self._ai_multi_line_context = {
             "path": task.path,
             "rows": rows,
@@ -6665,6 +7344,13 @@ class MainWindow(QMainWindow):
             for i in range(len(recs))
         ]
 
+        self._push_undo(task)
+
+        new_recs = [
+            RecordView(i, recs[i].text, recs[i].bbox)
+            for i in range(len(recs))
+        ]
+
         for local_idx, row in enumerate(rows):
             if 0 <= row < len(new_recs):
                 new_text = revised_lines[local_idx].strip()
@@ -6733,18 +7419,19 @@ class MainWindow(QMainWindow):
         self.temp_dirs_created.clear()
 
     def eventFilter(self, obj, event):
+        if getattr(self, "_is_closing", False):
+            return False
+
         try:
             et = event.type()
 
             if et in (QEvent.ShortcutOverride, QEvent.KeyPress):
                 if event.matches(QKeySequence.Paste):
-                    # Nur reagieren, wenn dieses Fenster wirklich aktiv ist
                     if QApplication.activeWindow() is not self:
                         return super().eventFilter(obj, event)
 
                     fw = QApplication.focusWidget()
 
-                    # In Texteingaben normales Einfügen erlauben
                     if isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit)):
                         return super().eventFilter(obj, event)
 
@@ -6810,7 +7497,7 @@ class MainWindow(QMainWindow):
             self.act_llm_status.setText(f"LLM: {display}")
 
         if hasattr(self, "act_lm_status"):
-            self.act_lm_status.setText(f"Model: {display}")
+            self.act_lm_status.setText(f"Modell: {display}")
 
         if hasattr(self, "act_lm_mode"):
             self.act_lm_mode.setText(f"Modus: {mode_label}")
@@ -7114,7 +7801,7 @@ class MainWindow(QMainWindow):
                 self.ai_model_actions[model_id] = act
 
         self.ai_models_submenu.addSeparator()
-        self.act_clear_ai_model = QAction("LM-Model entfernen", self)
+        self.act_clear_ai_model = QAction("LM-Modell entfernen", self)
         self.act_clear_ai_model.triggered.connect(self.clear_ai_model)
         self.act_clear_ai_model.setEnabled(bool(self.ai_model_id or self.ai_available_models))
         self.ai_models_submenu.addAction(self.act_clear_ai_model)
@@ -7297,9 +7984,9 @@ class MainWindow(QMainWindow):
         abs_path, rel_path = self._make_hybrid_paths_for_task(task)
 
         payload = {
-            "path": abs_path,                 # Legacy/Fallback
-            "absolute_path": abs_path,       # neu
-            "relative_path": rel_path,       # neu: echter relativer Pfad
+            "path": abs_path,  # Legacy/Fallback
+            "absolute_path": abs_path,  # neu
+            "relative_path": rel_path,  # neu: echter relativer Pfad
             "display_name": task.display_name,
             "status": int(task.status),
             "edited": bool(task.edited),
@@ -7318,7 +8005,8 @@ class MainWindow(QMainWindow):
     def _task_from_dict(self, data: dict) -> TaskItem:
         resolved_path = self._resolve_hybrid_task_path(data)
 
-        display_name_default = os.path.basename(resolved_path) if resolved_path else os.path.basename(str(data.get("path", "")))
+        display_name_default = os.path.basename(resolved_path) if resolved_path else os.path.basename(
+            str(data.get("path", "")))
         rel_default = str(data.get("relative_path", "")).strip()
 
         task = TaskItem(
@@ -7731,43 +8419,190 @@ class MainWindow(QMainWindow):
                 btn.setMaximumWidth(16777215)
 
     def _scan_kraken_models(self):
-        self.rec_model_candidates = []
-        self.default_seg_model = ""
+        self.kraken_rec_models = []
+        self.kraken_seg_models = []
+        self.kraken_unknown_models = []
 
         model_dir = KRAKEN_MODELS_DIR
         if not os.path.isdir(model_dir):
             return
 
-        for name in sorted(os.listdir(model_dir)):
-            full = os.path.join(model_dir, name)
-            if not os.path.isfile(full):
-                continue
-            ext = os.path.splitext(name)[1].lower()
-            if ext not in (".mlmodel", ".pt"):
-                continue
+        candidates = []
+        seen_names = set()
 
-            lname = name.lower()
+        for root, _dirs, files in os.walk(model_dir):
+            for name in files:
+                ext = os.path.splitext(name)[1].lower()
 
-            # Standard-Segmentierung: blla
-            if "blla" in lname:
-                if not self.default_seg_model:
-                    self.default_seg_model = full
-                continue
+                # nur noch .mlmodel
+                if ext != ".mlmodel":
+                    continue
 
-            # Alles andere als Recognition behandeln
-            self.rec_model_candidates.append(full)
+                full = os.path.join(root, name)
+
+                # Dubletten über Dateinamen rausfiltern
+                key = name.lower()
+                if key in seen_names:
+                    continue
+                seen_names.add(key)
+
+                candidates.append(full)
+
+        for full in sorted(candidates, key=lambda p: os.path.basename(p).lower()):
+            kind = self._classify_kraken_model_file(full)
+
+            if kind == "rec":
+                self.kraken_rec_models.append(full)
+            elif kind == "seg":
+                self.kraken_seg_models.append(full)
+            else:
+                self.kraken_unknown_models.append(full)
 
     def _load_default_segmentation_model(self):
-        if self.default_seg_model and os.path.exists(self.default_seg_model):
-            self.seg_model_path = self.default_seg_model
-            self.current_segmenter_mode = "blla"
+        if self.seg_model_path and os.path.exists(self.seg_model_path):
+            return
+
+        if not self.kraken_seg_models:
+            return
+
+        preferred = next(
+            (p for p in self.kraken_seg_models if "blla" in os.path.basename(p).lower()),
+            self.kraken_seg_models[0]
+        )
+
+        self.seg_model_path = preferred
+        self.current_segmenter_mode = "blla"
+
+    def _model_type_to_text(self, model_type) -> str:
+        if isinstance(model_type, (list, tuple, set)):
+            return " ".join(str(x) for x in model_type if x).strip().lower()
+        return str(model_type or "").strip().lower()
+
+    def _classify_kraken_model_file(self, model_path: str) -> str:
+        """
+        Gibt zurück:
+            "rec"      -> Recognition-Modell
+            "seg"      -> Segmentierungs-Modell
+            "unknown"  -> nicht sicher bestimmbar
+        """
+        # 1) Primär: echtes Kraken-Metadatum lesen
+        try:
+            nn = vgsl.TorchVGSLModel.load_model(model_path)
+            model_type = self._model_type_to_text(getattr(nn, "model_type", ""))
+
+            if "recognition" in model_type:
+                return "rec"
+
+            if any(x in model_type for x in ("segmentation", "baseline", "region")):
+                return "seg"
+        except Exception:
+            pass
+
+        # 2) Fallback nur für alte / unklare Modelle
+        lname = os.path.basename(model_path).lower()
+
+        if any(x in lname for x in ("blla", "seg", "segment", "baseline", "region")):
+            return "seg"
+
+        if any(x in lname for x in ("rec", "recognition", "ocr", "htr", "handwriting", "print")):
+            return "rec"
+
+        return "unknown"
+
+    def _set_scanned_rec_model(self, model_path: str):
+        if not model_path or not os.path.exists(model_path):
+            return
+
+        self.model_path = model_path
+        self.last_rec_model_dir = os.path.dirname(model_path)
+        self.settings.setValue("paths/last_rec_model_dir", self.last_rec_model_dir)
+
+        self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(model_path)}")
+        self.status_bar.showMessage(self._tr("msg_loaded_rec", os.path.basename(model_path)))
+
+        self._update_models_menu_labels()
+        self._update_model_clear_buttons()
+
+    def _set_scanned_seg_model(self, model_path: str):
+        if not model_path or not os.path.exists(model_path):
+            return
+
+        self.seg_model_path = model_path
+        self.last_seg_model_dir = os.path.dirname(model_path)
+        self.settings.setValue("paths/last_seg_model_dir", self.last_seg_model_dir)
+
+        self.btn_seg_model.setText(f"Seg-Modell: {os.path.basename(model_path)}")
+        self.status_bar.showMessage(self._tr("msg_loaded_seg", os.path.basename(model_path)))
+
+        self._update_models_menu_labels()
+        self._update_model_clear_buttons()
+
+    def _rebuild_kraken_models_submenu(self):
+        if not hasattr(self, "kraken_models_submenu"):
+            return
+
+        self.kraken_models_submenu.clear()
+
+        has_any = False
+
+        if self.kraken_rec_models:
+            header_rec = QAction("Recognition-Modelle", self)
+            header_rec.setEnabled(False)
+            self.kraken_models_submenu.addAction(header_rec)
+
+            for model_path in self.kraken_rec_models:
+                name = os.path.basename(model_path)
+                act = QAction(name, self)
+                act.setCheckable(True)
+                act.setChecked(os.path.abspath(model_path) == os.path.abspath(self.model_path or ""))
+                act.triggered.connect(lambda checked, mp=model_path: self._set_scanned_rec_model(mp))
+                self.kraken_models_submenu.addAction(act)
+
+            has_any = True
+
+        if self.kraken_seg_models:
+            if has_any:
+                self.kraken_models_submenu.addSeparator()
+
+            header_seg = QAction("Segmentierungs-Modelle", self)
+            header_seg.setEnabled(False)
+            self.kraken_models_submenu.addAction(header_seg)
+
+            for model_path in self.kraken_seg_models:
+                name = os.path.basename(model_path)
+                act = QAction(name, self)
+                act.setCheckable(True)
+                act.setChecked(os.path.abspath(model_path) == os.path.abspath(self.seg_model_path or ""))
+                act.triggered.connect(lambda checked, mp=model_path: self._set_scanned_seg_model(mp))
+                self.kraken_models_submenu.addAction(act)
+
+            has_any = True
+
+        if not has_any:
+            empty_act = QAction("(keine Modelle – bitte scannen)", self)
+            empty_act.setEnabled(False)
+            self.kraken_models_submenu.addAction(empty_act)
+
+        self.kraken_models_submenu.addSeparator()
+        self.kraken_models_submenu.addAction(self.act_clear_rec)
+        self.kraken_models_submenu.addAction(self.act_clear_seg)
+
+    def _update_kraken_menu_status(self):
+        rec_name = os.path.basename(self.model_path) if self.model_path else "-"
+        seg_name = os.path.basename(self.seg_model_path) if self.seg_model_path else "-"
+
+        if hasattr(self, "act_rec_status"):
+            self.act_rec_status.setText(f"Recognition-Modell: {rec_name}")
+
+        if hasattr(self, "act_seg_status"):
+            self.act_seg_status.setText(f"Segmentierungs-Modell: {seg_name}")
 
     def choose_rec_model_from_scanned(self):
-        if not getattr(self, "rec_model_candidates", None):
+        if not getattr(self, "kraken_rec_models", None):
             QMessageBox.warning(self, self._tr("warn_title"), "Keine Recognition-Modelle gefunden.")
             return
 
-        names = [os.path.basename(p) for p in self.rec_model_candidates]
+        names = [os.path.basename(p) for p in self.kraken_rec_models]
         current_name = os.path.basename(self.model_path) if self.model_path else names[0]
 
         selected, ok = QInputDialog.getItem(
@@ -7781,7 +8616,7 @@ class MainWindow(QMainWindow):
         if not ok or not selected:
             return
 
-        for p in self.rec_model_candidates:
+        for p in self.kraken_rec_models:
             if os.path.basename(p) == selected:
                 self.model_path = p
                 break
@@ -8051,6 +8886,8 @@ class MainWindow(QMainWindow):
     def on_ai_batch_file_started(self, path: str, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
         if task:
+            if task.results:
+                task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in task.results[3]]
             task.status = STATUS_AI_PROCESSING
             self._update_queue_row(path)
 
@@ -8149,40 +8986,14 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
 
     def _resolve_faster_whisper_device(self) -> Tuple[str, str]:
-        caps = self._gpu_capabilities()
-
-        # gleiche Priorität wie OCR:
-        # CUDA > ROCm > MPS > CPU
-        preferred_order = ["cuda", "rocm", "mps", "cpu"]
-
-        chosen = "cpu"
-        for dev in preferred_order:
-            ok, _ = caps.get(dev, (False, ""))
-            if ok:
-                chosen = dev
-                break
-
-        # Wenn in der GUI explizit ein verfügbares Gerät gewählt wurde,
-        # dann dieses bevorzugen
-        user_ok, _ = caps.get(self.device_str, (False, ""))
-        if user_ok:
-            chosen = self.device_str
-
-        # faster-whisper / ctranslate2 Mapping
-        if chosen == "cuda":
-            return "cuda", "float16"
-
-        # stabile Fallbacks
-        if chosen == "rocm":
-            return "cpu", "int8"
-
-        if chosen == "mps":
-            return "cpu", "int8"
-
+        # Wichtig:
+        # Whisper immer auf CPU laufen lassen.
+        # Sonst kollidiert es mit Kraken-OCR und/oder LM Studio im VRAM.
         return "cpu", "int8"
 
     def run_voice_line_fill(self):
         task = self._current_task()
+        self._persist_live_canvas_bboxes(task)
         if not task or task.status != STATUS_DONE or not task.results:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_voice_need_done"))
             return
@@ -8209,12 +9020,18 @@ class MainWindow(QMainWindow):
             return
 
         if self.whisper_selected_input_device is None:
-            QMessageBox.warning(
-                self,
-                self._tr("warn_title"),
-                "Es ist noch kein Mikrofon ausgewählt. Bitte unter 'Whisper-Optionen' ein Mikrofon festlegen."
-            )
-            return
+            devices = self._get_input_audio_devices()
+            if devices:
+                self.whisper_selected_input_device = devices[0]["index"]
+                self.whisper_selected_input_device_label = devices[0]["label"]
+                self._update_whisper_menu_status()
+            else:
+                QMessageBox.warning(
+                    self,
+                    self._tr("warn_title"),
+                    "Es ist kein Mikrofon verfügbar."
+                )
+                return
 
         if self.voice_record_dialog is not None:
             try:
@@ -8243,7 +9060,11 @@ class MainWindow(QMainWindow):
             self._log("Sprachaufnahme wird gestoppt...")
 
             if self.voice_record_dialog:
-                self.voice_record_dialog.set_recording_state(False)
+                self.voice_record_dialog._recording = False
+                self.voice_record_dialog._processing = True
+                self.voice_record_dialog.btn_toggle.setText("Aufnahme starten")
+                self.voice_record_dialog.lbl_info.setText("Whisper verarbeitet Audio … bitte kurz warten.")
+                self.voice_record_dialog._keep_start_button_primary()
 
             self._set_progress_idle(0)
             self.voice_worker.stop()
@@ -8321,6 +9142,10 @@ class MainWindow(QMainWindow):
         )
 
     def on_voice_line_fill_failed(self, path: str, msg: str):
+        # Schutz gegen doppelte Ausführung
+        if self.voice_worker is None:
+            return
+
         task = next((i for i in self.queue_items if i.path == path), None)
         self.voice_worker = None
 
@@ -8360,6 +9185,7 @@ class MainWindow(QMainWindow):
         else:
             # Fallback: aktuelles Vorschau-Element
             task = self._current_task()
+            self._persist_live_canvas_bboxes(task)
 
         if not task or task.status != STATUS_DONE or not task.results:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
@@ -8377,6 +9203,16 @@ class MainWindow(QMainWindow):
         if not recs:
             return
 
+        task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs]
+
+        self.act_ai_revise.setEnabled(True)
+        self.status_bar.showMessage(self._tr("msg_ai_started"))
+        self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
+
+        recs_for_ai = self._current_recs_for_ai(task)
+        if not recs_for_ai:
+            return
+
         self.act_ai_revise.setEnabled(True)
         self.status_bar.showMessage(self._tr("msg_ai_started"))
         self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
@@ -8388,7 +9224,7 @@ class MainWindow(QMainWindow):
 
         self.ai_worker = AIRevisionWorker(
             path=task.path,
-            recs=recs,
+            recs=recs_for_ai,
             lm_model=model_id,
             endpoint=self.ai_endpoint,
             enable_thinking=self.ai_enable_thinking,
@@ -8412,6 +9248,7 @@ class MainWindow(QMainWindow):
 
     def run_ai_revision_for_single_line(self, row: int):
         task = self._current_task()
+        self._persist_live_canvas_bboxes(task)
         if not task or task.status != STATUS_DONE or not task.results:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
@@ -8430,10 +9267,12 @@ class MainWindow(QMainWindow):
         if self.ai_worker and self.ai_worker.isRunning():
             return
 
+        live_recs = self._current_recs_for_ai(task)
+
         single_rec = RecordView(
             idx=0,
-            text=recs[row].text,
-            bbox=recs[row].bbox
+            text=live_recs[row].text,
+            bbox=live_recs[row].bbox
         )
 
         self._ai_single_line_context = {
@@ -8545,7 +9384,8 @@ class MainWindow(QMainWindow):
 
         self._push_undo(task)
 
-        # WICHTIG: neue RecordView-Liste bauen, nicht in-place mutieren
+        # WICHTIG:
+        # Texte ersetzen, aber die AKTUELLEN Boxen aus task.results behalten.
         new_recs = [
             RecordView(i, revised_lines[i], recs[i].bbox)
             for i in range(len(recs))
@@ -8833,7 +9673,8 @@ class MainWindow(QMainWindow):
 
         self._push_undo(task)
 
-        # WICHTIG: neue Liste statt Mutation der alten
+        # WICHTIG:
+        # Texte ersetzen, Boxen aber exakt so behalten wie sie aktuell im Task stehen.
         new_recs = [
             RecordView(i, revised_lines[i], recs[i].bbox)
             for i in range(len(recs))
@@ -8959,7 +9800,6 @@ class MainWindow(QMainWindow):
 
         self.models_menu = menubar.addMenu(self._tr("menu_models"))
 
-        # Menüeinträge zeigen immer den aktuell geladenen Namen
         self.act_rec = QAction("Recognition-Modell laden...", self)
         self.act_rec.triggered.connect(self.choose_rec_model)
         self.models_menu.addAction(self.act_rec)
@@ -8970,21 +9810,35 @@ class MainWindow(QMainWindow):
 
         self.models_menu.addSeparator()
 
-        # --- Clear actions in Models menu ---
-        self.act_clear_rec = QAction(self._tr("act_clear_rec"), self)
-        self.act_clear_rec.setToolTip(self._tr("act_clear_rec"))
-        self.act_clear_rec.triggered.connect(self.clear_rec_model)
-        self.models_menu.addAction(self.act_clear_rec)
+        self.kraken_models_submenu = self.models_menu.addMenu("Verfügbare Kraken-Modelle")
 
-        self.act_clear_seg = QAction(self._tr("act_clear_seg"), self)
-        self.act_clear_seg.setToolTip(self._tr("act_clear_seg"))
+        # Diese Aktionen werden nicht mehr direkt ins Hauptmenü gesetzt,
+        # sondern im Untermenü eingebaut.
+        self.act_clear_rec = QAction("Recognition-Modell entfernen", self)
+        self.act_clear_rec.triggered.connect(self.clear_rec_model)
+
+        self.act_clear_seg = QAction("Segmentierungs-Modell entfernen", self)
         self.act_clear_seg.triggered.connect(self.clear_seg_model)
-        self.models_menu.addAction(self.act_clear_seg)
+
+        self.act_rec_status = QAction("Recognition-Modell: -", self)
+        self.act_rec_status.setEnabled(False)
+
+        self.act_seg_status = QAction("Segmentierungs-Modell: -", self)
+        self.act_seg_status.setEnabled(False)
+
+        self._rebuild_kraken_models_submenu()
+        self._update_kraken_menu_status()
 
         self.models_menu.addSeparator()
-        self.act_download = QAction(self._tr("act_download_model"), self)
+        self.models_menu.addAction(self.act_rec_status)
+        self.models_menu.addAction(self.act_seg_status)
+        self.models_menu.addSeparator()
+
+        self.act_download = QAction("Modell herunterladen (Zenodo)", self)
         self.act_download.triggered.connect(self.open_download_link)
         self.models_menu.addAction(self.act_download)
+
+        self._update_kraken_menu_status()
 
         self.revision_models_menu = menubar.addMenu("LM-Optionen")
 
@@ -9011,13 +9865,9 @@ class MainWindow(QMainWindow):
         self.whisper_model_group = QActionGroup(self)
         self.whisper_model_group.setExclusive(True)
 
-        self.act_whisper_unload = QAction("Modell entladen", self)
-        self.act_whisper_unload.triggered.connect(self._clear_whisper_model)
-        self.whisper_menu.addAction(self.act_whisper_unload)
-
         self.whisper_menu.addSeparator()
 
-        self.act_whisper_status_model = QAction("Model: -", self)
+        self.act_whisper_status_model = QAction("Modell: -", self)
         self.act_whisper_status_model.setEnabled(False)
         self.whisper_menu.addAction(self.act_whisper_status_model)
 
@@ -9050,16 +9900,14 @@ class MainWindow(QMainWindow):
         self.act_scan_lm.triggered.connect(self.scan_ai_models_now)
         self.revision_models_menu.addAction(self.act_scan_lm)
 
-        self.revision_models_menu.addSeparator()
-
-        self.ai_models_submenu = self.revision_models_menu.addMenu("verfügbare LM-Model")
+        self.ai_models_submenu = self.revision_models_menu.addMenu("Verfügbare LM-Modelle")
         self.ai_model_group = QActionGroup(self)
         self.ai_model_group.setExclusive(True)
         self._rebuild_ai_model_submenu()
 
         self.revision_models_menu.addSeparator()
 
-        self.act_lm_status = QAction("Model: -", self)
+        self.act_lm_status = QAction("Modell: -", self)
         self.act_lm_status.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_status)
 
@@ -9183,9 +10031,12 @@ class MainWindow(QMainWindow):
 
             num_w = self._queue_num_col_width()
             check_w = self._queue_check_col_width()
-            status_w = 120
 
-            file_w = max(120, vw - num_w - check_w - status_w)
+            # vorher: status_w = 120
+            status_w = 200
+
+            # Datei-Spalte bewusst kleiner
+            file_w = max(160, vw - num_w - check_w - status_w)
 
             self.queue_table.setColumnWidth(QUEUE_COL_NUM, num_w)
             self.queue_table.setColumnWidth(QUEUE_COL_CHECK, check_w)
@@ -9349,12 +10200,16 @@ class MainWindow(QMainWindow):
         self._refresh_hw_menu_availability()
 
     def _update_models_menu_labels(self):
-        rec_name = os.path.basename(self.model_path) if self.model_path else "-"
-        seg_name = os.path.basename(self.seg_model_path) if self.seg_model_path else "-"
+        if hasattr(self, "act_rec"):
+            self.act_rec.setText("Recognition-Modell laden...")
+        if hasattr(self, "act_seg"):
+            self.act_seg.setText("Segmentierungs-Modell laden...")
 
-        # Reiter "Modelle" (Menü) aktualisieren
-        self.act_rec.setText(f"{self._tr('dlg_choose_rec')}{rec_name}")
-        self.act_seg.setText(f"{self._tr('dlg_choose_seg')}{seg_name}")
+        self._update_kraken_menu_status()
+        self._rebuild_kraken_models_submenu()
+
+        if hasattr(self, "kraken_models_submenu"):
+            self._rebuild_kraken_models_submenu()
 
     def set_reading_direction(self, mode):
         self.reading_direction = mode
@@ -9423,14 +10278,15 @@ class MainWindow(QMainWindow):
         self.act_play.setText(self._tr("act_start_ocr"))
         self.act_stop.setText(self._tr("act_stop_ocr"))
         self.act_project_load_toolbar.setText(self._tr("menu_project_load"))
-        self.act_project_load_toolbar.setText(self._tr("menu_project_load"))
         self.act_project_load_toolbar.setToolTip(self._tr("menu_project_load"))
 
         self.lbl_queue.setText(self._tr("lbl_queue"))
         self.lbl_lines.setText(self._tr("lbl_lines"))
-        self.queue_table.setHorizontalHeaderLabels(["#", "☐", self._tr("col_file"), self._tr("col_status")])
+        self.queue_table.setHorizontalHeaderLabels(["#", "☐", "Geladene Datein", self._tr("col_status")])
+
         if hasattr(self.list_lines, "setHeaderLabels"):
-            self.list_lines.setHeaderLabels(["Nr.", "Inhalt"])
+            self.list_lines.setHeaderLabels(["#", "Erkannte Zeilen und Wörter"])
+            self.list_lines.header().setDefaultAlignment(Qt.AlignCenter)
 
         if self.model_path:
             self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(self.model_path)}")
@@ -9459,17 +10315,30 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
 
         # Models menu actions
-        self.act_rec.setText(
-            f"{self._tr('dlg_choose_rec')}{os.path.basename(self.model_path) if self.model_path else '-'}")
-        self.act_seg.setText(
-            f"{self._tr('dlg_choose_seg')}{os.path.basename(self.seg_model_path) if self.seg_model_path else '-'}")
+        if hasattr(self, "act_rec"):
+            self.act_rec.setText("Recognition-Modell laden...")
+        if hasattr(self, "act_seg"):
+            self.act_seg.setText("Segmentierungs-Modell laden...")
 
         if hasattr(self, "act_clear_rec"):
-            self.act_clear_rec.setText(self._tr("act_clear_rec"))
-            self.act_clear_rec.setToolTip(self._tr("act_clear_rec"))
+            self.act_clear_rec.setText("Recognition-Modell entfernen")
         if hasattr(self, "act_clear_seg"):
-            self.act_clear_seg.setText(self._tr("act_clear_seg"))
-            self.act_clear_seg.setToolTip(self._tr("act_clear_seg"))
+            self.act_clear_seg.setText("Segmentierungs-Modell entfernen")
+
+        if hasattr(self, "kraken_models_submenu"):
+            self.kraken_models_submenu.setTitle("Verfügbare Kraken-Modelle")
+
+        if hasattr(self, "ai_models_submenu"):
+            self.ai_models_submenu.setTitle("Verfügbare LM-Modelle")
+
+        if hasattr(self, "whisper_models_submenu"):
+            self.whisper_models_submenu.setTitle("Verfügbare Whisper-Modelle")
+
+        self._update_kraken_menu_status()
+        self._rebuild_kraken_models_submenu()
+        self.refresh_models_menu_status()
+        self._update_whisper_menu_status()
+        self._rebuild_whisper_model_submenu()
 
         if hasattr(self, "btn_rec_clear"):
             self.btn_rec_clear.setToolTip(self._tr("act_clear_rec"))
@@ -9586,7 +10455,7 @@ class MainWindow(QMainWindow):
                 files.append(p)
 
         if files:
-            self.files_dropped.emit(files)
+            self.add_files_to_queue(files)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -10512,11 +11381,37 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(self._tr("msg_finished"))
         self.progress_bar.setValue(100)
 
+        if self.worker:
+            try:
+                self.worker.deleteLater()
+            except Exception:
+                pass
+            self.worker = None
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
     def on_failed(self, msg):
         QMessageBox.critical(self, self._tr("err_title"), msg)
         self.act_play.setEnabled(True)
         self.act_stop.setEnabled(False)
         self._set_progress_idle(0)
+
+        if self.worker:
+            try:
+                self.worker.deleteLater()
+            except Exception:
+                pass
+            self.worker = None
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def _update_queue_row(self, path):
         for row in range(self.queue_table.rowCount()):
@@ -10569,6 +11464,26 @@ class MainWindow(QMainWindow):
 
         _, _, _, recs = task.results
         task.preset_bboxes = [rv.bbox for rv in recs]
+
+    def _current_recs_for_ai(self, task: TaskItem) -> List[RecordView]:
+        if not task or not task.results:
+            return []
+
+        # Sicherheitshalber die aktuell sichtbaren Canvas-Boxen zuerst ins Task-Modell ziehen
+        self._persist_live_canvas_bboxes(task)
+
+        _, _, _, recs = task.results
+
+        out = []
+        for i, rv in enumerate(recs):
+            out.append(
+                RecordView(
+                    i,
+                    rv.text,
+                    tuple(rv.bbox) if rv.bbox else None
+                )
+            )
+        return out
 
     def on_line_selected(self, current, previous=None):
         row = self.list_lines.currentRow()
@@ -10763,6 +11678,10 @@ class MainWindow(QMainWindow):
         new_text = "\n".join([r.text for r in recs]).strip()
         task.results = (new_text, kr_records, im, recs)
 
+        # WICHTIG:
+        # Immer den aktuellsten Box-Stand zentral synchron halten.
+        self._update_task_preset_bboxes(task)
+
         self._populate_lines_list(recs, keep_row=keep_row)
 
         if os.path.exists(task.path):
@@ -10885,7 +11804,7 @@ class MainWindow(QMainWindow):
 
         total_chars = len(" ".join(words))
         best_i = 1
-        best_diff = 10**9
+        best_diff = 10 ** 9
         current_len = 0
 
         for i in range(1, len(words)):
@@ -10966,9 +11885,9 @@ class MainWindow(QMainWindow):
         return out
 
     def _reapply_preset_bboxes_to_recs(
-        self,
-        recs: List[RecordView],
-        preset_bboxes: List[Optional[BBox]]
+            self,
+            recs: List[RecordView],
+            preset_bboxes: List[Optional[BBox]]
     ) -> List[RecordView]:
         if not preset_bboxes:
             return recs
@@ -11205,29 +12124,32 @@ class MainWindow(QMainWindow):
         if not (0 <= idx < len(recs)):
             return
 
-        if im:
-            img_w, img_h = im.size
-            r = scene_rect.normalized()
-            x0 = max(0, min(img_w - 1, _safe_int(r.left())))
-            y0 = max(0, min(img_h - 1, _safe_int(r.top())))
-            x1 = max(1, min(img_w, _safe_int(r.right())))
-            y1 = max(1, min(img_h, _safe_int(r.bottom())))
+        new_bbox = self._scene_rect_to_bbox(scene_rect, im)
+        if not new_bbox:
+            return
 
-            if x1 <= x0:
-                x1 = min(img_w, x0 + 1)
-            if y1 <= y0:
-                y1 = min(img_h, y0 + 1)
+        old_bbox = recs[idx].bbox
+        if old_bbox == new_bbox:
+            return
 
-            old = recs[idx].bbox
-            new = (x0, y0, x1, y1)
-            if old != new:
-                self._push_undo(task)
-                recs[idx].bbox = new
-                task.edited = True
+        self._push_undo(task)
 
-                keep = self.list_lines.currentRow() if self.list_lines.currentRow() >= 0 else idx
-                self._sync_ui_after_recs_change(task, keep_row=keep)
-                self._update_task_preset_bboxes(task)
+        recs[idx].bbox = new_bbox
+        task.edited = True
+        task.results = (
+            "\n".join(r.text for r in recs).strip(),
+            kr_records,
+            im,
+            recs
+        )
+
+        self._update_task_preset_bboxes(task)
+
+        # Label der Box direkt mitziehen, ohne kompletten Canvas-Neuaufbau
+        lab = self.canvas._labels.get(idx)
+        if lab and isValid(lab):
+            x0, y0, x1, y1 = new_bbox
+            lab.setPos(x0, max(0, y0 - 16))
 
     # -----------------------------
     # Overlay umschalten
@@ -11513,12 +12435,120 @@ class MainWindow(QMainWindow):
         return os.path.dirname(os.path.abspath(sys.argv[0]))
 
     def _default_whisper_base_dir(self) -> str:
-        return os.path.join(self._app_base_dir(), "whisper")
+        if sys.platform.startswith("win"):
+            base = r"C:\bk_whisper"
+        else:
+            base = os.path.join("/tmp", "bk_whisper")
+
+        os.makedirs(base, exist_ok=True)
+        return base
 
     def _default_whisper_model_dir(self) -> str:
         return os.path.join(self._default_whisper_base_dir(), "faster-whisper-large-v3")
 
+    def _whisper_venv_dir(self) -> str:
+        return os.path.join(self._default_whisper_base_dir(), ".venv")
+
+    def _whisper_venv_python_path(self, platform_name: str) -> str:
+        name = (platform_name or "").strip().lower()
+        venv_dir = self._whisper_venv_dir()
+
+        if name == "windows":
+            return os.path.join(venv_dir, "Scripts", "python.exe")
+
+        return os.path.join(venv_dir, "bin", "python3")
+
+    def _whisper_button_commands(self, platform_name: str) -> Tuple[str, str]:
+        """
+        Nur für die Anzeige im Hinweise-Dialog.
+        Zeigt dem Nutzer die Befehle, die dem echten Ablauf entsprechen.
+        """
+        name = (platform_name or "").strip().lower()
+        model_dir = self._default_whisper_model_dir().replace("\\", "/")
+        venv_dir = self._whisper_venv_dir().replace("\\", "/")
+        venv_python = self._whisper_venv_python_path(platform_name).replace("\\", "/")
+
+        if name == "windows":
+            install_cmd = (
+                f'"{sys.executable}" -m pip install -U pip setuptools wheel '
+                f'huggingface_hub faster-whisper sounddevice'
+            )
+            download_cmd = (
+                f'"{sys.executable}" -m huggingface_hub download '
+                f'Systran/faster-whisper-large-v3 --local-dir "{model_dir}"'
+            )
+            return install_cmd, download_cmd
+
+        # Linux / macOS: immer venv verwenden
+        install_cmd = (
+            f'python3 -m venv "{venv_dir}"\n'
+            f'"{venv_python}" -m pip install -U pip setuptools wheel huggingface_hub faster-whisper sounddevice'
+        )
+        download_cmd = (
+            f'"{venv_python}" -m huggingface_hub download '
+            f'Systran/faster-whisper-large-v3 --local-dir "{model_dir}"'
+        )
+        return install_cmd, download_cmd
+
+    def _whisper_system_hint(self, platform_name: str) -> str:
+        name = (platform_name or "").strip().lower()
+
+        if name in ("debian", "ubuntu", "linux mint", "mint"):
+            return (
+                "Hinweis für Debian/Ubuntu/Linux Mint:\n"
+                "Die App verwendet hier automatisch eine eigene Python-Umgebung (venv),\n"
+                "damit kein PEP-668-Fehler mit dem System-Python entsteht.\n\n"
+                "Falls das Erzeugen der venv scheitert, fehlen meist Systempakete.\n"
+                "Dann bitte einmal im Terminal ausführen:\n\n"
+                "sudo apt update\n"
+                "sudo apt install -y python3-venv python3-pip ffmpeg portaudio19-dev"
+            )
+
+        if name == "fedora":
+            return (
+                "Optionaler Hinweis für Fedora:\n"
+                "Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n\n"
+                "sudo dnf install -y python3-pip ffmpeg portaudio-devel"
+            )
+
+        if name == "arch":
+            return (
+                "Optionaler Hinweis für Arch Linux:\n"
+                "Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n\n"
+                "sudo pacman -S --needed python-pip ffmpeg portaudio"
+            )
+
+        if name in ("mac", "macos", "darwin"):
+            return (
+                "Optionaler Hinweis für macOS:\n"
+                "Falls später Probleme mit sounddevice auftreten, können diese Pakete helfen.\n\n"
+                "brew install ffmpeg portaudio"
+            )
+
+        if name == "windows":
+            return (
+                "Optionaler Hinweis für Windows:\n"
+                "Normalerweise sind keine zusätzlichen Systempakete nötig.\n"
+                "Falls es später Audioprobleme gibt, liegt das meist eher an Treibern oder Mikrofonrechten."
+            )
+
+        return (
+            "Optionaler Hinweis:\n"
+            "Falls später Probleme mit sounddevice auftreten, können zusätzliche Systempakete nötig sein."
+        )
+
     def download_whisper_model_from_help_dialog(self, platform_name: str, dialog_parent=None):
+        platform_hint = self._whisper_system_hint(platform_name)
+
+        QMessageBox.information(
+            dialog_parent or self,
+            self._tr("info_title"),
+            "Optionaler Systemhinweis:\n\n"
+            f"{platform_hint}\n\n"
+            "Der eigentliche Download läuft trotzdem nur über Python "
+            "(sys.executable -m pip / Python-API von huggingface_hub)."
+        )
+
         # Prüfen, ob bereits ein Download läuft
         if self.hf_download_worker and self.hf_download_worker.isRunning():
             if self.hf_download_dialog is not None:
@@ -11555,33 +12585,70 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage(f"Whisper-Modell bereits vorhanden: {target_model_dir}")
                 return
 
-            if not shutil.which("hf"):
-                QMessageBox.warning(
-                    self,
-                    self._tr("warn_title"),
-                    "Die Hugging-Face-CLI 'hf' wurde nicht gefunden.\n\n"
-                    "Bitte zuerst installieren, z. B. mit:\n"
-                    "pip install -U huggingface_hub"
-                )
-                return
-
             self.status_bar.showMessage(
-                f"Starte hf download nach: {target_model_dir}"
+                f"Starte Requirement-Installation und Modell-Download nach: {target_model_dir}"
             )
 
             self.hf_download_dialog = ProgressStatusDialog(
                 "Whisper-Modell wird geladen",
                 dialog_parent or self
             )
-            self.hf_download_dialog.set_status("Starte Hugging-Face-Download …")
+            self.hf_download_dialog.set_status("Starte Whisper-Vorbereitung …")
             self.hf_download_dialog.set_progress(0)
             self.hf_download_dialog.show()
             self.hf_download_dialog.raise_()
             self.hf_download_dialog.activateWindow()
 
+            platform_key = (
+                "windows" if sys.platform.startswith("win")
+                else "mac" if sys.platform == "darwin"
+                else "linux"
+            )
+
+            venv_dir = self._whisper_venv_dir()
+            venv_python = self._whisper_venv_python_path(platform_key)
+
+            # Immer eigene virtuelle Umgebung verwenden
+            prepare_cmds = [
+                [sys.executable, "-m", "venv", venv_dir],
+            ]
+
+            install_cmd = [
+                venv_python,
+                "-m",
+                "pip",
+                "install",
+                "-U",
+                "pip",
+                "setuptools",
+                "wheel",
+                "huggingface_hub",
+                "faster-whisper",
+                "sounddevice",
+            ]
+
+            # WICHTIG:
+            # Nicht mehr: python -m huggingface_hub download ...
+            # Stattdessen robust per Python-API:
+            download_cmd = [
+                venv_python,
+                "-c",
+                (
+                    "from huggingface_hub import snapshot_download; "
+                    f"snapshot_download("
+                    f"repo_id='Systran/faster-whisper-large-v3', "
+                    f"local_dir=r'''{target_model_dir}''', "
+                    f"local_dir_use_symlinks=False"
+                    f")"
+                )
+            ]
+
             self.hf_download_worker = HFDownloadWorker(
                 repo_id="Systran/faster-whisper-large-v3",
                 local_dir=target_model_dir,
+                prepare_cmds=prepare_cmds,
+                install_cmd=install_cmd,
+                download_cmd=download_cmd,
                 parent=self
             )
             self.hf_download_worker.progress_changed.connect(self.hf_download_dialog.set_progress)
@@ -11609,7 +12676,7 @@ class MainWindow(QMainWindow):
             self._set_whisper_model(local_dir)
 
         self._update_whisper_menu_status()
-
+        self.settings.setValue("paths/whisper_models_base_dir", self.whisper_models_base_dir)
         if hasattr(self, "hf_download_dialog") and self.hf_download_dialog:
             self.hf_download_dialog.set_progress(100)
             self.hf_download_dialog.hide()
@@ -11644,7 +12711,42 @@ class MainWindow(QMainWindow):
     def show_lm_help_dialog(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Hinweise")
-        dlg.resize(1200, 760)
+        dlg.resize(1080, 760)
+        dlg.setMinimumSize(980, 680)
+        dlg.setStyleSheet("""
+            QDialog {
+                background: #f6f7fb;
+            }
+            QTextBrowser {
+                background: white;
+                border: 1px solid #d9dce3;
+                border-radius: 10px;
+                padding: 8px;
+            }
+            QLabel {
+                color: #1f2937;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton {
+                background: white;
+                border: 1px solid #cfd5df;
+                border-radius: 8px;
+                padding: 6px 12px;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background: #f0f4ff;
+                border-color: #9bb5ff;
+            }
+            QPushButton:pressed {
+                background: #e5edff;
+            }
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+        """)
 
         layout = QVBoxLayout(dlg)
 
@@ -11653,103 +12755,904 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(6, 6, 6, 6)
+        content_layout.setSpacing(10)
 
-        hf_cmd = (
-            f'hf download Systran/faster-whisper-large-v3 --local-dir "{self._default_whisper_model_dir()}"'
-        )
+        default_install_cmd, default_download_cmd = self._whisper_button_commands("Windows")
 
-        left_text = f"""
-                    <b><u>Ablauf</u></b><br>
-                    1. Bild/PDF laden<br>
-                    2. Kraken-Rec-Model laden<br>
-                    3. Kraken-Seg-Model laden<br>
-                    4. Kraken-OCR starten<br><br>
+        left_text = """
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.45;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        .muted {
+            color: #6b7280;
+        }
+        .badge {
+            display: inline-block;
+            background: #eef2ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        code, pre {
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 12px;
+        }
+        pre {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            white-space: pre-wrap;
+        }
+        ul {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        li {
+            margin-bottom: 4px;
+        }
+        </style>
 
-                    (Optional)<br>
-                    5. LM-Model (per LM-Studio/vLLM) laden<br>
-                    6. LM-Überarbeitung starten<br><br>
+        <div class="card">
+            <div class="h1">Ablauf</div>
+            <ol>
+                <li>Bild oder PDF laden</li>
+                <li>Recognition-Modell laden</li>
+                <li>Segmentierungs-Modell laden</li>
+                <li>Kraken-OCR starten</li>
+            </ol>
+        </div>
 
-                    (Optional)<br>
-                    7. einzelne Zeilen mit Mikrofon einsprechen<br>
-                    8. Zeilen (txt-Format) importieren<br><br>
+        <div class="card">
+            <div class="h2">Nachbearbeitung</div>
+            <span class="badge">Optional</span>
+            <ul>
+                <li>LM-Modell über LM Studio oder vLLM laden</li>
+                <li>LM-Überarbeitung starten</li>
+                <li>Einzelne Zeilen per Mikrofon ersetzen</li>
+                <li>Zeilen aus TXT importieren</li>
+            </ul>
+        </div>
 
-                    (Zusatz)<br>
-                    - Zeilen und (rote) Overlay-Boxen können jederzeit angepasst/editiert werden<br><br>
+        <div class="card">
+            <div class="h2">Overlay-Boxen & Zeilen</div>
+            <span class="badge">Optional</span>
+            <ul>
+                <li>Zeilen und rote Overlay-Boxen können jederzeit angepasst, verschoben oder gelöscht werden.</li>
+            </ul>
+        </div>
 
-                    <b><u>LM-Server-URL / Remote / SSH</u></b><br><br>
-                    Als LM-Server-URL sind z. B. gültig:<br>
-                    <pre>http://127.0.0.1:1234/v1<br>
-http://localhost:8000/v1<br>
-http://192.0.0.200:8000/v1</pre><br>
+        <div class="card">
+            <div class="h2">LM-Server-URL</div><br>
+            Gültige Beispiele:
+            <pre>http://127.0.0.1:1234/v1
+http://localhost:8000/v1
+http://192.0.0.200:8000/v1</pre>
+            <div class="muted">
+                Wenn der Server direkt im LAN oder VPN erreichbar ist, genügt die URL.<br>
+            </div>
+        </div>
 
-                    Wenn der LM-Server direkt im LAN/VPN erreichbar ist,
-                    trägst du einfach dessen URL ein.<br><br>
+        <div class="card">
+            <div class="h2">Remote-Zugriff per SSH-Tunnel</div><br>
+            Falls der Dienst nur auf <code>127.0.0.1</code> des Zielrechners läuft:
+            <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>
+            Danach lokal im Programm verwenden:
+            <pre>http://127.0.0.1:1234/v1</pre>
+        </div>
 
-                    Falls der Dienst auf dem entfernten Rechner nur auf
-                    <b>127.0.0.1</b> läuft, brauchst du einen SSH-Tunnel, z. B.:<br>
-                    <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre><br>
-
-                    Danach verwendest du im Programm lokal z. B.:<br>
-                    <pre>http://127.0.0.1:1234/v1</pre><br>
-
-                    <b><u>Whisper-Modell automatisch herunterladen</u></b><br><br>
-                    Es wird <b>nur</b> das Modell <b>Systran/faster-whisper-large-v3</b> geladen.<br>
-                    Der Download erfolgt per <b>hf download</b>.<br>
-                    Gespeichert wird standardmäßig <b>relativ zur EXE</b>.<br><br>
-                """
+        <div class="card">
+            <div class="h2">Faster-Whisper Download</div><br>
+            Es wird nur das Modell <b>Systran/faster-whisper-large-v3</b> geladen.<br><br>
+            Vor dem Download werden automatisch die benötigten Python-Pakete installiert.
+            Unter Linux und macOS wird dafür automatisch eine eigene <b>venv</b>-Umgebung genutzt.
+        </div>
+        """
 
         right_text = """
-            <b><u>Shortcuts</u></b><br>
-            Ctrl+S  → Projekt speichern<br>
-            Ctrl+Alt+S  → Projekt speichern unter<br>
-            Ctrl+I  → Projekt laden<br>
-            Ctrl+E  → Export<br>
-            Ctrl+Q  → Programm beenden<br><br>
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.45;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 14px 16px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #111827;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #edf0f5;
+            vertical-align: top;
+        }
+        .kbd {
+            font-family: Consolas, 'Courier New', monospace;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 2px 6px;
+            color: #111827;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .section {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1d4ed8;
+            padding-top: 12px;
+            padding-bottom: 6px;
+        }
+        </style>
 
-            Ctrl+K  → Kraken-OCR starten<br>
-            Ctrl+P  → Kraken-OCR stoppen<br>
-            Ctrl+L  → LM-Überarbeitung starten<br>
-            Ctrl+M  → Faster-Whisper / Mikrofon starten<br><br>
+        <div class="card">
+            <div class="h1">Tastenkürzel</div>
 
-            Ctrl+A  → Alles im aktuellen Kontext auswählen<br>
-            Entf  → Ausgewählte Zeile(n) / Overlay-Box(en) löschen<br><br>
+            <table class="table">
+                <tr><td class="section" colspan="2">Projekt</td></tr>
+                <tr><td><span class="kbd">Strg + S</span></td><td>Projekt speichern</td></tr>
+                <tr><td><span class="kbd">Strg + Alt + S</span></td><td>Projekt speichern unter</td></tr>
+                <tr><td><span class="kbd">Strg + I</span></td><td>Projekt laden</td></tr>
+                <tr><td><span class="kbd">Strg + E</span></td><td>Export</td></tr>
+                <tr><td><span class="kbd">Strg + Q</span></td><td>Programm beenden</td></tr>
 
-            F1  → Shortcut-Hilfe<br>
-            F2  → Kraken-Recognition-Modell laden<br>
-            F3  → Kraken-Segmentierungs-Modell laden<br>
-            F4  → LM-Server-URL eingeben<br>
-            F5  → LM-Scan starten<br>
-            F6  → Log-Fenster ein/aus
+                <tr><td class="section" colspan="2">OCR & LM</td></tr>
+                <tr><td><span class="kbd">Strg + K</span></td><td>Kraken-OCR starten</td></tr>
+                <tr><td><span class="kbd">Strg + P</span></td><td>Kraken-OCR stoppen</td></tr>
+                <tr><td><span class="kbd">Strg + L</span></td><td>LM-Überarbeitung starten</td></tr>
+                <tr><td><span class="kbd">Strg + M</span></td><td>Faster-Whisper / Mikrofon starten</td></tr>
+
+                <tr><td class="section" colspan="2">Auswahl</td></tr>
+                <tr><td><span class="kbd">Strg + A</span></td><td>Alles im aktuellen Kontext auswählen</td></tr>
+                <tr><td><span class="kbd">Entf</span></td><td>Ausgewählte Zeilen oder Boxen löschen</td></tr>
+
+                <tr><td class="section" colspan="2">F-Tasten</td></tr>
+                <tr><td><span class="kbd">F1</span></td><td>Shortcut-Hilfe</td></tr>
+                <tr><td><span class="kbd">F2</span></td><td>Recognition-Modell laden</td></tr>
+                <tr><td><span class="kbd">F3</span></td><td>Segmentierungs-Modell laden</td></tr>
+                <tr><td><span class="kbd">F4</span></td><td>LM-Server-URL eingeben</td></tr>
+                <tr><td><span class="kbd">F5</span></td><td>LM-Scan starten</td></tr>
+                <tr><td><span class="kbd">F6</span></td><td>Log-Fenster ein/aus</td></tr>
+            </table>
+        </div>
+        """
+
+        data_protection = """
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        .warn {
+            border-left: 4px solid #f59e0b;
+            background: #fffbeb;
+        }
+        .ok {
+            border-left: 4px solid #2563eb;
+            background: #f8fbff;
+        }
+        ul {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        li {
+            margin-bottom: 4px;
+        }
+        a {
+            color: #1d4ed8;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        code, pre {
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 12px;
+        }
+        </style>
+
+        <div class="card warn">
+            <div class="h1">Datenschutz</div>
+        </div>
+
+        <div class="card">
+            <div class="h2">LM Studio</div><br>
+            Laut offizieller Dokumentation laufen heruntergeladene Modelle lokal.
+            Auch Eingaben beim lokalen Chat, lokale Dokumentverarbeitung und Requests
+            an den lokalen Server bleiben lokal, <b>wenn</b> LM Studio wirklich lokal genutzt wird.
+            <br><br>
+            Das ist also datenschutzfreundlich und für viele lokale Workflows gut geeignet.
+            Eine pauschale Rechtsaussage für jeden Einzelfall sollte daraus aber nicht gemacht werden.
+            <br><br>
+            Quellen:
+            <ul>
+                <li><a href="https://lmstudio.ai/docs/app/offline">LM Studio Docs – Offline Operation</a></li>
+                <li><a href="https://lmstudio.ai/docs/developer/core/server">LM Studio Docs – Local LLM API Server</a></li>
+                <li><a href="https://lmstudio.ai/privacy">LM Studio Privacy Policy</a></li><br>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">faster-whisper</div><br>
+            faster-whisper ist eine lokale Whisper-Implementierung auf Basis von CTranslate2.
+            In Bottled Kraken wird dafür ein lokaler Modellordner geladen und eine lokale WAV-Datei
+            transkribiert. Solange dieser Ablauf lokal bleibt, erfolgt die Audioverarbeitung ebenfalls lokal.
+            <br><br>
+            Quellen:
+            <ul>
+                <li><a href="https://github.com/SYSTRAN/faster-whisper">SYSTRAN / faster-whisper</a></li>
+                <li><a href="https://github.com/opennmt/ctranslate2">CTranslate2</a></li><br>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">Wichtige Einschränkungen</div>
+            <ul>
+                <li>Sobald LM Studio über Netzwerk, VPN oder Tunnel genutzt wird, ist es nicht mehr rein localhost-lokal.</li>
+                <li>Der einmalige Modelldownload für LM Studio oder faster-whisper benötigt natürlich Internetzugriff.</li>
+                <li>Ob ein Einsatz im Einzelfall datenschutzkonform ist, hängt zusätzlich von Speicherort, Zugriffsschutz, Backups, Logs und internen Regeln ab.</li>
+            </ul>
+        </div>
         """
 
         def _small_btn(text: str) -> QPushButton:
             b = QPushButton(text)
-            b.setFixedHeight(24)
-            b.setMinimumWidth(70)
-            b.setMaximumWidth(90)
+            b.setFixedHeight(30)
+            b.setMinimumWidth(82)
+            b.setMaximumWidth(110)
+            b.setCursor(Qt.PointingHandCursor)
             return b
 
-        # ---------------------------------
-        # Linke Spalte
-        # ---------------------------------
-        left_col = QWidget()
-        left_col_layout = QVBoxLayout(left_col)
-        left_col_layout.setContentsMargins(0, 0, 0, 0)
-        left_col_layout.setSpacing(8)
+        def make_page(html: str) -> QTextBrowser:
+            browser = QTextBrowser()
+            browser.setReadOnly(True)
+            browser.setOpenExternalLinks(True)
+            browser.setFrameShape(QTextBrowser.NoFrame)
+            browser.setOpenLinks(False)
+            browser.anchorClicked.connect(QDesktopServices.openUrl)
+            browser.setHtml(html)
+            browser.setMinimumWidth(420)
+            browser.document().setDocumentMargin(8)
+            return browser
 
-        left_browser = QTextBrowser()
-        left_browser.setReadOnly(True)
-        left_browser.setOpenExternalLinks(False)
-        left_browser.setHtml(left_text)
-        left_browser.setMinimumWidth(420)
-        left_browser.setMinimumHeight(520)
-        left_browser.setMaximumHeight(620)
-        left_col_layout.addWidget(left_browser)
+        # ---------------------------------
+        # Navigation links + Stack rechts
+        # ---------------------------------
+        nav_list = QListWidget()
+        nav_list.setFixedWidth(180)
+        nav_list.setSpacing(4)
+        nav_list.setStyleSheet("""
+                    QListWidget {
+                        background: #f8fafc;
+                        border: 1px solid #d9dce3;
+                        border-radius: 12px;
+                        padding: 8px;
+                        font-size: 14px;
+                    }
+                    QListWidget::item {
+                        min-height: 34px;
+                        padding: 8px 12px;
+                        margin: 2px 0;
+                        border-radius: 8px;
+                    }
+                    QListWidget::item:selected {
+                        background: #dbeafe;
+                        border: 1px solid #93c5fd;
+                        color: #111827;
+                        font-weight: 700;
+                    }
+                    QListWidget::item:hover {
+                        background: #eff6ff;
+                    }
+                """)
 
-        btn_info = QLabel("Whisper-Modell per Button herunterladen:")
-        left_col_layout.addWidget(btn_info)
+        stack = QStackedWidget()
+        stack.setStyleSheet("""
+                    QStackedWidget {
+                        background: transparent;
+                    }
+                """)
+
+        # ---------------------------------
+        # Seite 1: Schnellstart
+        # ---------------------------------
+        page_quick = QWidget()
+        page_quick_layout = QVBoxLayout(page_quick)
+        page_quick_layout.setContentsMargins(0, 0, 0, 0)
+        page_quick_layout.setSpacing(8)
+
+        browser_quick = make_page("""
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        .badge {
+            display: inline-block;
+            background: #eef2ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        ul, ol {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        li {
+            margin-bottom: 4px;
+        }
+        </style>
+
+       <div class="card warn">
+            <div class="h1">Ablauf</div>
+        </div>
+            <ol>
+                <li>Bild oder PDF laden</li>
+                <li>Recognition-Modell laden</li>
+                <li>Segmentierungs-Modell laden</li>
+                <li>Kraken-OCR starten</li>
+                <li>Erkannte Zeilen prüfen und bei Bedarf korrigieren</li>
+                <li>Optional: LM-Überarbeitung oder Whisper verwenden</li>
+                <li>Ergebnis als TXT, CSV, JSON, ALTO, hOCR oder PDF exportieren</li>
+            </ol>
+        </div>
+        <div class="card">
+            <div class="h2">Nachbearbeitung</div>
+            <span class="badge">Optional</span>
+            <ul>
+                <li>LM-Modell über LM Studio oder vLLM laden</li>
+                <li>OCR-Zeilen mit lokalem Sprachmodell sprachlich oder inhaltlich glätten</li>
+                <li>Einzelne Zeilen per Mikrofon mit Faster-Whisper neu einsprechen</li>
+                <li>Zeilen aus TXT oder JSON importieren</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">Overlay-Boxen & Zeilen</div>
+            <span class="badge">Optional</span>
+            <ul>
+                <li>Zeilen und Overlay-Boxen können verschoben, geteilt, ergänzt oder gelöscht werden.</li>
+                <li>Damit lässt sich die Zeilenstruktur vor einem erneuten OCR-Durchlauf gezielt verbessern.</li>
+                <li>Besonders nützlich bei Formularen, Spaltenlayouts und fehlerhaft segmentierten Handschriften.</li>
+            </ul>
+        </div>
+        <br>
+        <br>
+         <div class="card">
+            <div class="h2">Was macht Bottled Kraken?</div><br>
+            Bottled Kraken kombiniert klassische OCR mit manueller Nachbearbeitung und optionaler lokaler KI-Unterstützung.
+            So kannst du schwer lesbare historische Drucke, Handschriften oder Formularseiten schrittweise verbessern.
+        </div>
+        """)
+        page_quick_layout.addWidget(browser_quick)
+
+        # ---------------------------------
+        # Seite 2: Kraken
+        # ---------------------------------
+        page_kraken = make_page("""
+                <style>
+                body {
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    color: #1f2937;
+                    line-height: 1.5;
+                }
+                .card {
+                    border: 1px solid #e3e7ef;
+                    border-radius: 12px;
+                    padding: 12px 14px;
+                    margin-bottom: 10px;
+                    background: #ffffff;
+                }
+                .h1 {
+                    font-size: 18px;
+                    font-weight: 700;
+                    margin-bottom: 10px;
+                    color: #111827;
+                }
+                .h2 {
+                    font-size: 15px;
+                    font-weight: 700;
+                    margin-bottom: 8px;
+                    color: #1d4ed8;
+                }
+                .badge {
+                    display: inline-block;
+                    background: #eef2ff;
+                    color: #3730a3;
+                    border: 1px solid #c7d2fe;
+                    border-radius: 999px;
+                    padding: 2px 8px;
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+                pre {
+                    background: #f8fafc;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 8px;
+                    padding: 10px;
+                    white-space: pre-wrap;
+                    font-family: Consolas, 'Courier New', monospace;
+                    font-size: 12px;
+                }
+                ul, ol {
+                    margin-top: 6px;
+                    margin-bottom: 6px;
+                }
+                li {
+                    margin-bottom: 4px;
+                }
+                a {
+                    color: #1d4ed8;
+                    text-decoration: none;
+                }
+                a:hover {
+                    text-decoration: underline;
+                }
+                .muted {
+                    color: #6b7280;
+                }
+                </style>
+
+                <div class="card">
+                    <div class="h1">Kraken</div><br>
+                    Kraken ist die OCR-/ATR-Basis von Bottled Kraken.
+                    Es handelt sich um ein Open-Source-System für automatische Texterkennung,
+                    das besonders für historische Drucke, Handschriften und nicht-lateinische Schriften entwickelt wurde.
+                </div>
+
+                <div class="card">
+                    <div class="h2">Was ist für Bottled Kraken daran wichtig?</div>
+                    <ul>
+                        <li><b>Segmentierung:</b> Erkennt Layout, Textregionen, Zeilen und Lesereihenfolge.</li>
+                        <li><b>Recognition:</b> Liest den eigentlichen Text aus den erkannten Zeilen.</li>
+                        <li><b>Modelle:</b> Segmentierung und Recognition laufen über trainierte Modelle, die zum Material passen müssen.</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="h2">Typischer Kraken-Ablauf</div>
+                    <ol>
+                        <li>Bild vorbereiten</li>
+                        <li>Seite segmentieren (<code>segment</code>)</li>
+                        <li>Text erkennen (<code>ocr</code>)</li>
+                        <li>Ergebnis strukturieren / exportieren</li>
+                    </ol>
+                    In Bottled Kraken sind genau diese Schritte in die Oberfläche übertragen:
+                    zuerst Segmentierungs-Modell, dann Recognition-Modell, danach OCR und Export.<br>
+                </div>
+
+                <div class="card">
+                    <div class="h2">Wichtige Stärken von Kraken</div>
+                    <ul>
+                        <li>trainierbare Layoutanalyse, Lesereihenfolge und Zeichenerkennung</li>
+                        <li>Unterstützung für Rechts-nach-Links, BiDi und Top-to-Bottom</li>
+                        <li>Ausgabe als ALTO, PageXML, abbyyXML und hOCR</li>
+                        <li>Wort-Bounding-Boxes und Character-Cuts</li>
+                        <li>öffentliche Modellsammlung über HTRMoPo / Zenodo</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="h2">Modelle</div><br>
+                    Kraken arbeitet modellbasiert.
+                    Gute Ergebnisse hängen stark davon ab, dass das Modell zum Dokumenttyp passt.
+                    Ein auf historische Drucke trainiertes Modell ist meist deutlich besser für historische Drucke
+                    als ein allgemeines Modell für modernes Material.
+                </div>
+
+                <div class="card">
+                    <div class="h2">Schnittstellen</div>
+                    Kraken bietet zwei Hauptwege:
+                    <ul>
+                        <li><b>CLI:</b> für klassische OCR-Workflows</li>
+                        <li><b>Python-API:</b> für eigene Anwendungen und Integrationen</li>
+                    </ul>
+                    Bottled Kraken nutzt die Python-Bibliothek direkt im Programmcode.<br>
+                </div>
+
+                <div class="card">
+                    <div class="h2">Offizielle Quellen</div>
+                    <ul>
+                        <li><a href="https://github.com/mittagessen/kraken">GitHub: mittagessen/kraken</a></li>
+                        <li><a href="https://kraken.re/7.0/index.html">Kraken Dokumentation 7.0</a></li>
+                        <li><a href="https://kraken.re/7.0/getting_started.html">Getting Started</a></li>
+                        <li><a href="https://kraken.re/7.0/user_guide/models.html">Model Management</a></li><br>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="h2">Hinweis</div>
+                    <span class="badge">Wichtig</span><br>
+                    Wenn die Segmentierung nicht sauber ist, wird auch die Recognition schlechter.
+                    Genau deshalb verwendet Bottled Kraken standardmäßig das "blla.mlmodell" anstatt des Legacy-
+                    Segmentierungs-Modells "pageseg".
+                </div>
+                """)
+
+        # ---------------------------------
+        # Seite 3: LM-Server
+        # ---------------------------------
+        page_lm = make_page("""
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        pre {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            white-space: pre-wrap;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 12px;
+        }
+        a {
+            color: #1d4ed8;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .muted {
+            color: #6b7280;
+        }
+        </style>
+
+        <div class="card">
+            <div class="h1">LM-Server / LM Studio</div><br>
+            Dieser Bereich ist für die <b>lokale Sprachmodell-Nachbearbeitung</b> gedacht.
+            Bottled Kraken kann dazu einen OpenAI-kompatiblen lokalen Server ansprechen.
+        </div>
+
+        <div class="card">
+            <div class="h2">Was macht LM Studio?</div><br>
+            LM Studio lädt ein lokales Sprachmodell auf deinem Rechner und kann dieses zusätzlich
+            über eine API bereitstellen. Bottled Kraken nutzt genau diese lokale API, um OCR-Zeilen
+            nachzubessern, ohne dass deine Texte an einen Cloud-Dienst gesendet werden.
+        </div>
+
+        <div class="card">
+            <div class="h2">LM Studio herunterladen</div><br>
+            Offizielle Download-Seite:<br>
+            <a href="https://lmstudio.ai/download">LM Studio Download</a><br>
+        </div>
+
+        <div class="card">
+            <div class="h2">Einrichtung mit LM Studio</div>
+            <ol>
+                <li>LM Studio installieren und starten</li>
+                <li>Im Discover-Bereich ein passendes Modell herunterladen</li>
+                <li>Das Modell laden</li>
+                <li>Den lokalen Server in LM Studio starten</li>
+                <li>In Bottled Kraken die LM-Server-URL eintragen oder per Scan erkennen lassen</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <div class="h2">Welche URL wird in Bottled Kraken eingetragen?</div>
+            Gültige Beispiele:
+            <pre>http://127.0.0.1:1234/v1
+http://localhost:8000/v1
+http://192.0.0.200:8000/v1</pre>
+
+            Typische Fälle:
+            <ul>
+                <li><b>LM Studio lokal auf demselben Rechner:</b> meist <code>http://127.0.0.1:1234/v1</code></li>
+                <li><b>vLLM lokal oder im Netzwerk:</b> häufig <code>http://HOST:8000/v1</code></li>
+                <li><b>Remote-Rechner:</b> entweder direkte Netzwerk-URL oder SSH-Tunnel</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">Hinweise</div>
+            <ul>
+                <li>Der Server muss laufen, bevor Bottled Kraken Modelle scannen kann.</li>
+                <li>Wenn mehrere Modelle verfügbar sind, kannst du in Bottled Kraken das gewünschte Modell auswählen.</li>
+                <li>Die LM-Überarbeitung ist optional und ergänzt die normale Kraken-OCR.</li>
+            </ul>
+            <div class="muted">
+                Besonders nützlich ist der LM-Schritt bei verrauschter OCR, historischen Schreibweisen
+                oder wenn einzelne Zeilen sprachlich geglättet werden sollen.
+            </div>
+        </div>
+        """)
+
+        # ---------------------------------
+        # Seite 4: SSH-Tunnel
+        # ---------------------------------
+        page_ssh = make_page("""
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        pre {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            white-space: pre-wrap;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 12px;
+        }
+        </style>
+
+        <div class="card">
+            <div class="h1">Remote-Zugriff per SSH-Tunnel</div><br>
+            Ein SSH-Tunnel ist nützlich, wenn dein LM-Server auf einem anderen Rechner läuft,
+            dort aber nur an <code>127.0.0.1</code> gebunden ist und deshalb nicht direkt im Netzwerk erreichbar ist.
+        </div>
+
+        <div class="card">
+            <div class="h2">Was passiert dabei?</div><br>
+            Der Tunnel leitet einen lokalen Port deines Rechners an einen Port des entfernten Rechners weiter.
+            Für Bottled Kraken sieht es dann so aus, als würde der LM-Server lokal auf deinem eigenen Rechner laufen.
+        </div>
+
+        <div class="card">
+            <div class="h2">Beispiel</div><br>
+            Falls LM Studio oder vLLM auf dem Zielrechner nur lokal auf Port 1234 läuft:
+            <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>
+
+            Danach in Bottled Kraken verwenden:
+            <pre>http://127.0.0.1:1234/v1</pre>
+        </div>
+
+        <div class="card">
+            <div class="h2">Typischer Ablauf</div>
+            <ol>
+                <li>Auf dem Zielrechner LM Studio oder vLLM starten</li>
+                <li>Prüfen, auf welchem Port der lokale API-Server läuft</li>
+                <li>Vom eigenen Rechner den SSH-Tunnel öffnen</li>
+                <li>In Bottled Kraken die lokale Tunnel-URL eintragen</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <div class="h2">Wichtig</div>
+            <ul>
+                <li>In Bottled Kraken trägst du <b>nicht</b> den SSH-Befehl ein.</li>
+                <li>Du trägst immer die resultierende HTTP-URL ein, also zum Beispiel <code>http://127.0.0.1:1234/v1</code>.</li>
+                <li>Der SSH-Tunnel muss geöffnet bleiben, solange Bottled Kraken den Server nutzen soll.</li>
+            </ul>
+        </div>
+        """)
+
+        # ---------------------------------
+        # Seite 5: Whisper
+        # ---------------------------------
+        page_whisper = QWidget()
+        page_whisper_layout = QVBoxLayout(page_whisper)
+        page_whisper_layout.setContentsMargins(0, 0, 0, 0)
+        page_whisper_layout.setSpacing(8)
+        page_whisper_layout.setAlignment(Qt.AlignTop)
+
+        browser_whisper_intro = make_page("""
+            <style>
+            body {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                color: #1f2937;
+                line-height: 1.45;
+                margin: 0;
+            }
+            .card {
+                border: 1px solid #e3e7ef;
+                border-radius: 12px;
+                padding: 12px 14px;
+                margin-bottom: 8px;
+                background: #ffffff;
+            }
+            .hero {
+                border-left: 4px solid #2563eb;
+                background: #f8fbff;
+            }
+            .h1 {
+                font-size: 18px;
+                font-weight: 700;
+                margin: 0 0 6px 0;
+                color: #111827;
+            }
+            .h2 {
+                font-size: 14px;
+                font-weight: 700;
+                margin: 0 0 4px 0;
+                color: #1d4ed8;
+            }
+            p {
+                margin: 0 0 6px 0;
+            }
+            ul, ol {
+                margin: 4px 0 0 18px;
+                padding: 0;
+            }
+            li {
+                margin: 2px 0;
+            }
+            .muted {
+                color: #6b7280;
+            }
+            .model {
+                display: inline-block;
+                background: #eef2ff;
+                border: 1px solid #c7d2fe;
+                border-radius: 8px;
+                padding: 2px 8px;
+                font-weight: 600;
+                color: #3730a3;
+            }
+            </style>
+
+            <div class="card">
+                <div class="h1">Faster-Whisper</div>
+                <p>
+                    Faster-Whisper ist eine schnelle lokale Sprach-zu-Text-Erkennung.
+                    In Bottled Kraken kannst du damit einzelne OCR-Zeilen per Mikrofon
+                    neu einsprechen und direkt als Text übernehmen.
+                </p>
+            </div>
+
+            <div class="card">
+                <div class="h2">Wofür ist das nützlich?</div>
+                <ul>
+                    <li>wenn eine OCR-Zeile stark beschädigt oder falsch erkannt wurde</li>
+                    <li>wenn du einzelne Felder oder Namen schneller einsprechen als tippen möchtest</li>
+                    <li>wenn du Korrekturen gezielt zeilenweise durchführen willst</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <div class="h2">Was wird heruntergeladen?</div>
+                <p>
+                    Es wird das Modell <span class="model">Systran/faster-whisper-large-v3</span> geladen.
+                </p>
+                <p class="muted">
+                    Vor dem Download installiert Bottled Kraken die benötigten Python-Pakete automatisch.
+                    Unter Linux und macOS wird dafür automatisch eine eigene venv-Umgebung genutzt.
+                </p>
+            </div>
+
+            <div class="card">
+                <div class="h2">Ablauf in Bottled Kraken</div>
+                <ol>
+                    <li>Whisper-Modell herunterladen oder vorhandenes Modell scannen</li>
+                    <li>Mikrofon auswählen</li>
+                    <li>Eine Zeile markieren</li>
+                    <li>Audioaufnahme starten</li>
+                    <li>Die gesprochene Eingabe wird lokal transkribiert und ersetzt die Zeile</li>
+                </ol>
+            </div>
+        """)
+
+        browser_whisper_intro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        browser_whisper_intro.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        browser_whisper_intro.setMinimumHeight(260)
+
+        page_whisper_layout.addWidget(browser_whisper_intro, 1)
+
+        btn_info = QLabel("<b>Whisper-Modell per Button herunterladen:</b>")
+        page_whisper_layout.addWidget(btn_info, 0)
 
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
@@ -11759,42 +13662,89 @@ http://192.0.0.200:8000/v1</pre><br>
         btn_arch = _small_btn("Arch")
         btn_debian = _small_btn("Debian")
         btn_fedora = _small_btn("Fedora")
-        btn_mac = _small_btn("Mac")
+        btn_mac = _small_btn("macOS")
 
-        btn_windows.clicked.connect(lambda: self.download_whisper_model_from_help_dialog("Windows", dlg))
-        btn_arch.clicked.connect(lambda: self.download_whisper_model_from_help_dialog("Arch", dlg))
-        btn_debian.clicked.connect(lambda: self.download_whisper_model_from_help_dialog("Debian", dlg))
-        btn_fedora.clicked.connect(lambda: self.download_whisper_model_from_help_dialog("Fedora", dlg))
-        btn_mac.clicked.connect(lambda: self.download_whisper_model_from_help_dialog("Mac", dlg))
+        hf_cmd_browser = QTextBrowser()
+        hf_cmd_browser.setReadOnly(True)
+        hf_cmd_browser.setOpenExternalLinks(False)
+        hf_cmd_browser.setFrameShape(QTextBrowser.NoFrame)
+        hf_cmd_browser.setHtml(f"<pre>{default_install_cmd}\n{default_download_cmd}</pre>")
+        hf_cmd_browser.setMinimumWidth(460)
+        hf_cmd_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        hf_cmd_browser.setFixedHeight(96)
+
+        hf_hint_browser = QTextBrowser()
+        hf_hint_browser.setReadOnly(True)
+        hf_hint_browser.setOpenExternalLinks(False)
+        hf_hint_browser.setFrameShape(QTextBrowser.NoFrame)
+        hf_hint_browser.setHtml("<pre>" + self._whisper_system_hint("windows") + "</pre>")
+        hf_hint_browser.setMinimumWidth(460)
+        hf_hint_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        hf_hint_browser.setFixedHeight(112)
+
+        def _bind_whisper_button(btn: QPushButton, platform_name: str):
+            def _handler():
+                install_cmd, download_cmd = self._whisper_button_commands(platform_name)
+                system_hint = self._whisper_system_hint(platform_name)
+
+                hf_cmd_browser.setHtml(f"<pre>{install_cmd}\n{download_cmd}</pre>")
+                hf_hint_browser.setHtml(f"<pre>{system_hint}</pre>")
+
+                self.download_whisper_model_from_help_dialog(platform_name, dlg)
+
+            btn.clicked.connect(_handler)
+
+        _bind_whisper_button(btn_windows, "Windows")
+        _bind_whisper_button(btn_arch, "Arch")
+        _bind_whisper_button(btn_debian, "Debian")
+        _bind_whisper_button(btn_fedora, "Fedora")
+        _bind_whisper_button(btn_mac, "Mac")
 
         btn_row.addWidget(btn_windows)
         btn_row.addWidget(btn_arch)
         btn_row.addWidget(btn_debian)
         btn_row.addWidget(btn_fedora)
         btn_row.addWidget(btn_mac)
-        btn_row.addStretch(1)
+        btn_row.addStretch()
 
-        left_col_layout.addLayout(btn_row)
-
-        hf_cmd_browser = QTextBrowser()
-        hf_cmd_browser.setReadOnly(True)
-        hf_cmd_browser.setOpenExternalLinks(False)
-        hf_cmd_browser.setHtml(f"<pre>{hf_cmd}</pre>")
-        hf_cmd_browser.setMinimumWidth(420)
-        hf_cmd_browser.setMaximumHeight(70)
-        left_col_layout.addWidget(hf_cmd_browser)
+        page_whisper_layout.addLayout(btn_row, 0)
+        page_whisper_layout.addWidget(hf_cmd_browser, 0)
+        page_whisper_layout.addWidget(hf_hint_browser, 0)
 
         # ---------------------------------
-        # Rechte Spalte
+        # Seite 6: Tastenkürzel
         # ---------------------------------
-        right_browser = QTextBrowser()
-        right_browser.setReadOnly(True)
-        right_browser.setOpenExternalLinks(False)
-        right_browser.setHtml(right_text)
-        right_browser.setMinimumWidth(420)
+        page_shortcuts = make_page(right_text)
 
-        content_layout.addWidget(left_col, 1)
-        content_layout.addWidget(right_browser, 1)
+        # ---------------------------------
+        # Seite 7: Datenschutz
+        # ---------------------------------
+        page_data_protection = make_page(data_protection)
+
+        # ---------------------------------
+        # Stack füllen
+        # ---------------------------------
+        stack.addWidget(page_quick)  # 0
+        stack.addWidget(page_kraken)  # 1
+        stack.addWidget(page_lm)  # 2
+        stack.addWidget(page_ssh)  # 3
+        stack.addWidget(page_whisper)  # 4
+        stack.addWidget(page_shortcuts)  # 5
+        stack.addWidget(page_data_protection)  # 6
+
+        nav_list.addItem("Ablauf")
+        nav_list.addItem("Kraken")
+        nav_list.addItem("LM-Server")
+        nav_list.addItem("SSH-Tunnel")
+        nav_list.addItem("Whisper")
+        nav_list.addItem("Tastenkürzel")
+        nav_list.addItem("Datenschutz")
+
+        nav_list.currentRowChanged.connect(stack.setCurrentIndex)
+        nav_list.setCurrentRow(0)
+
+        content_layout.addWidget(nav_list, 0)
+        content_layout.addWidget(stack, 1)
 
         scroll.setWidget(content)
         layout.addWidget(scroll)
@@ -11806,40 +13756,30 @@ http://192.0.0.200:8000/v1</pre><br>
         dlg.exec()
 
     def closeEvent(self, event):
+        if self._is_closing:
+            event.ignore()
+            return
+
+        self._is_closing = True
+        self.setEnabled(False)
+
         try:
-            if self.worker and self.worker.isRunning():
-                self.worker.requestInterruption()
-                self.worker.wait(2000)
+            self._request_all_workers_stop()
 
-            if self.ai_worker and self.ai_worker.isRunning():
-                self.ai_worker.cancel()
-                self.ai_worker.wait(2000)
-
-            if self.ai_batch_worker and self.ai_batch_worker.isRunning():
-                self.ai_batch_worker.cancel()
-                self.ai_batch_worker.wait(2000)
-
-            if self.export_worker and self.export_worker.isRunning():
-                self.export_worker.requestInterruption()
-                self.export_worker.wait(2000)
-
-            if self.pdf_worker and self.pdf_worker.isRunning():
-                self.pdf_worker.requestInterruption()
-                self.pdf_worker.wait(2000)
-
-            if self.hf_download_worker and self.hf_download_worker.isRunning():
-                self.hf_download_worker.cancel()
-                self.hf_download_worker.wait(2000)
-
-            if self.voice_worker and self.voice_worker.isRunning():
-                self.voice_worker.stop()
-                self.voice_worker.wait(2000)
+            # Threads kurz sauber auslaufen lassen
+            for w in self._all_workers():
+                try:
+                    if w and w.isRunning():
+                        w.wait(1500)
+                except Exception:
+                    pass
 
             self._cleanup_temp_dirs()
-        except Exception:
-            pass
+            event.accept()
 
-        super().closeEvent(event)
+        except Exception:
+            event.accept()
+
 
 def main():
     if sys.platform.startswith("win"):
@@ -11849,6 +13789,7 @@ def main():
             pass
 
     app = QApplication(sys.argv)
+    _install_exception_hook()
     app.setStyle("Fusion")
 
     icon_path = resource_path("icon.ico")
@@ -11871,6 +13812,7 @@ def main():
         pass
 
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
