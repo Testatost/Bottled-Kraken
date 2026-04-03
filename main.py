@@ -5177,6 +5177,7 @@ class HFDownloadWorker(QThread):
         self._current_file = ""
         self._last_finished_file = ""
         self._repo_files: List[Tuple[str, int]] = []  # [(rel_path, size), ...]
+        self._last_progress_percent = 0
 
     def cancel(self):
         self._cancel_requested = True
@@ -5187,6 +5188,32 @@ class HFDownloadWorker(QThread):
                 proc.terminate()
             except Exception:
                 pass
+
+    def _stream_reader_to_queue(self, pipe, output_queue: "queue.Queue[str]"):
+        """
+        Liest stdout/stderr zeichenweise und splittet sowohl auf \\n als auch auf \\r.
+        Dadurch kommen auch tqdm-/hf-Fortschrittsupdates an.
+        """
+        try:
+            if pipe is None:
+                return
+
+            buf = ""
+            while True:
+                ch = pipe.read(1)
+                if ch == "":
+                    if buf.strip():
+                        output_queue.put(buf)
+                    break
+
+                if ch in ("\n", "\r"):
+                    if buf.strip():
+                        output_queue.put(buf)
+                    buf = ""
+                else:
+                    buf += ch
+        except Exception:
+            pass
 
     def _run_simple_command(self, cmd: List[str], status_text: str):
         self.status_changed.emit(status_text)
@@ -5210,16 +5237,11 @@ class HFDownloadWorker(QThread):
 
         output_queue = queue.Queue()
 
-        def _reader():
-            try:
-                if self._proc.stdout is None:
-                    return
-                for line in self._proc.stdout:
-                    output_queue.put(line)
-            except Exception:
-                pass
-
-        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread = threading.Thread(
+            target=self._stream_reader_to_queue,
+            args=(self._proc.stdout, output_queue),
+            daemon=True
+        )
         reader_thread.start()
 
         while True:
@@ -5260,6 +5282,11 @@ class HFDownloadWorker(QThread):
         current_file = self._extract_current_file_from_output(txt)
         if current_file:
             self._current_file = current_file
+
+        # WICHTIG:
+        # KEIN Prozentwert aus der hf-Ausgabe direkt für den ProgressBar übernehmen,
+        # weil das meist nur der Fortschritt der aktuellen Datei ist
+        # und NICHT des gesamten Modell-Downloads.
 
         if "still waiting to acquire lock" in txt.lower():
             self.status_changed.emit("Warte auf Dateisperre im Zielordner …")
@@ -5422,16 +5449,11 @@ class HFDownloadWorker(QThread):
 
             output_queue = queue.Queue()
 
-            def _reader_download():
-                try:
-                    if self._proc.stdout is None:
-                        return
-                    for line in self._proc.stdout:
-                        output_queue.put(line)
-                except Exception:
-                    pass
-
-            reader_thread = threading.Thread(target=_reader_download, daemon=True)
+            reader_thread = threading.Thread(
+                target=self._stream_reader_to_queue,
+                args=(self._proc.stdout, output_queue),
+                daemon=True
+            )
             reader_thread.start()
 
             last_emit_ts = 0.0
@@ -5457,49 +5479,48 @@ class HFDownloadWorker(QThread):
                     if last_finished:
                         self._last_finished_file = last_finished
 
-                    if total_bytes > 0:
-                        percent = int((downloaded / total_bytes) * 100)
-                        percent = max(0, min(100, percent))
-                        self.progress_changed.emit(percent)
-
-                        downloaded_mb = downloaded / (1024 * 1024)
-                        total_mb = total_bytes / (1024 * 1024)
-                        speed = (downloaded_mb / elapsed) if elapsed > 0 else 0.0
-
-                        lines = [
-                            f"{percent}%  |  {downloaded_mb:.1f}/{total_mb:.1f} MB  |  {elapsed:.0f}s  |  {speed:.1f} MB/s"
-                        ]
-
-                        if total_files > 0:
-                            lines.append(f"Dateien fertig: {finished_files}/{total_files}")
-
-                        if self._current_file:
-                            lines.append(f"Aktuell: {self._current_file}")
-
-                        if self._last_finished_file:
-                            lines.append(f"Zuletzt fertig: {self._last_finished_file}")
-
-                        self.status_changed.emit("\n".join(lines))
+                    if total_files > 0:
+                        percent_tenths = int((finished_files / total_files) * 1000)  # 0.1%-Schritte
                     else:
-                        downloaded_mb = downloaded / (1024 * 1024)
-                        speed = (downloaded_mb / elapsed) if elapsed > 0 else 0.0
+                        percent_tenths = 0
 
-                        lines = [
-                            f"{downloaded_mb:.1f} MB geladen  |  {elapsed:.0f}s  |  {speed:.1f} MB/s"
-                        ]
+                    percent_tenths = max(0, min(1000, percent_tenths))
 
-                        if total_files > 0:
-                            lines.append(f"Dateien fertig: {finished_files}/{total_files}")
+                    self._last_progress_percent = percent_tenths
+                    self.progress_changed.emit(percent_tenths)
 
-                        if self._current_file:
-                            lines.append(f"Aktuell: {self._current_file}")
+                    lines = [
+                        f"{percent_tenths / 10:.1f}%  |  2,9GB (total)  |  {elapsed:.0f}s  |  <2-5 Minuten"
+                    ]
 
-                        if self._last_finished_file:
-                            lines.append(f"Zuletzt fertig: {self._last_finished_file}")
+                    if total_files > 0:
+                        lines.append(f"Dateien fertig: {finished_files}/{total_files}")
 
-                        self.status_changed.emit("\n".join(lines))
+                    if self._current_file:
+                        lines.append(f"Aktuell: {self._current_file}")
 
-                    last_emit_ts = now
+                    if self._last_finished_file:
+                        lines.append(f"Zuletzt fertig: {self._last_finished_file}")
+
+                    self.status_changed.emit("\n".join(lines))
+                else:
+                    downloaded_mb = downloaded / (1024 * 1024)
+                    speed = (downloaded_mb / elapsed) if elapsed > 0 else 0.0
+
+                    lines = [
+                        f"{downloaded_mb:.1f} MB geladen  |  {elapsed:.0f}s  |  {speed:.1f} MB/s"
+                    ]
+
+                    if total_files > 0:
+                        lines.append(f"Dateien fertig: {finished_files}/{total_files}")
+
+                    if self._current_file:
+                        lines.append(f"Aktuell: {self._current_file}")
+
+                    if self._last_finished_file:
+                        lines.append(f"Zuletzt fertig: {self._last_finished_file}")
+
+                    self.status_changed.emit("\n".join(lines))
 
                 if ret is not None:
                     break
@@ -5517,7 +5538,7 @@ class HFDownloadWorker(QThread):
             if ret != 0:
                 raise RuntimeError(f"'hf download' wurde mit Exit-Code {ret} beendet.")
 
-            self.progress_changed.emit(100)
+            self.progress_changed.emit(1000)
             self.status_changed.emit("Download abgeschlossen.")
             self.finished_download.emit(self.local_dir)
 
@@ -5965,8 +5986,9 @@ class ProgressStatusDialog(QDialog):
         self.lbl_status.setMaximumWidth(520)
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
+        self.progress.setRange(0, 100)  # sichtbarer Balken
         self.progress.setValue(0)
+        self.progress.setFormat("%p%")
 
         self.btn_cancel = QPushButton("Abbrechen")
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
@@ -5982,8 +6004,21 @@ class ProgressStatusDialog(QDialog):
         self.adjustSize()
 
     def set_progress(self, value: int):
-        self.progress.setValue(max(0, min(100, int(value))))
+        value = max(0, min(1000, int(value)))
+        percent_text = value / 10.0
 
+        if value < 10:  # unter 1.0 %
+            if self.progress.minimum() != 0 or self.progress.maximum() != 0:
+                self.progress.setRange(0, 0)  # Busy-Modus
+            self.progress.setFormat(f"{percent_text:.1f}%")
+            return
+
+        if self.progress.minimum() != 0 or self.progress.maximum() != 100:
+            self.progress.setRange(0, 100)
+
+        bar_value = max(0, min(100, int(round(percent_text))))
+        self.progress.setValue(bar_value)
+        self.progress.setFormat(f"{percent_text:.1f}%")
 
 class VoiceRecordDialog(QDialog):
     start_requested = Signal()
@@ -9857,7 +9892,7 @@ class MainWindow(QMainWindow):
 
         self.whisper_menu.addSeparator()
 
-        self.act_whisper_scan = QAction("Scannen", self)
+        self.act_whisper_scan = QAction("Lokal Scannen", self)
         self.act_whisper_scan.triggered.connect(self.scan_whisper_models_now)
         self.whisper_menu.addAction(self.act_whisper_scan)
 
@@ -9896,7 +9931,7 @@ class MainWindow(QMainWindow):
 
         self.revision_models_menu.addSeparator()
 
-        self.act_scan_lm = QAction("Scannen", self)
+        self.act_scan_lm = QAction("Lokal Scannen", self)
         self.act_scan_lm.triggered.connect(self.scan_ai_models_now)
         self.revision_models_menu.addAction(self.act_scan_lm)
 
@@ -12446,6 +12481,36 @@ class MainWindow(QMainWindow):
     def _default_whisper_model_dir(self) -> str:
         return os.path.join(self._default_whisper_base_dir(), "faster-whisper-large-v3")
 
+    def _hf_cli_executable(self, platform_name: str) -> str:
+        """
+        Liefert den hf-CLI-Pfad passend zur Python-Umgebung.
+        Unter Windows bevorzugt <python>\Scripts\hf.exe
+        """
+        name = (platform_name or "").strip().lower()
+
+        if name == "windows":
+            py_dir = os.path.dirname(sys.executable)
+            candidates = [
+                os.path.join(py_dir, "Scripts", "hf.exe"),
+                os.path.join(py_dir, "hf.exe"),
+                "hf",
+            ]
+            for c in candidates:
+                if c == "hf" or os.path.exists(c):
+                    return c
+            return "hf"
+
+        # Linux/macOS: CLI aus der venv
+        venv_dir = self._whisper_venv_dir()
+        candidates = [
+            os.path.join(venv_dir, "bin", "hf"),
+            "hf",
+        ]
+        for c in candidates:
+            if c == "hf" or os.path.exists(c):
+                return c
+        return "hf"
+
     def _whisper_venv_dir(self) -> str:
         return os.path.join(self._default_whisper_base_dir(), ".venv")
 
@@ -12469,13 +12534,14 @@ class MainWindow(QMainWindow):
         venv_python = self._whisper_venv_python_path(platform_name).replace("\\", "/")
 
         if name == "windows":
+            hf_exe = self._hf_cli_executable(platform_name).replace("\\", "/")
             install_cmd = (
                 f'"{sys.executable}" -m pip install -U pip setuptools wheel '
                 f'huggingface_hub faster-whisper sounddevice'
             )
             download_cmd = (
-                f'"{sys.executable}" -m huggingface_hub download '
-                f'Systran/faster-whisper-large-v3 --local-dir "{model_dir}"'
+                f'"{hf_exe}" download Systran/faster-whisper-large-v3 '
+                f'--local-dir "{model_dir}"'
             )
             return install_cmd, download_cmd
 
@@ -12608,40 +12674,62 @@ class MainWindow(QMainWindow):
             venv_dir = self._whisper_venv_dir()
             venv_python = self._whisper_venv_python_path(platform_key)
 
-            # Immer eigene virtuelle Umgebung verwenden
-            prepare_cmds = [
-                [sys.executable, "-m", "venv", venv_dir],
-            ]
+            if platform_key == "windows":
+                # Windows: direkt in der laufenden Python-Umgebung arbeiten
+                prepare_cmds = []
 
-            install_cmd = [
-                venv_python,
-                "-m",
-                "pip",
-                "install",
-                "-U",
-                "pip",
-                "setuptools",
-                "wheel",
-                "huggingface_hub",
-                "faster-whisper",
-                "sounddevice",
-            ]
+                install_cmd = [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-U",
+                    "pip",
+                    "setuptools",
+                    "wheel",
+                    "huggingface_hub",
+                    "faster-whisper",
+                    "sounddevice",
+                ]
 
-            # WICHTIG:
-            # Nicht mehr: python -m huggingface_hub download ...
-            # Stattdessen robust per Python-API:
-            download_cmd = [
-                venv_python,
-                "-c",
-                (
-                    "from huggingface_hub import snapshot_download; "
-                    f"snapshot_download("
-                    f"repo_id='Systran/faster-whisper-large-v3', "
-                    f"local_dir=r'''{target_model_dir}''', "
-                    f"local_dir_use_symlinks=False"
-                    f")"
-                )
-            ]
+                hf_exe = self._hf_cli_executable(platform_key)
+
+                download_cmd = [
+                    hf_exe,
+                    "download",
+                    "Systran/faster-whisper-large-v3",
+                    "--local-dir",
+                    target_model_dir,
+                ]
+            else:
+                # Linux / macOS: weiter mit venv
+                prepare_cmds = [
+                    [sys.executable, "-m", "venv", venv_dir],
+                ]
+
+                install_cmd = [
+                    venv_python,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-U",
+                    "pip",
+                    "setuptools",
+                    "wheel",
+                    "huggingface_hub",
+                    "faster-whisper",
+                    "sounddevice",
+                ]
+
+                hf_exe = self._hf_cli_executable(platform_key)
+
+                download_cmd = [
+                    hf_exe,
+                    "download",
+                    "Systran/faster-whisper-large-v3",
+                    "--local-dir",
+                    target_model_dir,
+                ]
 
             self.hf_download_worker = HFDownloadWorker(
                 repo_id="Systran/faster-whisper-large-v3",
@@ -12929,7 +13017,7 @@ http://192.0.0.200:8000/v1</pre>
             <table class="table">
                 <tr><td class="section" colspan="2">Projekt</td></tr>
                 <tr><td><span class="kbd">Strg + S</span></td><td>Projekt speichern</td></tr>
-                <tr><td><span class="kbd">Strg + Alt + S</span></td><td>Projekt speichern unter</td></tr>
+                <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Projekt speichern unter</td></tr>
                 <tr><td><span class="kbd">Strg + I</span></td><td>Projekt laden</td></tr>
                 <tr><td><span class="kbd">Strg + E</span></td><td>Export</td></tr>
                 <tr><td><span class="kbd">Strg + Q</span></td><td>Programm beenden</td></tr>
@@ -13049,6 +13137,167 @@ http://192.0.0.200:8000/v1</pre>
                 <li>Sobald LM Studio über Netzwerk, VPN oder Tunnel genutzt wird, ist es nicht mehr rein localhost-lokal.</li>
                 <li>Der einmalige Modelldownload für LM Studio oder faster-whisper benötigt natürlich Internetzugriff.</li>
                 <li>Ob ein Einsatz im Einzelfall datenschutzkonform ist, hängt zusätzlich von Speicherort, Zugriffsschutz, Backups, Logs und internen Regeln ab.</li>
+            </ul>
+        </div>
+        """
+        legal_text = """
+        <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #e3e7ef;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #111827;
+        }
+        .h2 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1d4ed8;
+        }
+        .warn {
+            border-left: 4px solid #dc2626;
+            background: #fff7f7;
+        }
+        .ok {
+            border-left: 4px solid #2563eb;
+            background: #f8fbff;
+        }
+        ul {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        li {
+            margin-bottom: 4px;
+        }
+        a {
+            color: #1d4ed8;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        code {
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .small {
+            color: #6b7280;
+            font-size: 12px;
+        }
+        </style>
+
+        <div class="card warn">
+            <div class="h1">Rechtliches</div><br>
+            Die folgenden Hinweise sind eine allgemeine Orientierung und ersetzen keine Rechtsberatung.
+            Für die konkrete Nutzung in Behörden, Archiven, Unternehmen, Forschungseinrichtungen oder
+            veröffentlichten Produkten sollte die rechtliche Einordnung im Einzelfall geprüft werden.
+        </div>
+
+        <div class="card ok">
+            <div class="h2">Bottled Kraken</div>
+            <ul>
+                <li><b>Besonderer Hinweis:</b> Dieses Projekt sollte entsprechend der im GitHub-Repository hinterlegten Lizenz weitergegeben, verändert und verteilt werden.</li>
+                <li><b>Repository-Lizenz:</b> GPL-3.0.</li>
+                <li><b>Bedeutung in Kurzform:</b> Wenn Bottled Kraken selbst weiterverbreitet oder in veränderter Form veröffentlicht wird, müssen die Bedingungen der GPL-3.0 beachtet werden, insbesondere die Beibehaltung der Lizenz- und Copyright-Hinweise sowie die Weitergabe des Quellcodes unter derselben Lizenz, soweit die GPL dies verlangt.</li>
+                <li><b>Wichtig:</b> Ob eine bloße interne Nutzung, eine Weitergabe innerhalb einer Organisation oder ein kombiniertes Gesamtprodukt zusätzliche Pflichten auslöst, hängt vom genauen Verwendungsfall ab.</li>
+            </ul>
+            <div class="small">
+                Quelle: GitHub-Repository Bottled Kraken
+            </div>
+            <ul>
+                <li><a href="https://github.com/Testatost/Bottled-Kraken">https://github.com/Testatost/Bottled-Kraken</a></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">Kraken</div>
+            <ul>
+                <li>Kraken ist die OCR-Basis von Bottled Kraken.</li>
+                <li>Kraken steht unter der Apache License 2.0.</li>
+                <li>Für die rechtliche Nutzung sind insbesondere Lizenztext, Copyright-Hinweise und ggf. NOTICE-Hinweise zu beachten.</li>
+                <li>Die Apache-2.0-Lizenz ist grundsätzlich auch für kommerzielle Nutzung geeignet; maßgeblich bleiben aber immer die Original-Lizenzbedingungen.</li>
+            </ul>
+            <div class="small">Quellen:</div>
+            <ul>
+                <li><a href="https://github.com/mittagessen/kraken">https://github.com/mittagessen/kraken</a></li>
+                <li><a href="https://kraken.re/7.0/index.html">https://kraken.re/7.0/index.html</a></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">faster-whisper</div>
+            <ul>
+                <li>faster-whisper wird in Bottled Kraken für lokale Sprach-zu-Text-Funktionen verwendet.</li>
+                <li>Das Projekt steht unter der MIT-Lizenz.</li>
+                <li>Die MIT-Lizenz ist sehr offen; typischerweise müssen Copyright- und Lizenzhinweise erhalten bleiben.</li>
+                <li>Zusätzlich können für Modelle oder weitere Abhängigkeiten gesonderte Bedingungen gelten.</li>
+            </ul>
+            <div class="small">Quellen:</div>
+            <ul>
+                <li><a href="https://github.com/SYSTRAN/faster-whisper">https://github.com/SYSTRAN/faster-whisper</a></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">LM Studio</div>
+            <ul>
+                <li>LM Studio wird in Bottled Kraken optional als lokaler oder angebundener Sprachmodell-Server genutzt.</li>
+                <li>Für die rechtliche Nutzung solltest du dich an den offiziellen Terms of Use und der Privacy Policy von LM Studio orientieren.</li>
+                <li>Gerade bei Nutzung über Netzwerk, Remote-Zugriff oder verknüpfte Dienste gelten nicht nur technische, sondern auch organisatorische und rechtliche Rahmenbedingungen.</li>
+                <li>Für geladene Modelle können zusätzlich eigene Modelllizenzen gelten, die getrennt geprüft werden sollten.</li>
+            </ul>
+            <div class="small">Quellen:</div>
+            <ul>
+                <li><a href="https://lmstudio.ai/">https://lmstudio.ai/</a></li>
+                <li><a href="https://lmstudio.ai/app-terms">https://lmstudio.ai/app-terms</a></li>
+                <li><a href="https://lmstudio.ai/privacy">https://lmstudio.ai/privacy</a></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2">PySide6 / Qt for Python</div>
+            <ul>
+                <li>Die grafische Oberfläche von Bottled Kraken basiert auf PySide6 / Qt for Python.</li>
+                <li>Qt for Python verwendet Lizenzmodelle, die je nach Komponente LGPL bzw. kommerzielle Qt-Lizenz einschließen können.</li>
+                <li>Für Redistribution, Packaging und kommerzielle Weitergabe sollte die Qt-Lizenzsituation gesondert geprüft werden.</li>
+                <li>Besonders bei ausgelieferten Binärpaketen oder proprietären Gesamtanwendungen ist eine genaue Lizenzprüfung wichtig.</li>
+            </ul>
+            <div class="small">Quellen:</div>
+            <ul>
+                <li><a href="https://doc.qt.io/qtforpython-6/">https://doc.qt.io/qtforpython-6/</a></li>
+                <li><a href="https://doc.qt.io/qtforpython-6/licenses.html">https://doc.qt.io/qtforpython-6/licenses.html</a></li>
+            </ul>
+        </div>
+
+        <div class="card warn">
+            <div class="h2">Zusätzlicher Hinweis zu Modellen und Inhalten</div>
+            <ul>
+                <li>Die Software-Lizenz der Anwendung ist von der Lizenz der geladenen OCR-, Sprach- oder KI-Modelle zu unterscheiden.</li>
+                <li>Auch die Verarbeitung urheberrechtlich geschützter Dokumente, personenbezogener Daten oder sensibler Archivbestände ist gesondert rechtlich zu bewerten.</li>
+                <li>Dieses Fenster gibt nur einen kompakten Überblick und keine verbindliche Einzelfallprüfung.</li>
+            </ul>
+        </div>
+        
+        <div class="card">
+            <div class="h2">Lizenz-Überblick</div>
+            <ul>
+                <li><b>Bottled Kraken:</b> GPL-3.0</li>
+                <li><b>Kraken:</b> Apache License 2.0</li>
+                <li><b>faster-whisper:</b> MIT License</li>
+                <li><b>PySide6 / Qt for Python:</b> LGPL / Qt Commercial je nach Nutzung</li>
+                <li><b>LM Studio:</b> Nutzung nach offiziellen Terms of Use</li>
             </ul>
         </div>
         """
@@ -13629,6 +13878,7 @@ http://192.0.0.200:8000/v1</pre>
                 </p>
                 <p class="muted">
                     Vor dem Download installiert Bottled Kraken die benötigten Python-Pakete automatisch.
+                    Der eigentliche Modell-Download läuft über die Hugging-Face-CLI <code>hf download</code>.
                     Unter Linux und macOS wird dafür automatisch eine eigene venv-Umgebung genutzt.
                 </p>
             </div>
@@ -13722,6 +13972,11 @@ http://192.0.0.200:8000/v1</pre>
         page_data_protection = make_page(data_protection)
 
         # ---------------------------------
+        # Seite 8: Rechtliches
+        # ---------------------------------
+        page_legal = make_page(legal_text)
+
+        # ---------------------------------
         # Stack füllen
         # ---------------------------------
         stack.addWidget(page_quick)  # 0
@@ -13731,6 +13986,7 @@ http://192.0.0.200:8000/v1</pre>
         stack.addWidget(page_whisper)  # 4
         stack.addWidget(page_shortcuts)  # 5
         stack.addWidget(page_data_protection)  # 6
+        stack.addWidget(page_legal)  # 7
 
         nav_list.addItem("Ablauf")
         nav_list.addItem("Kraken")
@@ -13739,6 +13995,7 @@ http://192.0.0.200:8000/v1</pre>
         nav_list.addItem("Whisper")
         nav_list.addItem("Tastenkürzel")
         nav_list.addItem("Datenschutz")
+        nav_list.addItem("Rechtliches")
 
         nav_list.currentRowChanged.connect(stack.setCurrentIndex)
         nav_list.setCurrentRow(0)
