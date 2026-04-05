@@ -33,6 +33,7 @@ import warnings
 import re
 import traceback
 import gc
+import html
 from dataclasses import dataclass, field
 from typing import Optional, List, Any, Tuple, Dict, Callable
 import fitz
@@ -44,10 +45,8 @@ import urllib.error
 import urllib.parse
 import http.client
 import base64
-import mimetypes
 import socket
 from io import BytesIO
-import tempfile
 import queue
 import wave
 import threading
@@ -62,10 +61,11 @@ except Exception:
 # GUI-Framework
 from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
                             QSize, QPointF, QEvent, QPoint, QDateTime, QLocale,
-                            QCoreApplication, QItemSelectionModel, QSettings)
+                            QCoreApplication, QSettings)
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
-    QKeySequence, QActionGroup, QIcon, QPalette, QShortcut, QDesktopServices
+    QKeySequence, QActionGroup, QIcon, QPalette, QShortcut, QDesktopServices,
+    QPainter
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox,
@@ -76,23 +76,24 @@ from PySide6.QtWidgets import (
     QMenu, QTableWidget, QTableWidgetItem, QHeaderView, QToolBar,
     QAbstractItemView, QInputDialog, QDialog, QDialogButtonBox, QRadioButton,
     QSpinBox, QFormLayout, QPlainTextEdit,
-    QToolButton, QSplashScreen, QLineEdit, QTextEdit, QComboBox,
+    QToolButton, QLineEdit, QTextEdit,
     QTextBrowser, QScrollArea, QTreeWidget, QTreeWidgetItem, QGraphicsLineItem,
-    QSizePolicy
+    QSizePolicy, QCheckBox, QSlider, QStyleOptionButton,
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle
 )
 
 # PySide-Helfer zur Objekt-Validitätsprüfung
 from shiboken6 import isValid
 
 # Bild & PDF
-from PIL import Image
+from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from PIL.ImageQt import ImageQt
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
 
 # Kraken & ML (Machine Learning)
 warnings.filterwarnings("ignore", message="Using legacy polygon extractor*", category=UserWarning)
-from kraken import blla, rpred, serialization, pageseg, binarization
+from kraken import blla, rpred, serialization, containers
 from kraken.lib import models, vgsl
 import torch
 
@@ -132,7 +133,7 @@ THEMES = {
     "bright": {
         "bg": "#f0f0f0",
         "fg": "#000000",
-        "canvas_bg": "#ffffff",
+        "canvas_bg": "#f2f2f2",
         "table_base": QColor(240, 240, 240),
         "toolbar_text": "#000000",
         "toolbar_border": "#000000",
@@ -161,13 +162,9 @@ STATUS_VOICE_RECORDING = 6
 
 STATUS_ICONS[STATUS_VOICE_RECORDING] = "🎤"
 
-DEFAULT_FASTER_WHISPER_MODEL_DIR = ""
 VOICE_SAMPLE_RATE = 16000
 VOICE_CHANNELS = 1
 VOICE_BLOCKSIZE = 0
-FASTER_WHISPER_DEVICE = "cpu"
-FASTER_WHISPER_COMPUTE_TYPE = "int8"
-
 
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
@@ -195,636 +192,5473 @@ def _load_image_color(path: str) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 
+def _theme_control_qss(theme: str) -> str:
+    if theme == "dark":
+        return """
+            QCheckBox, QRadioButton {
+                spacing: 6px;
+                color: #f3f4f6;
+            }
+
+            QCheckBox::indicator,
+            QRadioButton::indicator,
+            QTableWidget::indicator,
+            QTreeWidget::indicator,
+            QListWidget::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #94a3b8;
+                border-radius: 3px;
+                background: #2f3540;
+            }
+
+            QCheckBox::indicator:hover,
+            QRadioButton::indicator:hover,
+            QTableWidget::indicator:hover,
+            QTreeWidget::indicator:hover,
+            QListWidget::indicator:hover {
+                border: 1px solid #60a5fa;
+                background: #374151;
+            }
+
+            QCheckBox::indicator:checked,
+            QRadioButton::indicator:checked,
+            QTableWidget::indicator:checked,
+            QTreeWidget::indicator:checked,
+            QListWidget::indicator:checked {
+                border: 1px solid #60a5fa;
+                background: #2563eb;
+            }
+
+            QCheckBox::indicator:checked:hover,
+            QRadioButton::indicator:checked:hover,
+            QTableWidget::indicator:checked:hover,
+            QTreeWidget::indicator:checked:hover,
+            QListWidget::indicator:checked:hover {
+                border: 1px solid #93c5fd;
+                background: #3b82f6;
+            }
+
+            QSlider::groove:horizontal {
+                height: 8px;
+                background: #374151;
+                border-radius: 4px;
+            }
+
+            QSlider::sub-page:horizontal {
+                background: #2563eb;
+                border-radius: 4px;
+            }
+
+            QSlider::add-page:horizontal {
+                background: #374151;
+                border-radius: 4px;
+            }
+
+            QSlider::handle:horizontal {
+                background: #60a5fa;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+                border: 1px solid #93c5fd;
+            }
+
+            QSlider::handle:horizontal:hover {
+                background: #93c5fd;
+            }
+        """
+
+    return """
+        QCheckBox, QRadioButton {
+            spacing: 6px;
+            color: #000000;
+        }
+
+        QCheckBox::indicator,
+        QRadioButton::indicator,
+        QTableWidget::indicator,
+        QTreeWidget::indicator,
+        QListWidget::indicator {
+            width: 16px;
+            height: 16px;
+            border: 1px solid #7c8aa5;
+            border-radius: 3px;
+            background: #ffffff;
+        }
+
+        QCheckBox::indicator:hover,
+        QRadioButton::indicator:hover,
+        QTableWidget::indicator:hover,
+        QTreeWidget::indicator:hover,
+        QListWidget::indicator:hover {
+            border: 1px solid #3399ff;
+            background: #f3f8ff;
+        }
+
+        QCheckBox::indicator:checked,
+        QRadioButton::indicator:checked,
+        QTableWidget::indicator:checked,
+        QTreeWidget::indicator:checked,
+        QListWidget::indicator:checked {
+            border: 1px solid #3399ff;
+            background: #3399ff;
+        }
+
+        QCheckBox::indicator:checked:hover,
+        QRadioButton::indicator:checked:hover,
+        QTableWidget::indicator:checked:hover,
+        QTreeWidget::indicator:checked:hover,
+        QListWidget::indicator:checked:hover {
+            border: 1px solid #1d4ed8;
+            background: #60a5fa;
+        }
+
+        QSlider::groove:horizontal {
+            height: 8px;
+            background: #d9dee7;
+            border-radius: 4px;
+        }
+
+        QSlider::sub-page:horizontal {
+            background: #3399ff;
+            border-radius: 4px;
+        }
+
+        QSlider::add-page:horizontal {
+            background: #d9dee7;
+            border-radius: 4px;
+        }
+
+        QSlider::handle:horizontal {
+            background: #ffffff;
+            width: 18px;
+            margin: -5px 0;
+            border-radius: 9px;
+            border: 1px solid #7aaef7;
+        }
+
+        QSlider::handle:horizontal:hover {
+            background: #f0f6ff;
+            border: 1px solid #3399ff;
+        }
+    """
+
+
+def _theme_app_qss(theme: str) -> str:
+    if theme == "dark":
+        base = """
+            QWidget {
+                background: #2b2b2b;
+                color: #f3f4f6;
+            }
+
+            QMainWindow, QDialog, QMessageBox, QInputDialog, QProgressDialog {
+                background: #1f232a;
+                color: #f3f4f6;
+            }
+
+            QLabel, QGroupBox {
+                color: #f3f4f6;
+            }
+
+            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
+            QComboBox, QListWidget, QTreeWidget, QTableWidget {
+                background: #2b3038;
+                color: #f3f4f6;
+                border: 1px solid #4b5563;
+                selection-background-color: #2563eb;
+                selection-color: white;
+            }
+
+            QPushButton, QToolButton {
+                color: #f3f4f6;
+                background: #2b3038;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                padding: 5px 10px;
+            }
+
+            QPushButton:hover, QToolButton:hover {
+                background: #343a44;
+                border-color: #60a5fa;
+            }
+
+            QPushButton:pressed, QToolButton:pressed {
+                background: #3f4652;
+            }
+
+            QPushButton:disabled, QToolButton:disabled {
+                color: #9ca3af;
+                background: #252a31;
+                border-color: #3f4652;
+            }
+
+            QMenuBar {
+                background: #20242b;
+                color: #f3f4f6;
+            }
+
+            QMenuBar::item:selected {
+                background: #2f3540;
+            }
+
+            QMenu {
+                background: #1f232a;
+                color: #f3f4f6;
+                border: 1px solid #4b5563;
+            }
+
+            QMenu::item:selected {
+                background: #2563eb;
+                color: white;
+            }
+
+            QHeaderView::section {
+                background: #313844;
+                color: #f3f4f6;
+                border: 1px solid #4b5563;
+                padding: 4px;
+            }
+
+            QScrollBar:vertical, QScrollBar:horizontal {
+                background: #232830;
+            }
+        """
+    else:
+        base = """
+            QWidget {
+                background: #f0f0f0;
+                color: #000000;
+            }
+
+            QMainWindow, QDialog, QMessageBox, QInputDialog, QProgressDialog {
+                background: #efefef;
+                color: #000000;
+            }
+
+            QLabel, QGroupBox {
+                color: #000000;
+            }
+
+            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
+            QComboBox, QListWidget, QTreeWidget, QTableWidget {
+                background: #ffffff;
+                color: #000000;
+                border: 1px solid #b8b8b8;
+                selection-background-color: #3399ff;
+                selection-color: #ffffff;
+            }
+
+            QPushButton, QToolButton {
+                color: #000000;
+                background: #f7f7f7;
+                border: 1px solid #b8b8b8;
+                border-radius: 6px;
+                padding: 5px 10px;
+            }
+
+            QPushButton:hover, QToolButton:hover {
+                background: #ececec;
+                border-color: #7aaef7;
+            }
+
+            QPushButton:pressed, QToolButton:pressed {
+                background: #dddddd;
+            }
+
+            QPushButton:disabled, QToolButton:disabled {
+                color: #8a8a8a;
+                background: #f0f0f0;
+                border-color: #cfcfcf;
+            }
+
+            QMenuBar {
+                background: #efefef;
+                color: #000000;
+            }
+
+            QMenuBar::item:selected {
+                background: #dcdcdc;
+            }
+
+            QMenu {
+                background: #ffffff;
+                color: #000000;
+                border: 1px solid #b8b8b8;
+            }
+
+            QMenu::item:selected {
+                background: #3399ff;
+                color: #ffffff;
+            }
+
+            QHeaderView::section {
+                background: #e8e8e8;
+                color: #000000;
+                border: 1px solid #c8c8c8;
+                padding: 4px;
+            }
+
+            QScrollBar:vertical, QScrollBar:horizontal {
+                background: #efefef;
+            }
+        """
+
+    return base + "\n" + _theme_control_qss(theme)
+
+
+def _image_edit_dialog_qss(theme: str) -> str:
+    if theme == "dark":
+        base = """
+            QDialog {
+                background: #1f232a;
+                color: #f3f4f6;
+            }
+
+            QLabel, QPushButton {
+                color: #f3f4f6;
+                font-size: 13px;
+            }
+
+            QPushButton {
+                background: #2b3038;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+
+            QPushButton:hover {
+                background: #343a44;
+                border-color: #60a5fa;
+            }
+
+            QPushButton:pressed {
+                background: #3f4652;
+            }
+
+            QPushButton:checked {
+                background: #1d4ed8;
+                border-color: #60a5fa;
+                color: white;
+            }
+        """
+    else:
+        base = """
+            QDialog {
+                background: #f6f7fb;
+                color: #1f2937;
+            }
+
+            QLabel, QPushButton {
+                color: #1f2937;
+                font-size: 13px;
+            }
+
+            QPushButton {
+                background: #ffffff;
+                border: 1px solid #cfd5df;
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+
+            QPushButton:hover {
+                background: #f0f4ff;
+                border-color: #7aaef7;
+            }
+
+            QPushButton:pressed {
+                background: #e5edff;
+            }
+
+            QPushButton:checked {
+                background: #3399ff;
+                border-color: #7aaef7;
+                color: white;
+            }
+        """
+
+    return base + "\n" + _theme_control_qss(theme)
+
+
+def _help_theme_values(theme: str) -> Dict[str, str]:
+    if theme == "dark":
+        return {
+            "html_bg": "#1f232a",
+            "html_fg": "#f3f4f6",
+            "card_bg": "#2b3038",
+            "card_border": "#4b5563",
+            "accent": "#60a5fa",
+            "muted": "#cbd5e1",
+            "badge_bg": "#1d4ed8",
+            "badge_fg": "#ffffff",
+            "warn_bg": "#3b2b00",
+            "warn_border": "#f59e0b",
+            "ok_bg": "#0f2d1f",
+            "ok_border": "#34d399",
+            "code_bg": "#20242b",
+            "nav_bg": "#2b3038",
+            "nav_border": "#4b5563",
+            "nav_hover": "#374151",
+            "nav_selected_bg": "#1d4ed8",
+            "nav_selected_border": "#60a5fa",
+            "button_bg": "#2b3038",
+            "button_hover": "#343a44",
+            "button_border": "#4b5563",
+            "dialog_bg": "#1f232a",
+            "browser_bg": "#2b3038",
+            "browser_border": "#4b5563",
+        }
+
+    return {
+        "html_bg": "#f6f7fb",
+        "html_fg": "#1f2937",
+        "card_bg": "#ffffff",
+        "card_border": "#e3e7ef",
+        "accent": "#1d4ed8",
+        "muted": "#6b7280",
+        "badge_bg": "#dbeafe",
+        "badge_fg": "#1d4ed8",
+        "warn_bg": "#fff7e6",
+        "warn_border": "#f59e0b",
+        "ok_bg": "#eefbf3",
+        "ok_border": "#34d399",
+        "code_bg": "#f3f6fb",
+        "nav_bg": "#ffffff",
+        "nav_border": "#d9dce3",
+        "nav_hover": "#f3f6fb",
+        "nav_selected_bg": "#dbeafe",
+        "nav_selected_border": "#93c5fd",
+        "button_bg": "#ffffff",
+        "button_hover": "#f0f4ff",
+        "button_border": "#cfd5df",
+        "dialog_bg": "#f6f7fb",
+        "browser_bg": "#ffffff",
+        "browser_border": "#d9dce3",
+    }
+
+
+def _help_dialog_qss(theme: str) -> str:
+    colors = _help_theme_values(theme)
+    selected_fg = "#ffffff" if theme == "dark" else "#1e3a8a"
+
+    return f"""
+        QDialog {{
+            background: {colors["dialog_bg"]};
+            color: {colors["html_fg"]};
+        }}
+
+        QTextBrowser {{
+            background: {colors["browser_bg"]};
+            color: {colors["html_fg"]};
+            border: 1px solid {colors["browser_border"]};
+            border-radius: 10px;
+            padding: 8px;
+        }}
+
+        QLabel {{
+            color: {colors["html_fg"]};
+            font-size: 13px;
+            font-weight: 600;
+        }}
+
+        QPushButton {{
+            color: {colors["html_fg"]};
+            background: {colors["button_bg"]};
+            border: 1px solid {colors["button_border"]};
+            border-radius: 8px;
+            padding: 6px 12px;
+            min-height: 28px;
+        }}
+
+        QPushButton:hover {{
+            background: {colors["button_hover"]};
+            border-color: {colors["accent"]};
+        }}
+
+        QPushButton:pressed {{
+            background: {colors["button_hover"]};
+        }}
+
+        QListWidget {{
+            background: {colors["nav_bg"]};
+            color: {colors["html_fg"]};
+            border: 1px solid {colors["nav_border"]};
+            border-radius: 12px;
+            padding: 8px;
+            font-size: 14px;
+        }}
+
+        QListWidget::item {{
+            min-height: 34px;
+            padding: 8px 12px;
+            margin: 2px 0;
+            border-radius: 8px;
+        }}
+
+        QListWidget::item:selected {{
+            background: {colors["nav_selected_bg"]};
+            color: {selected_fg};
+            border: 1px solid {colors["nav_selected_border"]};
+            font-weight: 700;
+        }}
+
+        QListWidget::item:hover {{
+            background: {colors["nav_hover"]};
+        }}
+
+        QScrollArea {{
+            border: none;
+            background: transparent;
+        }}
+    """
+
+
+def _help_html(theme: str, content: str) -> str:
+    colors = _help_theme_values(theme)
+    return f"""
+        <style>
+            body {{
+                font-family: 'Segoe UI', Arial, sans-serif;
+                color: {colors["html_fg"]};
+                background: {colors["html_bg"]};
+                line-height: 1.55;
+                margin: 0;
+            }}
+
+            a {{
+                color: {colors["accent"]};
+                text-decoration: none;
+            }}
+
+            a:hover {{
+                text-decoration: underline;
+            }}
+
+            .card {{
+                border: 1px solid {colors["card_border"]};
+                border-radius: 12px;
+                padding: 14px 16px;
+                margin-bottom: 12px;
+                background: {colors["card_bg"]};
+            }}
+
+            .warn {{
+                background: {colors["warn_bg"]};
+                border-color: {colors["warn_border"]};
+            }}
+
+            .ok {{
+                background: {colors["ok_bg"]};
+                border-color: {colors["ok_border"]};
+            }}
+
+            .h1 {{
+                font-size: 20px;
+                font-weight: 700;
+                margin: 0 0 8px 0;
+                color: {colors["html_fg"]};
+            }}
+
+            .h2 {{
+                font-size: 15px;
+                font-weight: 700;
+                margin: 0 0 8px 0;
+                color: {colors["accent"]};
+            }}
+
+            .muted {{
+                color: {colors["muted"]};
+            }}
+
+            .badge {{
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 11px;
+                font-weight: 700;
+                background: {colors["badge_bg"]};
+                color: {colors["badge_fg"]};
+                margin-bottom: 8px;
+            }}
+
+            .small {{
+                font-size: 12px;
+                color: {colors["muted"]};
+            }}
+
+            code {{
+                font-family: 'Cascadia Code', 'Consolas', monospace;
+                background: {colors["code_bg"]};
+                padding: 2px 6px;
+                border-radius: 6px;
+            }}
+
+            pre {{
+                font-family: 'Cascadia Code', 'Consolas', monospace;
+                background: {colors["code_bg"]};
+                padding: 10px 12px;
+                border-radius: 8px;
+                white-space: pre-wrap;
+                border: 1px solid {colors["card_border"]};
+                overflow-wrap: anywhere;
+            }}
+
+            ul, ol {{
+                margin-top: 6px;
+                margin-bottom: 0;
+                padding-left: 22px;
+            }}
+
+            li {{
+                margin-bottom: 4px;
+            }}
+
+            .table {{
+                width: 100%;
+                border-collapse: collapse;
+            }}
+
+            .table td {{
+                padding: 7px 8px;
+                border-bottom: 1px solid {colors["card_border"]};
+                vertical-align: top;
+            }}
+
+            .table .section {{
+                font-weight: 700;
+                color: {colors["accent"]};
+                background: {colors["code_bg"]};
+            }}
+
+            .kbd {{
+                display: inline-block;
+                min-width: 70px;
+                padding: 2px 8px;
+                border-radius: 6px;
+                border: 1px solid {colors["card_border"]};
+                background: {colors["code_bg"]};
+                font-family: 'Cascadia Code', 'Consolas', monospace;
+                font-size: 12px;
+                text-align: center;
+            }}
+        </style>
+        {content}
+    """
+
+
+def _help_pre(text: str) -> str:
+    return f"<pre>{html.escape(text)}</pre>"
+
 # -----------------------------
 # ÜBERSETZUNGEN
 # -----------------------------
-TRANSLATIONS = {
-    "de": {
-        "dlg_filter_img": "Bilder/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
-        "pdf_render_title": "PDF wird vorbereitet",
-        "pdf_render_label": "Seiten werden gerendert… ({}/{}): {}",
-        "app_title": "Bottled Kraken",
-        "toolbar_main": "Werkzeugleiste",
-        "menu_file": "&Datei",
-        "menu_edit": "&Bearbeiten",
-        "menu_export": "Exportieren als...",
-        "menu_exit": "Beenden",
-        "menu_models": "&Kraken-Optionen",
-        "menu_options": "&Optionen",
-        "menu_languages": "Sprachen",
-        "menu_hw": "CPU/GPU",
-        "menu_reading": "Leserichtung",
-        "menu_appearance": "Erscheinungsbild",
-        "act_clear_rec": "Recognition-Modell entfernen",
-        "act_clear_seg": "Segmentierungs-Modell entfernen",
-        "act_paste_clipboard": "Aus Zwischenablage einfügen",
-
-        "log_toggle_show": "Log",
-        "log_toggle_hide": "Log",
-        "menu_export_log": "Log als .txt exportieren...",
-        "dlg_save_log": "Log speichern",
-        "dlg_filter_txt": "Text (*.txt)",
-        "log_started": "Programm gestartet.",
-        "log_queue_cleared": "Queue geleert.",
-
-        "lang_de": "Deutsch",
-        "lang_en": "English",
-        "lang_fr": "Français",
-
-        "hw_cpu": "CPU",
-        "hw_cuda": "GPU – CUDA (NVIDIA)",
-        "hw_rocm": "GPU – ROCm (AMD)",
-        "hw_mps": "GPU – MPS (Apple)",
-
-        "act_undo": "Rückgängig",
-        "act_redo": "Wiederholen",
-
-        "msg_hw_not_available": "Diese Hardware ist auf diesem System nicht verfügbar. Wechsle zu CPU.",
-        "msg_using_device": "Verwende Gerät: {}",
-        "msg_detected_gpu": "Erkannt: {}",
-        "msg_device_cpu": "CPU",
-        "msg_device_cuda": "CUDA",
-        "msg_device_rocm": "ROCm",
-        "msg_device_mps": "MPS",
-
-        "act_add_files": "Dateien laden...",
-        "act_download_model": "Modell herunterladen (Zenodo)",
-        "act_delete": "Löschen",
-        "act_rename": "Umbenennen...",
-        "act_clear_queue": "Wartebereich leeren",
-        "act_start_ocr": "Start Kraken OCR",
-        "act_stop_ocr": "Stopp",
-        "act_re_ocr": "Wiederholen",
-        "act_re_ocr_tip": "Ausgewählte Datei(en) erneut verarbeiten",
-        "act_overlay_show": "Overlay-Boxen anzeigen",
-
-        "status_ready": "Bereit.",
-        "status_waiting": "Wartet",
-        "status_processing": "Verarbeite...",
-        "status_done": "Fertig",
-        "status_error": "Fehler",
-
-        "lbl_queue": "Wartebereich:",
-        "lbl_lines": "Erkannte Zeilen:",
-        "col_file": "Datei",
-        "col_status": "Status",
-
-        "drop_hint": "Datei(en) hierher ziehen und ablegen",
-        "queue_drop_hint": "Datei(en) hierher ziehen und ablegen",
-
-        "info_title": "Information",
-        "warn_title": "Warnung",
-        "err_title": "Fehler",
-
-        "theme_bright": "Hell",
-        "theme_dark": "Dunkel",
-
-        "warn_queue_empty": "Wartebereich ist leer oder alle Elemente wurden verarbeitet.",
-        "warn_select_done": "Keine Datei(en) für erneutes OCRn geladen.",
-        "warn_need_rec": "Bitte wählen Sie zuerst ein Format-Modell (Recognition) aus.",
-        "warn_need_seg": "Bitte wählen Sie zuerst ein Segmentierungs-Modell aus.",
-
-        "msg_stopping": "Breche ab...",
-        "msg_finished": "Batch abgeschlossen.",
-        "msg_device": "Gerät gesetzt auf: {}",
-        "msg_exported": "Exportiert: {}",
-        "msg_loaded_rec": "Format-Modell: {}",
-        "msg_loaded_seg": "Segmentierungs-Modell: {}",
-
-        "err_load": "Bild kann nicht geladen werden: {}",
-
-        "dlg_title_rename": "Umbenennen",
-        "dlg_label_name": "Neuer Dateiname:",
-        "dlg_save": "Speichern",
-        "dlg_load_img": "Bilder wählen",
-        "dlg_choose_rec": "Recognition-Modell: ",
-        "dlg_choose_seg": "Segmentierungs-Modell: ",
-        "dlg_filter_model": "Modelle (*.mlmodel)",
-
-        "reading_tb_lr": "Oben → Unten + Links → Rechts",
-        "reading_tb_rl": "Oben → Unten + Rechts → Links",
-        "reading_bt_lr": "Unten → Oben + Links → Rechts",
-        "reading_bt_rl": "Unten → Oben + Rechts → Links",
-
-        "line_menu_move_up": "Zeile nach oben",
-        "line_menu_move_down": "Zeile nach unten",
-        "line_menu_delete": "Zeile löschen",
-        "line_menu_add_above": "Zeile darüber hinzufügen",
-        "line_menu_add_below": "Zeile darunter hinzufügen",
-        "line_menu_draw_box": "Overlay-Box zeichnen",
-        "line_menu_edit_box": "Overlay-Box bearbeiten (ziehen/skalieren)",
-        "line_menu_move_to": "Zeile verschieben zu…",
-
-        "dlg_new_line_title": "Neue Zeile",
-        "dlg_new_line_label": "Text der neuen Zeile:",
-
-        "dlg_move_to_title": "Zeile verschieben",
-        "dlg_move_to_label": "Ziel-Zeilennummer (1…):",
-
-        "canvas_menu_add_box_draw": "Overlay-Box hinzufügen (zeichnen)",
-        "canvas_menu_delete_box": "Overlay-Box löschen",
-        "canvas_menu_edit_box": "Overlay-Box bearbeiten…",
-        "canvas_menu_select_line": "Zeile auswählen",
-
-        "dlg_box_title": "Overlay-Box",
-        "dlg_box_left": "links",
-        "dlg_box_top": "oben",
-        "dlg_box_right": "rechts",
-        "dlg_box_bottom": "unten",
-        "dlg_box_apply": "Anwenden",
-
-        "export_choose_mode_title": "Export",
-        "export_mode_all": "Alle Dateien exportieren",
-        "export_mode_selected": "Ausgewählte Dateien exportieren",
-        "export_select_files_title": "Dateien auswählen",
-        "export_select_files_hint": "Wählen Sie die Dateien für den Export:",
-        "export_choose_folder": "Zielordner wählen",
-        "export_need_done": "Mindestens eine ausgewählte Datei ist nicht fertig verarbeitet.",
-        "export_none_selected": "Keine Dateien ausgewählt.",
-
-        "undo_nothing": "Nichts zum Rückgängig machen.",
-        "redo_nothing": "Nichts zum Wiederholen.",
-        "overlay_only_after_ocr": "Overlay-Bearbeitung ist erst nach abgeschlossener OCR möglich.",
-
-        "new_line_from_box_title": "Neue Zeile",
-        "new_line_from_box_label": "Text für die neue Zeile (optional):",
-
-        "log_added_files": "{} Datei(en) zur Queue hinzugefügt.",
-        "log_ocr_started": "OCR gestartet: {} Datei(en), Device={}, Reading={}",
-        "log_stop_requested": "OCR-Abbruch angefordert.",
-        "log_file_started": "Starte Datei: {}",
-        "log_file_done": "Fertig: {} ({} Zeilen)",
-        "log_file_error": "Fehler: {} -> {}",
-        "log_export_done": "Export abgeschlossen: {} Datei(en) als {} nach {}",
-        "log_export_single": "Export: {} -> {}",
-        "log_export_log_done": "Log exportiert: {}",
-        "act_ai_revise": "LM-Überarbeitung",
-        "act_ai_revise_tip": "OCR-Text mit lokalem LLM überarbeiten",
-        "msg_ai_started": "Überarbeitung gestartet...",
-        "msg_ai_done": "Überarbeitung abgeschlossen.",
-        "msg_ai_model_set": "KI-Modell-ID: {}",
-        "msg_ai_disabled": "Überarbeitung nicht möglich.",
-        "warn_need_done_for_ai": "Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.",
-        "warn_need_ai_model": "Kein Modell über die konfigurierte LM-Server-URL gefunden. Bitte LM Studio/vLLM starten oder eine gültige URL bzw. Modell-ID setzen.",
-        "warn_ai_server": "LM Studio Server nicht erreichbar. Bitte Modell laden und lokalen Server starten.",
-        "dlg_choose_ai_model": "LM-Studio Modell-Identifier",
-        "dlg_choose_ai_model_label": "Optionale Modell-ID. Leer lassen, wenn das laufende Modell des eingetragenen Servers automatisch verwendet werden soll:",
-        "log_ai_started": "Überarbeitung gestartet: {}",
-        "log_ai_done": "Überarbeitung abgeschlossen: {}",
-        "log_ai_error": "Überarbeitung Fehler: {} -> {}",
-        "status_ai_processing": "Überarbeitung...",
-        "status_exporting": "Exportiere...",
-
-        "menu_project_save": "Projekt speichern",
-        "menu_project_save_as": "Projekt speichern unter...",
-        "menu_project_load": "Projekt laden...",
-        "dlg_filter_project": "Bottled-Kraken Projekt (*.json)",
-        "msg_project_saved": "Projekt gespeichert: {}",
-        "msg_project_loaded": "Projekt geladen: {}",
-        "warn_project_load_failed": "Projekt konnte nicht geladen werden: {}",
-        "warn_project_save_failed": "Projekt konnte nicht gespeichert werden: {}",
-        "warn_project_file_missing": "Datei nicht gefunden: {}",
-        "line_menu_swap_with": "Zeile tauschen mit…",
-        "dlg_swap_title": "Zeilen tauschen",
-        "dlg_swap_label": "Mit Zeilennummer tauschen (1…):",
-
-        "act_voice_fill": "Audioaufnahme",
-        "act_voice_fill_tip": "Zeilen per Mikrofon mit faster-whisper überschreiben",
-        "act_voice_stop": "Aufnahme stoppen",
-        "msg_voice_started": "Sprachaufnahme gestartet...",
-        "msg_voice_stopped": "Sprachaufnahme beendet. Transkribiere...",
-        "msg_voice_done": "Sprachimport abgeschlossen.",
-        "msg_voice_cancelled": "Sprachaufnahme abgebrochen.",
-        "warn_voice_need_done": "Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.",
-        "warn_voice_model_missing": "Faster-Whisper-Modellordner wurde nicht gefunden.",
-        "status_voice_recording": "Spricht ein...",
-
-        "line_menu_ai_revise_single": "Nur diese Zeile mit LM überarbeiten",
-    },
-
-    "en": {
-        "dlg_filter_img": "Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
-        "pdf_render_title": "Preparing PDF",
-        "pdf_render_label": "Rendering pages… ({}/{}): {}",
-        "app_title": "Bottled Kraken",
-        "toolbar_main": "Toolbar",
-        "menu_file": "&File",
-        "menu_edit": "&Edit",
-        "menu_export": "Export as...",
-        "menu_exit": "Exit",
-        "menu_models": "&Kraken Options",
-        "menu_options": "&Options",
-        "menu_languages": "Languages",
-        "menu_hw": "CPU/GPU",
-        "menu_reading": "Reading Direction",
-        "menu_appearance": "Appearance",
-        "act_clear_rec": "Clear recognition model",
-        "act_clear_seg": "Clear segmentation model",
-        "act_paste_clipboard": "Paste from clipboard",
-
-        "log_toggle_show": "Log",
-        "log_toggle_hide": "Log",
-        "menu_export_log": "Export log as .txt...",
-        "dlg_save_log": "Save log",
-        "dlg_filter_txt": "Text (*.txt)",
-        "log_started": "Program started.",
-        "log_queue_cleared": "Queue cleared.",
-
-        "lang_de": "German",
-        "lang_en": "English",
-        "lang_fr": "French",
-
-        "hw_cpu": "CPU",
-        "hw_cuda": "GPU – CUDA (NVIDIA)",
-        "hw_rocm": "GPU – ROCm (AMD)",
-        "hw_mps": "GPU – MPS (Apple)",
-
-        "act_undo": "Undo",
-        "act_redo": "Redo",
-
-        "msg_hw_not_available": "This hardware is not available on this system. Switching to CPU.",
-        "msg_using_device": "Using device: {}",
-        "msg_detected_gpu": "Detected: {}",
-        "msg_device_cpu": "CPU",
-        "msg_device_cuda": "CUDA",
-        "msg_device_rocm": "ROCm",
-        "msg_device_mps": "MPS",
-
-        "act_add_files": "Load files...",
-        "act_download_model": "Download model (Zenodo)",
-        "act_delete": "Delete",
-        "act_rename": "Rename...",
-        "act_clear_queue": "Clear queue",
-        "act_start_ocr": "Start Kraken OCR",
-        "act_stop_ocr": "Stop",
-        "act_re_ocr": "Reprocess",
-        "act_re_ocr_tip": "Reprocess selected file(s)",
-        "act_overlay_show": "Show overlay boxes",
-
-        "status_ready": "Ready.",
-        "status_waiting": "Waiting",
-        "status_processing": "Processing...",
-        "status_done": "Done",
-        "status_error": "Error",
-
-        "lbl_queue": "Queue:",
-        "lbl_lines": "Recognized lines:",
-        "col_file": "File",
-        "col_status": "Status",
-
-        "drop_hint": "Drag & drop files here",
-        "queue_drop_hint": "Drag & drop files here",
-
-        "info_title": "Information",
-        "warn_title": "Warning",
-        "err_title": "Error",
-
-        "theme_bright": "Bright",
-        "theme_dark": "Dark",
-
-        "warn_queue_empty": "Queue is empty or all items are processed.",
-        "warn_select_done": "No file(s) loaded for re-OCR.",
-        "warn_need_rec": "Please select a format model (recognition) first.",
-        "warn_need_seg": "Please select a segmentation model first.",
-
-        "msg_stopping": "Stopping...",
-        "msg_finished": "Batch finished.",
-        "msg_device": "Device set to: {}",
-        "msg_exported": "Exported: {}",
-        "msg_loaded_rec": "Format model: {}",
-        "msg_loaded_seg": "Segmentation model: {}",
-
-        "err_load": "Cannot load image: {}",
-
-        "dlg_title_rename": "Rename",
-        "dlg_label_name": "New filename:",
-        "dlg_save": "Save",
-        "dlg_load_img": "Choose images",
-        "dlg_choose_rec": "recognition model: ",
-        "dlg_choose_seg": "segmentation model: ",
-        "dlg_filter_model": "Models (*.mlmodel)",
-
-        "reading_tb_lr": "Top → Bottom + Left → Right",
-        "reading_tb_rl": "Top → Bottom + Right → Left",
-        "reading_bt_lr": "Bottom → Top + Left → Right",
-        "reading_bt_rl": "Bottom → Top + Right → Left",
-
-        "line_menu_move_up": "Move line up",
-        "line_menu_move_down": "Move line down",
-        "line_menu_delete": "Delete line",
-        "line_menu_add_above": "Add line above",
-        "line_menu_add_below": "Add line below",
-        "line_menu_draw_box": "Draw overlay box",
-        "line_menu_edit_box": "Edit overlay box (move/resize)",
-        "line_menu_move_to": "Move line to…",
-
-        "dlg_new_line_title": "New line",
-        "dlg_new_line_label": "Text of the new line:",
-
-        "dlg_move_to_title": "Move line",
-        "dlg_move_to_label": "Target line number (1…):",
-
-        "canvas_menu_add_box_draw": "Add overlay box (draw)",
-        "canvas_menu_delete_box": "Delete overlay box",
-        "canvas_menu_edit_box": "Edit overlay box…",
-        "canvas_menu_select_line": "Select line",
-
-        "dlg_box_title": "Overlay box",
-        "dlg_box_left": "left",
-        "dlg_box_top": "top",
-        "dlg_box_right": "right",
-        "dlg_box_bottom": "bottom",
-        "dlg_box_apply": "Apply",
-
-        "export_choose_mode_title": "Export",
-        "export_mode_all": "Export all files",
-        "export_mode_selected": "Export selected files",
-        "export_select_files_title": "Select files",
-        "export_select_files_hint": "Choose files to export:",
-        "export_choose_folder": "Choose destination folder",
-        "export_need_done": "At least one selected file is not finished.",
-        "export_none_selected": "No files selected.",
-
-        "undo_nothing": "Nothing to undo.",
-        "redo_nothing": "Nothing to redo.",
-        "overlay_only_after_ocr": "Overlay editing is only available after OCR is finished.",
-
-        "new_line_from_box_title": "New line",
-        "new_line_from_box_label": "Text for the new line (optional):",
-
-        "log_added_files": "{} file(s) added to the queue.",
-        "log_ocr_started": "OCR started: {} file(s), Device={}, Reading={}",
-        "log_stop_requested": "OCR stop requested.",
-        "log_file_started": "Starting file: {}",
-        "log_file_done": "Done: {} ({} lines)",
-        "log_file_error": "Error: {} -> {}",
-        "log_export_done": "Export finished: {} file(s) as {} to {}",
-        "log_export_single": "Export: {} -> {}",
-        "log_export_log_done": "Log exported: {}",
-        "act_ai_revise": "LM Revision",
-        "act_ai_revise_tip": "Revise OCR text with local LLM",
-        "msg_ai_started": "AI revision started...",
-        "msg_ai_done": "AI revision finished.",
-        "msg_ai_model_set": "AI model ID: {}",
-        "msg_ai_disabled": "AI revision not available.",
-        "warn_need_done_for_ai": "Please select a finished OCR item first.",
-        "warn_need_ai_model": "No model was found via the configured LM server URL. Please start vLLM/LM Studio or set a valid URL or model ID.",
-        "warn_ai_server": "LM Studio server is not reachable. Please load the model and start the local server.",
-        "dlg_choose_ai_model": "LM Studio model identifier",
-        "dlg_choose_ai_model_label": "Optional model ID. Leave empty to automatically use the running model from the configured server:",
-        "log_ai_started": "AI revision started: {}",
-        "log_ai_done": "AI revision finished: {}",
-        "log_ai_error": "AI revision error: {} -> {}",
-        "status_ai_processing": "AI revising...",
-        "status_exporting": "Exporting...",
-
-        "menu_project_save": "Save project",
-        "menu_project_save_as": "Save project as...",
-        "menu_project_load": "Load project...",
-        "dlg_filter_project": "Bottled Kraken Project (*.json)",
-        "msg_project_saved": "Project saved: {}",
-        "msg_project_loaded": "Project loaded: {}",
-        "warn_project_load_failed": "Project could not be loaded: {}",
-        "warn_project_save_failed": "Project could not be saved: {}",
-        "warn_project_file_missing": "File not found: {}",
-        "line_menu_swap_with": "Swap line with…",
-        "dlg_swap_title": "Swap lines",
-        "dlg_swap_label": "Swap with line number (1…):",
-
-        "act_voice_fill": "Speak lines",
-        "act_voice_fill_tip": "Overwrite lines from microphone with faster-whisper",
-        "act_voice_stop": "Stop recording",
-        "msg_voice_started": "Voice recording started...",
-        "msg_voice_stopped": "Voice recording stopped. Transcribing...",
-        "msg_voice_done": "Voice import finished.",
-        "msg_voice_cancelled": "Voice recording cancelled.",
-        "warn_voice_need_done": "Please select a finished OCR item first.",
-        "warn_voice_model_missing": "Faster-Whisper model directory was not found.",
-        "status_voice_recording": "Recording...",
-
-        "line_menu_ai_revise_single": "Revise only this line with LM",
-    },
-
-    "fr": {
-        "dlg_filter_img": "Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)",
-        "pdf_render_title": "Préparation du PDF",
-        "pdf_render_label": "Rendu des pages… ({}/{}): {}",
-        "app_title": "Bottled Kraken",
-        "toolbar_main": "Barre d’outils",
-        "menu_file": "&Fichier",
-        "menu_edit": "&Édition",
-        "menu_export": "Exporter en tant que...",
-        "menu_exit": "Quitter",
-        "menu_models": "&Options Kraken",
-        "menu_options": "&Options",
-        "menu_languages": "Langues",
-        "menu_hw": "CPU/GPU",
-        "menu_reading": "Direction de lecture",
-        "menu_appearance": "Apparence",
-        "act_clear_rec": "Retirer le modèle de reconnaissance",
-        "act_clear_seg": "Retirer le modèle de segmentation",
-        "act_paste_clipboard": "Coller depuis le presse-papiers",
-
-        "log_toggle_show": "Log",
-        "log_toggle_hide": "Log",
-        "menu_export_log": "Exporter le log en .txt...",
-        "dlg_save_log": "Enregistrer le log",
-        "dlg_filter_txt": "Texte (*.txt)",
-        "log_started": "Programme démarré.",
-        "log_queue_cleared": "File d’attente vidée.",
-
-        "lang_de": "Allemand",
-        "lang_en": "Anglais",
-        "lang_fr": "Français",
-
-        "hw_cpu": "CPU",
-        "hw_cuda": "GPU – CUDA (NVIDIA)",
-        "hw_rocm": "GPU – ROCm (AMD)",
-        "hw_mps": "GPU – MPS (Apple)",
-
-        "act_undo": "Annuler",
-        "act_redo": "Rétablir",
-
-        "msg_hw_not_available": "Ce matériel n’est pas disponible sur ce système. Retour au CPU.",
-        "msg_using_device": "Appareil utilisé : {}",
-        "msg_detected_gpu": "Détecté : {}",
-        "msg_device_cpu": "CPU",
-        "msg_device_cuda": "CUDA",
-        "msg_device_rocm": "ROCm",
-        "msg_device_mps": "MPS",
-
-        "act_add_files": "Charger des fichiers…",
-        "act_download_model": "Télécharger le modèle (Zenodo)",
-        "act_delete": "Supprimer",
-        "act_rename": "Renommer...",
-        "act_clear_queue": "Vider la file d’attente",
-        "act_start_ocr": "Démarrer Kraken OCR",
-        "act_stop_ocr": "Arrêter",
-        "act_re_ocr": "Relancer",
-        "act_re_ocr_tip": "Relancer le traitement du/des fichier(s) sélectionné(s)",
-        "act_overlay_show": "Afficher les boîtes de superposition",
-
-        "status_ready": "Prêt.",
-        "status_waiting": "En attente",
-        "status_processing": "Traitement...",
-        "status_done": "Terminé",
-        "status_error": "Erreur",
-
-        "lbl_queue": "File d’attente:",
-        "lbl_lines": "Lignes reconnues:",
-        "col_file": "Fichier",
-        "col_status": "Statut",
-
-        "drop_hint": "Glissez-déposez des fichiers ici",
-        "queue_drop_hint": "Glissez-déposez des fichiers ici",
-
-        "info_title": "Information",
-        "warn_title": "Avertissement",
-        "err_title": "Erreur",
-
-        "theme_bright": "Clair",
-        "theme_dark": "Sombre",
-
-        "warn_queue_empty": "La file d’attente est vide ou tous les éléments ont été traités.",
-        "warn_select_done": "Aucun fichier chargé pour relancer l’OCR.",
-        "warn_need_rec": "Veuillez d’abord sélectionner un modèle de format (reconnaissance).",
-        "warn_need_seg": "Veuillez d’abord sélectionner un modèle de segmentation.",
-
-        "msg_stopping": "Arrêt...",
-        "msg_finished": "Traitement terminé.",
-        "msg_device": "Appareil réglé sur: {}",
-        "msg_exported": "Exporté: {}",
-        "msg_loaded_rec": "Modèle de format: {}",
-        "msg_loaded_seg": "Modèle de segmentation: {}",
-
-        "err_load": "Impossible de charger l’image: {}",
-
-        "dlg_title_rename": "Renommer",
-        "dlg_label_name": "Nouveau nom de fichier:",
-        "dlg_save": "Enregistrer",
-        "dlg_load_img": "Choisir des images",
-        "dlg_choose_rec": "le modèle de reconnaissance: ",
-        "dlg_choose_seg": "le modèle de segmentation: ",
-        "dlg_filter_model": "Modèles (*.mlmodel)",
-
-        "reading_tb_lr": "Haut → Bas + Gauche → Droite",
-        "reading_tb_rl": "Haut → Bas + Droite → Gauche",
-        "reading_bt_lr": "Bas → Haut + Gauche → Droite",
-        "reading_bt_rl": "Bas → Haut + Droite → Gauche",
-
-        "line_menu_move_up": "Monter la ligne",
-        "line_menu_move_down": "Descendre la ligne",
-        "line_menu_delete": "Supprimer la ligne",
-        "line_menu_add_above": "Ajouter une ligne au-dessus",
-        "line_menu_add_below": "Ajouter une ligne en dessous",
-        "line_menu_draw_box": "Dessiner la boîte",
-        "line_menu_edit_box": "Modifier la boîte (déplacer/redimensionner)",
-        "line_menu_move_to": "Déplacer la ligne vers…",
-
-        "dlg_new_line_title": "Nouvelle ligne",
-        "dlg_new_line_label": "Texte de la nouvelle ligne:",
-
-        "dlg_move_to_title": "Déplacer la ligne",
-        "dlg_move_to_label": "Numéro de ligne cible (1…):",
-
-        "canvas_menu_add_box_draw": "Ajouter une boîte (dessiner)",
-        "canvas_menu_delete_box": "Supprimer la boîte",
-        "canvas_menu_edit_box": "Modifier la boîte…",
-        "canvas_menu_select_line": "Sélectionner la ligne",
-
-        "dlg_box_title": "Boîte de superposition",
-        "dlg_box_left": "gauche",
-        "dlg_box_top": "haut",
-        "dlg_box_right": "droite",
-        "dlg_box_bottom": "bas",
-        "dlg_box_apply": "Appliquer",
-
-        "export_choose_mode_title": "Export",
-        "export_mode_all": "Exporter tous les fichiers",
-        "export_mode_selected": "Exporter les fichiers sélectionnés",
-        "export_select_files_title": "Sélectionner des fichiers",
-        "export_select_files_hint": "Choisissez les fichiers à exporter :",
-        "export_choose_folder": "Choisir le dossier de destination",
-        "export_need_done": "Au moins un fichier sélectionné n’est pas terminé.",
-        "export_none_selected": "Aucun fichier sélectionné.",
-
-        "undo_nothing": "Rien à annuler.",
-        "redo_nothing": "Rien à rétablir.",
-        "overlay_only_after_ocr": "L’édition des overlays n’est disponible qu’après l’OCR.",
-
-        "new_line_from_box_title": "Nouvelle ligne",
-        "new_line_from_box_label": "Texte pour la nouvelle ligne (optionnel):",
-
-        "log_added_files": "{} fichier(s) ajouté(s) à la file d’attente.",
-        "log_ocr_started": "OCR démarré : {} fichier(s), Appareil={}, Lecture={}",
-        "log_stop_requested": "Arrêt de l’OCR demandé.",
-        "log_file_started": "Traitement du fichier : {}",
-        "log_file_done": "Terminé : {} ({} lignes)",
-        "log_file_error": "Erreur : {} -> {}",
-        "log_export_done": "Export terminé : {} fichier(s) en {} vers {}",
-        "log_export_single": "Export : {} -> {}",
-        "log_export_log_done": "Log exporté : {}",
-        "act_ai_revise": "Révision LM",
-        "act_ai_revise_tip": "Réviser le texte OCR avec un LLM local",
-        "msg_ai_started": "Révision IA démarrée...",
-        "msg_ai_done": "Révision IA terminée.",
-        "msg_ai_model_set": "ID du modèle IA : {}",
-        "msg_ai_disabled": "Révision IA non disponible.",
-        "warn_need_done_for_ai": "Veuillez d'abord sélectionner un fichier OCR terminé.",
-        "warn_need_ai_model": "Aucun modèle trouvé via l’URL du serveur LM configurée. Veuillez démarrer vLLM/LM Studio ou définir une URL ou un identifiant de modèle valide.",
-        "warn_ai_server": "Serveur LM Studio inaccessible. Veuillez charger le modèle et démarrer le serveur local.",
-        "dlg_choose_ai_model": "Identifiant du modèle LM Studio",
-        "dlg_choose_ai_model_label": "Identifiant de modèle facultatif. Laissez vide pour utiliser automatiquement le modèle du serveur configuré :",
-        "log_ai_started": "Révision IA démarrée : {}",
-        "log_ai_done": "Révision IA terminée : {}",
-        "log_ai_error": "Erreur de révision IA : {} -> {}",
-        "status_ai_processing": "Révision IA...",
-        "status_exporting": "Export en cours...",
-
-        "menu_project_save": "Enregistrer le projet",
-        "menu_project_save_as": "Enregistrer le projet sous...",
-        "menu_project_load": "Charger un projet...",
-        "dlg_filter_project": "Projet Bottled Kraken (*.json)",
-        "msg_project_saved": "Projet enregistré : {}",
-        "msg_project_loaded": "Projet chargé : {}",
-        "warn_project_load_failed": "Impossible de charger le projet : {}",
-        "warn_project_save_failed": "Impossible d’enregistrer le projet : {}",
-        "warn_project_file_missing": "Fichier introuvable : {}",
-        "line_menu_swap_with": "Échanger la ligne avec…",
-        "dlg_swap_title": "Échanger les lignes",
-        "dlg_swap_label": "Échanger avec le numéro de ligne (1…) :",
-
-        "act_voice_fill": "Dicter les lignes",
-        "act_voice_fill_tip": "Remplacer les lignes reconnues via le microphone avec faster-whisper",
-        "act_voice_stop": "Arrêter l’enregistrement",
-        "msg_voice_started": "Enregistrement vocal démarré...",
-        "msg_voice_stopped": "Enregistrement terminé. Transcription en cours...",
-        "msg_voice_done": "Import vocal terminé.",
-        "msg_voice_cancelled": "Enregistrement vocal annulé.",
-        "warn_voice_need_done": "Veuillez d'abord sélectionner un fichier OCR terminé.",
-        "warn_voice_model_missing": "Le dossier du modèle Faster-Whisper est introuvable.",
-        "status_voice_recording": "Enregistrement...",
-
-        "line_menu_ai_revise_single": "Réviser uniquement cette ligne avec le LM",
-    }
+TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)',
+        'pdf_render_title': 'PDF wird vorbereitet',
+        'pdf_render_label': 'Seiten werden gerendert… ({}/{}): {}',
+        'app_title': 'Bottled Kraken',
+        'toolbar_main': 'Werkzeugleiste',
+        'toolbar_language': 'Sprache',
+        'toolbar_theme_tooltip': 'Zwischen Hell- und Dunkelmodus wechseln',
+        'toolbar_language_tooltip': 'Sprache einstellen',
+        'menu_file': '&Datei',
+        'menu_edit': '&Bearbeiten',
+        'menu_export': 'Exportieren als...',
+        'menu_exit': 'Beenden',
+        'menu_models': '&Kraken-Optionen',
+        'menu_options': '&Optionen',
+        'menu_languages': 'Sprachen',
+        'menu_hw': 'CPU/GPU',
+        'menu_reading': 'Leserichtung',
+        'menu_appearance': 'Erscheinungsbild',
+        'act_clear_rec': 'Recognition-Modell entfernen',
+        'act_clear_seg': 'Segmentierungs-Modell entfernen',
+        'act_paste_clipboard': 'Aus Zwischenablage einfügen',
+        'log_toggle_show': 'Log',
+        'log_toggle_hide': 'Log',
+        'menu_export_log': 'Log als .txt exportieren...',
+        'dlg_save_log': 'Log speichern',
+        'dlg_filter_txt': 'Text (*.txt)',
+        'log_started': 'Programm gestartet.',
+        'log_queue_cleared': 'Queue geleert.',
+        'lang_de': 'Deutsch',
+        'lang_en': 'English',
+        'lang_fr': 'Français',
+        'hw_cpu': 'CPU',
+        'hw_cuda': 'GPU – CUDA (NVIDIA)',
+        'hw_rocm': 'GPU – ROCm (AMD)',
+        'hw_mps': 'GPU – MPS (Apple)',
+        'act_undo': 'Rückgängig',
+        'act_redo': 'Wiederholen',
+        'msg_hw_not_available': 'Diese Hardware ist auf diesem System nicht verfügbar. Wechsle zu CPU.',
+        'msg_using_device': 'Verwende Gerät: {}',
+        'msg_detected_gpu': 'Erkannt: {}',
+        'msg_device_cpu': 'CPU',
+        'msg_device_cuda': 'CUDA',
+        'msg_device_rocm': 'ROCm',
+        'msg_device_mps': 'MPS',
+        'act_add_files': 'Dateien laden...',
+        'act_download_model': 'Modell herunterladen (Zenodo)',
+        'act_delete': 'Löschen',
+        'act_rename': 'Umbenennen...',
+        'act_clear_queue': 'Wartebereich leeren',
+        'act_start_ocr': 'Start Kraken OCR',
+        'act_stop_ocr': 'Stopp',
+        'act_re_ocr': 'Wiederholen',
+        'act_re_ocr_tip': 'Ausgewählte Datei(en) erneut verarbeiten',
+        'act_overlay_show': 'Overlay-Boxen anzeigen',
+        'status_ready': 'Bereit.',
+        'status_waiting': 'Wartet',
+        'status_processing': 'Verarbeite...',
+        'status_done': 'Fertig',
+        'status_error': 'Fehler',
+        'lbl_queue': 'Wartebereich:',
+        'lbl_lines': 'Erkannte Zeilen:',
+        'col_file': 'Datei',
+        'col_status': 'Status',
+        'drop_hint': 'Datei(en) hierher ziehen und ablegen',
+        'queue_drop_hint': 'Datei(en) hierher ziehen und ablegen',
+        'queue_load_title': 'Dateien werden geladen',
+        'queue_load_label': 'Lade Datei {}/{}: {}',
+        'queue_load_cancelled': 'Dateiladen abgebrochen.',
+        'queue_load_pdf_started': 'PDF wird in den Wartebereich geladen: {}',
+        'info_title': 'Information',
+        'warn_title': 'Warnung',
+        'err_title': 'Fehler',
+        'theme_bright': 'Hell',
+        'theme_dark': 'Dunkel',
+        'warn_queue_empty': 'Wartebereich ist leer oder alle Elemente wurden verarbeitet.',
+        'warn_select_done': 'Keine Datei(en) für erneutes OCRn geladen.',
+        'warn_need_rec': 'Bitte wählen Sie zuerst ein Format-Modell (Recognition) aus.',
+        'warn_need_seg': 'Bitte wählen Sie zuerst ein Segmentierungs-Modell aus.',
+        'msg_stopping': 'Breche ab...',
+        'msg_finished': 'Batch abgeschlossen.',
+        'msg_device': 'Gerät gesetzt auf: {}',
+        'msg_exported': 'Exportiert: {}',
+        'msg_loaded_rec': 'Format-Modell: {}',
+        'msg_loaded_seg': 'Segmentierungs-Modell: {}',
+        'err_load': 'Bild kann nicht geladen werden: {}',
+        'dlg_title_rename': 'Umbenennen',
+        'dlg_label_name': 'Neuer Dateiname:',
+        'dlg_save': 'Speichern',
+        'dlg_load_img': 'Bilder wählen',
+        'dlg_choose_rec': 'Recognition-Modell: ',
+        'dlg_choose_seg': 'Segmentierungs-Modell: ',
+        'dlg_filter_model': 'Modelle (*.mlmodel)',
+        'reading_tb_lr': 'Oben → Unten + Links → Rechts',
+        'reading_tb_rl': 'Oben → Unten + Rechts → Links',
+        'reading_bt_lr': 'Unten → Oben + Links → Rechts',
+        'reading_bt_rl': 'Unten → Oben + Rechts → Links',
+        'line_menu_move_up': 'Zeile nach oben',
+        'line_menu_move_down': 'Zeile nach unten',
+        'line_menu_delete': 'Zeile löschen',
+        'line_menu_add_above': 'Zeile darüber hinzufügen',
+        'line_menu_add_below': 'Zeile darunter hinzufügen',
+        'line_menu_draw_box': 'Overlay-Box zeichnen',
+        'line_menu_edit_box': 'Overlay-Box bearbeiten (ziehen/skalieren)',
+        'line_menu_move_to': 'Zeile verschieben zu…',
+        'dlg_new_line_title': 'Neue Zeile',
+        'dlg_new_line_label': 'Text der neuen Zeile:',
+        'dlg_move_to_title': 'Zeile verschieben',
+        'dlg_move_to_label': 'Ziel-Zeilennummer (1…):',
+        'canvas_menu_add_box_draw': 'Overlay-Box hinzufügen (zeichnen)',
+        'canvas_menu_delete_box': 'Overlay-Box löschen',
+        'canvas_menu_edit_box': 'Overlay-Box bearbeiten…',
+        'canvas_menu_select_line': 'Zeile auswählen',
+        'dlg_box_title': 'Overlay-Box',
+        'dlg_box_left': 'links',
+        'dlg_box_top': 'oben',
+        'dlg_box_right': 'rechts',
+        'dlg_box_bottom': 'unten',
+        'dlg_box_apply': 'Anwenden',
+        'export_choose_mode_title': 'Export',
+        'export_mode_all': 'Alle Dateien exportieren',
+        'export_mode_selected': 'Ausgewählte Dateien exportieren',
+        'export_select_files_title': 'Dateien auswählen',
+        'export_select_files_hint': 'Wählen Sie die Dateien für den Export:',
+        'export_choose_folder': 'Zielordner wählen',
+        'export_need_done': 'Mindestens eine ausgewählte Datei ist nicht fertig verarbeitet.',
+        'export_none_selected': 'Keine Dateien ausgewählt.',
+        'undo_nothing': 'Nichts zum Rückgängig machen.',
+        'redo_nothing': 'Nichts zum Wiederholen.',
+        'overlay_only_after_ocr': 'Overlay-Bearbeitung ist erst nach abgeschlossener OCR möglich.',
+        'new_line_from_box_title': 'Neue Zeile',
+        'new_line_from_box_label': 'Text für die neue Zeile (optional):',
+        'log_added_files': '{} Datei(en) zur Queue hinzugefügt.',
+        'log_ocr_started': 'OCR gestartet: {} Datei(en), Device={}, Reading={}',
+        'log_stop_requested': 'OCR-Abbruch angefordert.',
+        'log_file_started': 'Starte Datei: {}',
+        'log_file_done': 'Fertig: {} ({} Zeilen)',
+        'log_file_error': 'Fehler: {} -> {}',
+        'log_export_done': 'Export abgeschlossen: {} Datei(en) als {} nach {}',
+        'log_export_single': 'Export: {} -> {}',
+        'log_export_log_done': 'Log exportiert: {}',
+        'act_ai_revise': 'LM-Überarbeitung',
+        'act_ai_revise_tip': 'OCR-Text mit lokalem LLM überarbeiten',
+        'msg_ai_started': 'Überarbeitung gestartet...',
+        'msg_ai_done': 'Überarbeitung abgeschlossen.',
+        'msg_ai_model_set': 'KI-Modell-ID: {}',
+        'msg_ai_disabled': 'Überarbeitung nicht möglich.',
+        'warn_lm_url_invalid': 'Es wurde leider keine gültige LM-Server-Adresse eingetragen.\n'
+                               'Bitte beachte die Hinweise und versuche eine andere Adresse.',
+        'warn_need_done_for_ai': 'Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.',
+        'warn_need_ai_model': 'Kein Modell über die konfigurierte LM-Server-URL gefunden. Bitte einen lokalen '
+                              'OpenAI-kompatiblen Server starten oder eine gültige URL bzw. Modell-ID setzen (z. B. LM '
+                              'Studio, Ollama, Jan, GPT4All, text-generation-webui, LocalAI oder vLLM).',
+        'warn_ai_server': 'Lokaler LM-Server nicht erreichbar. Bitte Modell laden und den OpenAI-kompatiblen Server '
+                          'starten.',
+        'dlg_choose_ai_model': 'LM-Modell-Identifier',
+        'dlg_choose_ai_model_label': 'Optionale Modell-ID. Leer lassen, wenn das laufende Modell des eingetragenen '
+                                     'Servers automatisch verwendet werden soll:',
+        'log_ai_started': 'Überarbeitung gestartet: {}',
+        'log_ai_done': 'Überarbeitung abgeschlossen: {}',
+        'log_ai_error': 'Überarbeitung Fehler: {} -> {}',
+        'status_ai_processing': 'Überarbeitung...',
+        'status_exporting': 'Exportiere...',
+        'menu_project_save': 'Projekt speichern',
+        'menu_project_save_as': 'Projekt speichern unter...',
+        'menu_project_load': 'Projekt laden...',
+        'dlg_filter_project': 'Bottled-Kraken Projekt (*.json)',
+        'msg_project_saved': 'Projekt gespeichert: {}',
+        'msg_project_loaded': 'Projekt geladen: {}',
+        'warn_project_load_failed': 'Projekt konnte nicht geladen werden: {}',
+        'warn_project_save_failed': 'Projekt konnte nicht gespeichert werden: {}',
+        'warn_project_file_missing': 'Datei nicht gefunden: {}',
+        'line_menu_swap_with': 'Zeile tauschen mit…',
+        'dlg_swap_title': 'Zeilen tauschen',
+        'dlg_swap_label': 'Mit Zeilennummer tauschen (1…):',
+        'act_voice_fill': 'Zeilen diktieren',
+        'act_voice_fill_tip': 'Zeilen per Mikrofon mit faster-whisper überschreiben',
+        'act_voice_stop': 'Aufnahme stoppen',
+        'msg_voice_started': 'Sprachaufnahme gestartet...',
+        'msg_voice_stopped': 'Sprachaufnahme beendet. Transkribiere...',
+        'msg_voice_done': 'Sprachimport abgeschlossen.',
+        'msg_voice_cancelled': 'Sprachaufnahme abgebrochen.',
+        'warn_voice_need_done': 'Bitte zuerst eine fertig OCR-verarbeitete Datei auswählen.',
+        'warn_voice_model_missing': 'Faster-Whisper-Modellordner wurde nicht gefunden.',
+        'status_voice_recording': 'Spricht ein...',
+        'lines_tree_header': 'Erkannte Zeilen und Wörter',
+        'col_loaded_files': 'Geladene Dateien',
+        'btn_rec_model_empty': 'Rec-Modell: -',
+        'btn_rec_model_value': 'Rec-Modell: {}',
+        'btn_seg_model_empty': 'Seg-Modell: -',
+        'btn_seg_model_value': 'Seg-Modell: {}',
+        'act_load_rec_model': 'Recognition-Modell laden...',
+        'act_load_seg_model': 'Segmentierungs-Modell laden...',
+        'submenu_available_kraken_models': 'Verfügbare Kraken-Modelle',
+        'submenu_available_ai_models': 'Verfügbare LM-Modelle',
+        'submenu_available_whisper_models': 'Verfügbare Whisper-Modelle',
+        'btn_cancel': 'Abbrechen',
+        'progress_status_ready': 'Bereit',
+        'voice_record_title': '🎤 Zeile mit Audio verändern',
+        'voice_record_info': 'Steuerung der Audioaufnahme:',
+        'voice_record_start': 'Aufnahme starten',
+        'voice_record_stop': 'Aufnahme stoppen',
+        'voice_record_processing': 'Whisper verarbeitet Audio … bitte kurz warten.',
+        'warn_select_line_first': 'Bitte zuerst eine Zeile auswählen.',
+        'warn_selected_line_invalid': 'Die ausgewählte Zeile ist ungültig.',
+        'warn_whisper_model_not_loaded': "Es ist kein geladenes Whisper-Modell aktiv. Bitte unter 'Whisper-Optionen' "
+                                         'ein Modell wählen.',
+        'warn_no_microphone_available': 'Es ist kein Mikrofon verfügbar.',
+        'log_voice_stopping': 'Sprachaufnahme wird gestoppt...',
+        'image_edit_title': 'Bildbearbeitung – {}',
+        'image_edit_erase_rect': 'Bereich entfernen (Rechteck)',
+        'image_edit_erase_ellipse': 'Bereich entfernen (Kreis)',
+        'image_edit_erase_clear': 'Entfernbereich löschen',
+        'warn_select_image_or_pdf_page': 'Bitte zuerst ein Bild oder eine PDF-Seite auswählen.',
+        'warn_image_load_failed_detail': 'Bild konnte nicht geladen werden:\n{}',
+        'info_no_marked_images_found': 'Keine markierten Bilder gefunden.',
+        'msg_image_edit_selected_applied': 'Bildbearbeitung für markierte Bilder übernommen.',
+        'msg_image_edit_all_applied': 'Bildbearbeitung für alle Bilder übernommen.',
+        'log_image_edit_error': 'Bildbearbeitung Fehler: {} -> {}',
+        'act_help': 'Hinweise',
+        'act_ai_revise_all': 'Alle überarbeiten',
+        'act_ai_revise_all_tip': 'Alle fertig erkannten Dateien überarbeiten',
+        'warn_select_multiple_lines_first': 'Bitte zuerst mehrere Zeilen auswählen.',
+        'msg_ai_selected_lines_started': 'LM-Überarbeitung für {} ausgewählte Zeilen gestartet...',
+        'log_ai_multi_started': 'LM-Mehrfachzeilenüberarbeitung gestartet: {} | Zeilen {}',
+        'dlg_ai_multi_title': 'KI-Mehrfachzeilenüberarbeitung',
+        'dlg_ai_multi_status': 'Überarbeite {} ausgewählte Zeilen …',
+        'btn_import_lines': 'Zeilen importieren',
+        'btn_import_lines_tip': 'Erkannte Zeilen aus TXT/JSON laden',
+        'act_import_lines_current': 'Für aktuelles Bild',
+        'act_import_lines_selected': 'Für ausgewählte Bilder',
+        'act_import_lines_all': 'Für alle Bilder',
+        'warn_import_unsupported_format': 'Nicht unterstütztes Importformat: {}',
+        'warn_import_no_usable_lines': 'Die Importdatei enthält keine verwertbaren Zeilen.',
+        'info_no_current_image_loaded': 'Kein aktuelles Bild geladen.',
+        'dlg_import_lines_current': 'Zeilen importieren',
+        'info_no_images_selected_or_marked': 'Keine Bilder ausgewählt oder markiert.',
+        'dlg_import_lines_selected': 'Zeilen-Dateien für ausgewählte Bilder laden',
+        'info_no_images_loaded': 'Keine Bilder geladen.',
+        'dlg_import_lines_all': 'Zeilen-Dateien für alle Bilder laden',
+        'warn_no_matching_import_for_selected': 'Keine Importdatei passt zu den ausgewählten Bildern.\n'
+                                                '\n'
+                                                'Die Dateinamen müssen über den Basisnamen passen.',
+        'warn_no_matching_import_for_loaded': 'Keine Importdatei passt zu den geladenen Bildern.\n'
+                                              '\n'
+                                              'Die Dateinamen müssen über den Basisnamen passen.',
+        'log_import_error': 'Import-Fehler: {} -> {}',
+        'log_voice_import_started': 'Sprachimport gestartet: {} | Zeile {} | Mikrofon: {} | Modell: {}',
+        'warn_voice_cancelled': 'Aufnahme abgebrochen.',
+        'warn_voice_not_finished': 'Aufnahme wurde nicht regulär beendet.',
+        'warn_voice_no_audio_data': 'Keine Audiodaten aufgenommen.',
+        'voice_status_prepare_wav': 'Audiodatei wird vorbereitet...',
+        'voice_status_load_whisper': 'Lade faster-whisper...',
+        'voice_status_transcribe_line': 'Transkribiere ausgewählte Zeile lokal ({}/{})...',
+        'voice_status_fallback_cpu': 'Initialisierung auf {}/{} fehlgeschlagen. Neuer Versuch mit CPU/int8 …',
+        'voice_status_finalize': 'Bereite Text auf...',
+        'voice_status_microphone_active': "Mikrofon aktiv … bitte sprechen. Zum Beenden 'Aufnahme stoppen' klicken.",
+        'voice_status_input_device': 'Aufnahmegerät: {}',
+        'audio_device_default_mic': 'Systemstandard-Mikrofon',
+        'audio_device_generic': 'Gerät {}',
+        'whisper_status_model': 'Modell: {}',
+        'whisper_status_mic': 'Mikrofon: {}',
+        'whisper_status_path': 'Pfad: {}',
+        'dlg_whisper_model_dir': 'Whisper-Modellordner wählen',
+        'msg_whisper_path_set': 'Whisper-Pfad gesetzt: {}',
+        'warn_whisper_model_present': 'Das Faster-Whisper large-v3 Modell ist bereits vorhanden.\n'
+                                      '\n'
+                                      'Pfad:\n'
+                                      '{}\n'
+                                      '\n'
+                                      'Ein erneuter Download ist nicht nötig.',
+        'msg_whisper_model_already_present': 'Whisper-Modell bereits vorhanden: {}',
+        'warn_whisper_download_start_failed': 'Download des Whisper-Modells konnte nicht gestartet werden:\n{}',
+        'msg_whisper_download_start_failed': 'Whisper-Download konnte nicht gestartet werden.',
+        'msg_whisper_model_loaded': 'Whisper-Modell geladen: {}',
+        'info_whisper_model_downloaded': 'Das Faster-Whisper-Modell wurde erfolgreich heruntergeladen.\n'
+                                         '\n'
+                                         'Zielordner:\n'
+                                         '{}',
+        'msg_whisper_download_failed': 'Whisper-Download fehlgeschlagen.',
+        'warn_whisper_download_failed': 'Download des Whisper-Modells fehlgeschlagen:\n{}',
+        'dlg_help_title': 'Hinweise',
+        'help_nav_quick': 'Ablauf',
+        'help_nav_kraken': 'Kraken',
+        'help_nav_lm_server': 'LM-Server',
+        'help_nav_ssh': 'SSH-Tunnel',
+        'help_nav_whisper': 'Whisper',
+        'help_nav_shortcuts': 'Tastenkürzel',
+        'help_nav_data_protection': 'Datenschutz',
+        'help_nav_legal': 'Rechtliches',
+        'help_whisper_download_label': '<b>Whisper-Modell per Button herunterladen:</b>',
+        'help_os_windows': 'Windows',
+        'help_os_arch': 'Arch',
+        'help_os_debian': 'Debian',
+        'help_os_fedora': 'Fedora',
+        'help_os_macos': 'macOS',
+        'whisper_hint_debian': 'Hinweis für Debian/Ubuntu/Linux Mint:\n'
+                               'Die App verwendet hier automatisch eine eigene Python-Umgebung (venv),\n'
+                               'damit kein PEP-668-Fehler mit dem System-Python entsteht.\n'
+                               '\n'
+                               'Falls das Erzeugen der venv scheitert, fehlen meist Systempakete.\n'
+                               'Dann bitte einmal im Terminal ausführen:\n'
+                               '\n'
+                               'sudo apt update\n'
+                               'sudo apt install -y python3-venv python3-pip ffmpeg portaudio19-dev',
+        'whisper_hint_fedora': 'Optionaler Hinweis für Fedora:\n'
+                               'Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n'
+                               '\n'
+                               'sudo dnf install -y python3-pip ffmpeg portaudio-devel',
+        'whisper_hint_arch': 'Optionaler Hinweis für Arch Linux:\n'
+                             'Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n'
+                             '\n'
+                             'sudo pacman -S --needed python-pip ffmpeg portaudio',
+        'whisper_hint_macos': 'Optionaler Hinweis für macOS:\n'
+                              'Falls später Probleme mit sounddevice auftreten, können diese Pakete helfen.\n'
+                              '\n'
+                              'brew install ffmpeg portaudio',
+        'whisper_hint_windows': 'Optionaler Hinweis für Windows:\n'
+                                'Normalerweise sind keine zusätzlichen Systempakete nötig.\n'
+                                'Falls es später Audioprobleme gibt, liegt das meist eher an Treibern oder '
+                                'Mikrofonrechten.',
+        'whisper_hint_generic': 'Optionaler Hinweis:\n'
+                                'Falls später Probleme mit sounddevice auftreten, können zusätzliche Systempakete '
+                                'nötig sein.',
+        'whisper_system_hint_dialog': 'Optionaler Systemhinweis:\n'
+                                      '\n'
+                                      '{}\n'
+                                      '\n'
+                                      'Der eigentliche Download läuft trotzdem nur über Python (sys.executable -m pip '
+                                      '/ Python-API von huggingface_hub).',
+        'warn_whisper_download_running': 'Es läuft bereits ein Whisper-Download.',
+        'msg_whisper_download_prepare_target': 'Starte Requirement-Installation und Modell-Download nach: {}',
+        'dlg_whisper_download_title': 'Whisper-Modell wird geladen',
+        'dlg_whisper_download_prepare': 'Starte Whisper-Vorbereitung …',
+        'hf_status_waiting_for_lock': 'Warte auf Dateisperre im Zielordner …',
+        'hf_status_files_done': 'Dateien fertig: {}/{}',
+        'hf_status_current_file': 'Aktuell: {}',
+        'hf_status_last_finished': 'Zuletzt fertig: {}',
+        'hf_status_download_done': 'Download abgeschlossen.',
+        'hf_error_cancelled': 'Download abgebrochen.',
+        'hf_error_hf_exit': "'hf download' wurde mit Exit-Code {} beendet.",
+        'hf_error_command_exit': 'Befehl wurde mit Exit-Code {} beendet:\n{}',
+        'hf_error_python_missing': 'Python oder ein benötigtes Modul wurde nicht gefunden.\n'
+                                   '\n'
+                                   'Bitte prüfen, ob die Anwendung mit einer funktionsfähigen Python-Umgebung läuft.',
+        'hf_error_externally_managed': 'Die Python-Installation des Systems darf nicht direkt verändert werden.\n'
+                                       '\n'
+                                       'Die App sollte dafür automatisch eine eigene Umgebung benutzen.\n'
+                                       'Falls das trotzdem passiert ist, fehlt wahrscheinlich python3-venv.\n'
+                                       '\n'
+                                       'Bitte einmal ausführen:\n'
+                                       'sudo apt update\n'
+                                       'sudo apt install -y python3-venv python3-pip',
+        'hf_error_no_venv': 'Auf diesem System fehlt die Unterstützung für Python-venv.\n'
+                            '\n'
+                            'Bitte einmal ausführen:\n'
+                            'sudo apt update\n'
+                            'sudo apt install -y python3-venv python3-pip',
+        'hf_error_python3_missing': 'python3 wurde nicht gefunden.\n\nBitte prüfen, ob Python 3 installiert ist.',
+        'warn_invalid_line': 'Ungültige Zeile.',
+        'btn_ai_model_value': 'KI: {}',
+        'llm_status_value': 'LLM: {}',
+        'lm_status_model_value': 'Modell: {}',
+        'lm_mode_value': 'Modus: {}',
+        'lm_server_value': 'Server: {}',
+        'dlg_ai_title': 'KI-Überarbeitung',
+        'dlg_ai_connecting': 'Verbinde mit lokalem LM-Server…',
+        'dlg_ai_single_title': 'KI-Zeilenüberarbeitung',
+        'dlg_ai_single_status': 'Überarbeite nur Zeile {} …',
+        'msg_ai_single_started': 'LM-Überarbeitung für Zeile {} gestartet...',
+        'log_ai_single_started': 'LM-Zeilenüberarbeitung gestartet: {} | Zeile {}',
+        'msg_ai_multi_done': 'LM-Überarbeitung für {} ausgewählte Zeilen abgeschlossen.',
+        'log_ai_multi_done': 'LM-Mehrfachzeilenüberarbeitung abgeschlossen: {} | Zeilen {}',
+        'msg_ai_multi_cancelled': 'Mehrfachzeilenüberarbeitung abgebrochen.',
+        'log_ai_multi_cancelled': 'LM-Mehrfachzeilenüberarbeitung abgebrochen: {}',
+        'msg_ai_multi_failed': 'Mehrfachzeilenüberarbeitung fehlgeschlagen.',
+        'log_ai_multi_failed': 'LM-Mehrfachzeilenüberarbeitung Fehler: {} -> {}',
+        'msg_ai_batch_finished': 'KI-Batch abgeschlossen.',
+        'log_ai_batch_debug_return': 'KI Batch Rückgabe für {}: {} Zeilen, OCR hatte {} Zeilen',
+        'log_ai_batch_debug_old_first': 'ALT erste Zeile: {}',
+        'log_ai_batch_debug_new_first': 'NEU erste Zeile: {}',
+        'log_ai_batch_debug_all': 'NEU alle Zeilen: {}',
+        'msg_ai_cancelled': 'Überarbeitung abgebrochen.',
+        'ai_status_start_free_ocr': 'Starte freie KI-OCR: {}',
+        'ai_status_step1_title': '1/3 Zeilenweise Box-OCR: {}',
+        'ai_status_step1_line': '1/3 Box-OCR Zeile {}/{}: {}',
+        'ai_status_step2_form': '2/3 Block-Kontext-OCR (Formularmodus): {}',
+        'ai_status_step2_plain': '2/3 Block-Kontext-OCR: {}',
+        'ai_status_step2_chunk': '2/3 Block-Kontext {}/{}: Zeilen {}-{}',
+        'ai_status_step3_merge': '3/3 Merge: Box primär, Page nur wenn lokal konsistent: {}',
+        'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
+        'ai_err_bad_scheme': 'Nicht unterstütztes Schema: {}',
+        'ai_err_invalid_endpoint': 'Ungültiger Endpoint.',
+        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Studio.',
+        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Studio: {}',
+        'ai_err_http': 'HTTP-Fehler: {}\n{}',
+        'ai_err_server_unreachable': 'LM Studio nicht erreichbar: {}',
+        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
+                                      'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
+                                      'verwende ein nicht-thinkendes Modell.',
+        'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
+                                 'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
+                                 'reasoning.',
+        'ai_err_no_content': 'LM Studio lieferte keinen verwertbaren Antwortinhalt.',
+        'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
+        'ai_err_page_no_usable_lines': 'Seiten-OCR lieferte keine verwertbaren Zeilen: {}/{}',
+        'ai_err_block_invalid_json': 'Block-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_block_invalid_lines': "Block-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_final_merge_count': 'Finale Merge-Ausgabe gab {} statt {} Zeilen zurück.',
+        'help_html_quick': '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h1">Ablauf</div>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <ol>\n'
+                           '                    <li>Bild oder PDF laden</li>\n'
+                           '                    <li>Optional: Bildbearbeitung zur Vorbereitung verwenden</li>\n'
+                           '                    <li>Recognition-Modell laden</li>\n'
+                           '                    <li>Segmentierungs-Modell laden</li>\n'
+                           '                    <li>Kraken-OCR starten</li>\n'
+                           '                    <li>Erkannte Zeilen prüfen und bei Bedarf korrigieren</li>\n'
+                           '                    <li>Optional: LM-Überarbeitung oder Whisper verwenden</li>\n'
+                           '                    <li>Ergebnis als TXT, CSV, JSON, ALTO, hOCR oder PDF exportieren</li>\n'
+                           '                </ol>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Vorbereitung</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>Die Bildbearbeitung kann schon <b>vor</b> dem OCR-Lauf genutzt '
+                           'werden, wenn ein Scan schlecht zugeschnitten, kontrastarm oder inhaltlich zu breit '
+                           'ist.</li>\n'
+                           '                    <li>Besonders praktisch sind dabei <b>Crop-Bereich</b>, '
+                           '<b>Trennbalken</b>, <b>Grau</b>, <b>Kontrast</b> und <b>Smart-Splitting</b>.</li>\n'
+                           '                    <li>So lassen sich Doppelseiten, Formularhälften, Randbereiche oder '
+                           'störende Nachbarinhalte vor dem eigentlichen OCR-Durchlauf gezielt vorbereiten.</li>\n'
+                           '                    <li>Das ist vor allem bei Aktenseiten, Formularen, Sammel-Scans und '
+                           'unsauber digitalisierten Beständen hilfreich.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Nachbearbeitung</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>LM-Modell über LM Studio oder einen anderen kompatiblen LM-Server '
+                           'laden</li>\n'
+                           '                    <li>OCR-Zeilen mit lokalem Sprachmodell sprachlich oder inhaltlich '
+                           'glätten</li>\n'
+                           '                    <li>Einzelne Zeilen per Mikrofon mit Faster-Whisper neu '
+                           'einsprechen</li>\n'
+                           '                    <li>Zeilen aus TXT oder JSON importieren</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Overlay-Boxen &amp; Zeilen</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>Zeilen und Overlay-Boxen können verschoben, geteilt, ergänzt oder '
+                           'gelöscht werden.</li>\n'
+                           '                    <li>Damit lässt sich die Zeilenstruktur vor einem erneuten '
+                           'OCR-Durchlauf gezielt verbessern.</li>\n'
+                           '                    <li>Besonders nützlich bei Formularen, Spaltenlayouts und fehlerhaft '
+                           'segmentierten Handschriften.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Was macht Bottled Kraken?</div><br>\n'
+                           '                Bottled Kraken kombiniert klassische OCR mit vorbereitender '
+                           'Bildbearbeitung, manueller Nachbearbeitung und optionaler lokaler KI-Unterstützung.\n'
+                           '                So kannst du schwer lesbare historische Drucke, Handschriften oder '
+                           'Formularseiten schrittweise verbessern.\n'
+                           '            </div>\n'
+                           '        ',
+        'help_html_kraken': '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h1">Kraken</div><br>\n'
+                            '                Kraken ist die OCR-/ATR-Basis von Bottled Kraken.\n'
+                            '                Es handelt sich um ein Open-Source-System für automatische '
+                            'Texterkennung,\n'
+                            '                das besonders für historische Drucke, Handschriften und nicht-lateinische '
+                            'Schriften entwickelt wurde.\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Was ist für Bottled Kraken daran wichtig?</div>\n'
+                            '                <ul>\n'
+                            '                    <li><b>Segmentierung:</b> Erkennt Layout, Textregionen, Zeilen und '
+                            'Lesereihenfolge.</li>\n'
+                            '                    <li><b>Recognition:</b> Liest den eigentlichen Text aus den erkannten '
+                            'Zeilen.</li>\n'
+                            '                    <li><b>Modelle:</b> Segmentierung und Recognition laufen über '
+                            'trainierte Modelle, die zum Material passen müssen.</li>\n'
+                            '                </ul>\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Typischer Kraken-Ablauf</div>\n'
+                            '                <ol>\n'
+                            '                    <li>Bild vorbereiten</li>\n'
+                            '                    <li>Seite segmentieren (<code>segment</code>)</li>\n'
+                            '                    <li>Text erkennen (<code>ocr</code>)</li>\n'
+                            '                    <li>Ergebnis strukturieren / exportieren</li>\n'
+                            '                </ol>\n'
+                            '                In Bottled Kraken sind genau diese Schritte in die Oberfläche '
+                            'übertragen:\n'
+                            '                zuerst Segmentierungs-Modell, dann Recognition-Modell, danach OCR und '
+                            'Export.\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Wichtige Stärken von Kraken</div>\n'
+                            '                <ul>\n'
+                            '                    <li>trainierbare Layoutanalyse, Lesereihenfolge und '
+                            'Zeichenerkennung</li>\n'
+                            '                    <li>Unterstützung für Rechts-nach-Links, BiDi und Top-to-Bottom</li>\n'
+                            '                    <li>Ausgabe als ALTO, PageXML, abbyyXML und hOCR</li>\n'
+                            '                    <li>Wort-Bounding-Boxes und Character-Cuts</li>\n'
+                            '                    <li>öffentliche Modellsammlung über HTRMoPo / Zenodo</li>\n'
+                            '                </ul>\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Modelle</div><br>\n'
+                            '                Kraken arbeitet modellbasiert.\n'
+                            '                Gute Ergebnisse hängen stark davon ab, dass das Modell zum Dokumenttyp '
+                            'passt.\n'
+                            '                Ein auf historische Drucke trainiertes Modell ist meist deutlich besser '
+                            'für historische Drucke\n'
+                            '                als ein allgemeines Modell für modernes Material.\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Schnittstellen</div><br>\n'
+                            '                Kraken bietet zwei Hauptwege:\n'
+                            '                <ul>\n'
+                            '                    <li><b>CLI:</b> für klassische OCR-Workflows</li>\n'
+                            '                    <li><b>Python-API:</b> für eigene Anwendungen und Integrationen</li>\n'
+                            '                </ul>\n'
+                            '                Bottled Kraken nutzt die Python-Bibliothek direkt im Programmcode.\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Offizielle Quellen</div>\n'
+                            '                <ul>\n'
+                            '                    <li><a href="https://github.com/mittagessen/kraken">GitHub: '
+                            'mittagessen/kraken</a></li>\n'
+                            '                    <li><a href="https://kraken.re/7.0/index.html">Kraken Dokumentation '
+                            '7.0</a></li>\n'
+                            '                    <li><a href="https://kraken.re/7.0/getting_started.html">Getting '
+                            'Started</a></li>\n'
+                            '                    <li><a href="https://kraken.re/7.0/user_guide/models.html">Model '
+                            'Management</a></li>\n'
+                            '                </ul>\n'
+                            '            </div>\n'
+                            '\n'
+                            '            <div class="card warn">\n'
+                            '                <div class="h2">Hinweis</div>\n'
+                            '                <span class="badge">Wichtig</span><br>\n'
+                            '                Wenn die Segmentierung nicht sauber ist, wird auch die Recognition '
+                            'schlechter.\n'
+                            '                Genau deshalb verwendet Bottled Kraken standardmäßig das '
+                            '<code>blla.mlmodell</code>\n'
+                            '                anstatt des Legacy-Segmentierungs-Modells <code>pageseg</code>.\n'
+                            '            </div>\n'
+                            '        ',
+        'help_html_lm_server': '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h1">LM-Server / lokale Modellserver</div><br>\n'
+                               '                Dieser Bereich ist für die <b>lokale Sprachmodell-Nachbearbeitung</b> '
+                               'gedacht.\n'
+                               '                Bottled Kraken erwartet dafür eine <b>OpenAI-kompatible Basis-URL</b>, '
+                               'typischerweise mit <code>/v1</code>.\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Direkt kompatible Basis-URLs in Bottled Kraken</div>\n'
+                               '                <pre>LM Studio:              http://localhost:1234/v1\n'
+                               'Ollama (OpenAI-kompat.): http://localhost:11434/v1\n'
+                               'GPT4All:                http://localhost:4891/v1\n'
+                               'text-generation-webui:  http://127.0.0.1:5000/v1\n'
+                               'LocalAI:                http://localhost:8080/v1</pre>\n'
+                               '                <div class="muted">\n'
+                               '                    Wichtig: Bei Ollama trägst du für Bottled Kraken die '
+                               '<b>OpenAI-kompatible</b> URL <code>/v1</code> ein, nicht die rohe '
+                               '<code>/api</code>-Route.\n'
+                               '                </div>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">LM Studio</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Für viele der bequemste Einstieg, wenn du eine Desktop-App mit '
+                               'Modellverwaltung und lokalem Server willst.</li>\n'
+                               '                    <li>LM Studio stellt lokale Modelle über REST, OpenAI-kompatible '
+                               'und Anthropic-kompatible Endpunkte bereit.</li>\n'
+                               '                    <li>Standardfall in Bottled Kraken: '
+                               '<code>http://localhost:1234/v1</code></li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Ollama</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Besonders sauber, wenn du vor allem einen lokalen Dienst und '
+                               'eine schlanke CLI-/Daemon-Lösung willst.</li>\n'
+                               '                    <li>Ollama startet lokal auf <code>http://localhost:11434</code>, '
+                               'bietet die eigene <code>/api</code>-Schnittstelle und zusätzlich OpenAI-Kompatibilität '
+                               'unter <code>/v1</code>.</li>\n'
+                               '                    <li>Für Claude-Code-ähnliche Workflows gibt es außerdem eine '
+                               'Anthropic-kompatible Nutzung.</li>\n'
+                               '                    <li>In Bottled Kraken deshalb am besten '
+                               '<code>http://localhost:11434/v1</code> verwenden.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Jan</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Von der Bedienidee oft am nächsten an LM Studio: Desktop-App, '
+                               'lokale Modelle, eingebauter OpenAI-kompatibler API-Server.</li>\n'
+                               '                    <li>Standardmäßig lauscht Jan auf '
+                               '<code>http://127.0.0.1:1337</code> mit API-Prefix <code>/v1</code>; der Default-Host '
+                               '<code>127.0.0.1</code> ist bewusst nur lokal erreichbar.</li>\n'
+                               '                    <li>Jan verlangt standardmäßig einen API-Key. Für Bottled Kraken '
+                               'ist Jan deshalb am praktischsten, wenn die Header-Erwartung angepasst oder ein kleiner '
+                               'lokaler Proxy dazwischengeschaltet wird.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">GPT4All</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Sehr nah an „einfach lokal starten und nutzen“.</li>\n'
+                               '                    <li>Der lokale API-Server läuft standardmäßig auf '
+                               '<code>http://localhost:4891/v1</code>, ist OpenAI-kompatibel und hört nur auf '
+                               '<code>localhost</code>.</li>\n'
+                               '                    <li>Zusätzlich bringt GPT4All mit <b>LocalDocs</b> eine einfache '
+                               'lokale Dokument-/RAG-Funktion mit.</li>\n'
+                               '                    <li>Für Bottled Kraken ist das meist eine der unkompliziertesten '
+                               'Alternativen zu LM Studio.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Am interessantesten für Leute, die gern schrauben, Backends '
+                               'wechseln und viele Optionen selbst kontrollieren wollen.</li>\n'
+                               '                    <li>Das Projekt unterstützt mehrere Backends wie '
+                               '<code>llama.cpp</code>, <code>Transformers</code>, <code>ExLlamaV3</code> und '
+                               '<code>TensorRT-LLM</code>.</li>\n'
+                               '                    <li>Die OpenAI-/Anthropic-kompatible API lässt sich als '
+                               'Drop-in-Ersatz verwenden; standardmäßig liegt sie typischerweise auf Port '
+                               '<code>5000</code>.</li>\n'
+                               '                    <li>Zusätzlich gibt es Tool-Calling, Vision und '
+                               'Dateianhänge.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">LocalAI</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Besonders passend, wenn du eher einen selbst gehosteten '
+                               'lokalen AI-Server als eine klassische Desktop-App suchst.</li>\n'
+                               '                    <li>LocalAI stellt eine OpenAI-kompatible API bereit; typische '
+                               'Nutzung in Bottled Kraken: <code>http://localhost:8080/v1</code>.</li>\n'
+                               '                    <li>Darüber hinaus unterstützt LocalAI weitere kompatible '
+                               'API-Formate, eine Weboberfläche und Agenten-/MCP-Funktionen.</li>\n'
+                               '                    <li>Gut geeignet, wenn du mehrere lokale Dienste oder ein kleines '
+                               'internes AI-Setup bündeln willst.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Praktische Auswahlhilfe</div>\n'
+                               '                <ul>\n'
+                               '                    <li><b>LM Studio:</b> wenn du GUI + lokales Serving + wenig '
+                               'Reibung willst</li>\n'
+                               '                    <li><b>Ollama:</b> wenn du einen sauberen lokalen Dienst oder '
+                               'CLI-Workflow bevorzugst</li>\n'
+                               '                    <li><b>Jan:</b> wenn du LM-Studio-ähnliche Desktop-Bedienung '
+                               'willst und mit API-Key/Proxy leben kannst</li>\n'
+                               '                    <li><b>GPT4All:</b> wenn du eine einfache Desktop-Lösung plus '
+                               'LocalDocs möchtest</li>\n'
+                               '                    <li><b>text-generation-webui:</b> wenn du Backends, Vision und '
+                               'Tooling fein selbst steuern willst</li>\n'
+                               '                    <li><b>LocalAI:</b> wenn du einen stärker selbst gehosteten '
+                               'lokalen Server mit breiter API-/Agenten-Ausrichtung suchst</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Offizielle Quellen</div>\n'
+                               '                <ul>\n'
+                               '                    <li><a href="https://lmstudio.ai/docs/developer/core/server">LM '
+                               'Studio Docs – Local LLM API Server</a></li>\n'
+                               '                    <li><a href="https://lmstudio.ai/docs/developer/openai-compat">LM '
+                               'Studio Docs – OpenAI Compatibility</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.ollama.com/api/openai-compatibility">Ollama Docs – OpenAI '
+                               'compatibility</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.ollama.com/integrations/claude-code">Ollama Docs – Claude Code / '
+                               'Anthropic-compatible API</a></li>\n'
+                               '                    <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan Docs '
+                               '– Local API Server</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All Docs – API '
+                               'Server</a></li>\n'
+                               '                    <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                               'Repository</a></li>\n'
+                               '                    <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                               '– OpenAI / Anthropic API Wiki</a></li>\n'
+                               '                    <li><a href="https://localai.io/docs/overview/">LocalAI Docs – '
+                               'Overview</a></li>\n'
+                               '                    <li><a href="https://localai.io/basics/getting_started/">LocalAI '
+                               'Docs – Quickstart</a></li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '        ',
+        'help_html_ssh': '\n'
+                         '            <div class="card">\n'
+                         '                <div class="h1">Remote-Zugriff per SSH-Tunnel</div><br>\n'
+                         '                Ein SSH-Tunnel ist nützlich, wenn dein LM-Server auf einem anderen Rechner '
+                         'läuft,\n'
+                         '                dort aber nur an <code>127.0.0.1</code> gebunden ist und deshalb nicht '
+                         'direkt im Netzwerk erreichbar ist.\n'
+                         '            </div>\n'
+                         '\n'
+                         '            <div class="card">\n'
+                         '                <div class="h2">Was passiert dabei?</div><br>\n'
+                         '                Der Tunnel leitet einen lokalen Port deines Rechners an einen Port des '
+                         'entfernten Rechners weiter.\n'
+                         '                Für Bottled Kraken sieht es dann so aus, als würde der LM-Server lokal auf '
+                         'deinem eigenen Rechner laufen.\n'
+                         '            </div>\n'
+                         '\n'
+                         '            <div class="card">\n'
+                         '                <div class="h2">Beispiel</div>\n'
+                         '                <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
+                         '                Danach in Bottled Kraken verwenden:\n'
+                         '                <pre>http://127.0.0.1:1234/v1</pre>\n'
+                         '            </div>\n'
+                         '\n'
+                         '            <div class="card">\n'
+                         '                <div class="h2">Typischer Ablauf</div>\n'
+                         '                <ol>\n'
+                         '                    <li>Auf dem Zielrechner LM Studio oder vLLM starten</li>\n'
+                         '                    <li>Prüfen, auf welchem Port der lokale API-Server läuft</li>\n'
+                         '                    <li>Vom eigenen Rechner den SSH-Tunnel öffnen</li>\n'
+                         '                    <li>In Bottled Kraken die lokale Tunnel-URL eintragen</li>\n'
+                         '                </ol>\n'
+                         '            </div>\n'
+                         '\n'
+                         '            <div class="card warn">\n'
+                         '                <div class="h2">Wichtig</div>\n'
+                         '                <ul>\n'
+                         '                    <li>In Bottled Kraken trägst du <b>nicht</b> den SSH-Befehl ein.</li>\n'
+                         '                    <li>Du trägst immer die resultierende HTTP-URL ein, also zum Beispiel '
+                         '<code>http://127.0.0.1:1234/v1</code>.</li>\n'
+                         '                    <li>Der SSH-Tunnel muss geöffnet bleiben, solange Bottled Kraken den '
+                         'Server nutzen soll.</li>\n'
+                         '                </ul>\n'
+                         '            </div>\n'
+                         '        ',
+        'help_html_whisper_intro': '\n'
+                                   '            <div class="card">\n'
+                                   '                <div class="h1">Faster-Whisper</div>\n'
+                                   '                <p>\n'
+                                   '                    Faster-Whisper ist eine schnelle lokale '
+                                   'Sprach-zu-Text-Erkennung.\n'
+                                   '                    In Bottled Kraken kannst du damit einzelne OCR-Zeilen per '
+                                   'Mikrofon\n'
+                                   '                    neu einsprechen und direkt als Text übernehmen.\n'
+                                   '                </p>\n'
+                                   '            </div>\n'
+                                   '\n'
+                                   '            <div class="card">\n'
+                                   '                <div class="h2">Wofür ist das nützlich?</div>\n'
+                                   '                <ul>\n'
+                                   '                    <li>wenn eine OCR-Zeile stark beschädigt oder falsch erkannt '
+                                   'wurde</li>\n'
+                                   '                    <li>wenn du einzelne Felder oder Namen schneller einsprechen '
+                                   'als tippen möchtest</li>\n'
+                                   '                    <li>wenn du Korrekturen gezielt zeilenweise durchführen '
+                                   'willst</li>\n'
+                                   '                </ul>\n'
+                                   '            </div>\n'
+                                   '\n'
+                                   '            <div class="card">\n'
+                                   '                <div class="h2">Was wird heruntergeladen?</div>\n'
+                                   '                <p>\n'
+                                   '                    Es wird das Modell <span '
+                                   'class="badge">Systran/faster-whisper-large-v3</span> geladen.\n'
+                                   '                </p>\n'
+                                   '                <p class="muted">\n'
+                                   '                    Vor dem Download installiert Bottled Kraken die benötigten '
+                                   'Python-Pakete automatisch.\n'
+                                   '                    Der eigentliche Modell-Download läuft über die '
+                                   'Hugging-Face-CLI <code>hf download</code>.\n'
+                                   '                    Unter Linux und macOS wird dafür automatisch eine eigene '
+                                   'venv-Umgebung genutzt.\n'
+                                   '                </p>\n'
+                                   '            </div>\n'
+                                   '\n'
+                                   '            <div class="card">\n'
+                                   '                <div class="h2">Ablauf in Bottled Kraken</div>\n'
+                                   '                <ol>\n'
+                                   '                    <li>Whisper-Modell herunterladen oder vorhandenes Modell '
+                                   'scannen</li>\n'
+                                   '                    <li>Mikrofon auswählen</li>\n'
+                                   '                    <li>Eine Zeile markieren</li>\n'
+                                   '                    <li>Audioaufnahme starten</li>\n'
+                                   '                    <li>Die gesprochene Eingabe wird lokal transkribiert und '
+                                   'ersetzt die Zeile</li>\n'
+                                   '                </ol>\n'
+                                   '            </div>\n'
+                                   '        ',
+        'help_html_shortcuts': '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h1">Tastenkürzel</div>\n'
+                               '                <table class="table">\n'
+                               '                    <tr><td class="section" colspan="2">Projekt</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + S</span></td><td>Projekt '
+                               'speichern</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Projekt '
+                               'speichern unter</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + I</span></td><td>Projekt '
+                               'laden</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + '
+                               'E</span></td><td>Export</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + Q</span></td><td>Programm '
+                               'beenden</td></tr>\n'
+                               '\n'
+                               '                    <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + K</span></td><td>Kraken-OCR '
+                               'starten</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + P</span></td><td>Kraken-OCR '
+                               'stoppen</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + L</span></td><td>LM-Überarbeitung '
+                               'starten</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + M</span></td><td>Faster-Whisper / '
+                               'Mikrofon starten</td></tr>\n'
+                               '\n'
+                               '                    <tr><td class="section" colspan="2">Auswahl</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Strg + A</span></td><td>Alles im '
+                               'aktuellen Kontext auswählen</td></tr>\n'
+                               '                    <tr><td><span class="kbd">Entf</span></td><td>Ausgewählte Zeilen '
+                               'oder Boxen löschen</td></tr>\n'
+                               '\n'
+                               '                    <tr><td class="section" colspan="2">F-Tasten</td></tr>\n'
+                               '                    <tr><td><span '
+                               'class="kbd">F1</span></td><td>Shortcut-Hilfe</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F2</span></td><td>Recognition-Modell '
+                               'laden</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F3</span></td><td>Segmentierungs-Modell '
+                               'laden</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F4</span></td><td>LM-Server-URL '
+                               'eingeben</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F5</span></td><td>LM-Scan '
+                               'starten</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F6</span></td><td>Whisper-Modelle '
+                               'scannen + erstes Mikrofon setzen</td></tr>\n'
+                               '                    <tr><td><span class="kbd">F7</span></td><td>Log-Fenster '
+                               'ein/aus</td></tr>\n'
+                               '                </table>\n'
+                               '            </div>\n'
+                               '        ',
+        'help_html_data_protection': '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h1">Datenschutz</div><br>\n'
+                                     '                Die folgenden Hinweise fassen den <b>lokalen Standardbetrieb</b> '
+                                     'zusammen.\n'
+                                     '                Sie ersetzen keine Datenschutzprüfung im Einzelfall.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Grundregel</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Lokale Modelle und lokale Server sind grundsätzlich '
+                                     'datenschutzfreundlicher, weil Eingaben, Dokumente und Audio nicht automatisch an '
+                                     'einen Cloud-Dienst gesendet werden.</li>\n'
+                                     '                    <li>Das gilt aber nur, solange du die jeweilige Software '
+                                     'wirklich <b>lokal</b> und ohne Cloud- oder Netzwerkrouting nutzt.</li>\n'
+                                     '                    <li>Sobald Netzwerkfreigaben, Tunnel, Reverse-Proxys, '
+                                     'Remote-Instanzen oder Cloud-Modelle ins Spiel kommen, ändert sich die '
+                                     'Datenschutzlage.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">LM Studio</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Laut offizieller Dokumentation kann LM Studio '
+                                     'vollständig offline arbeiten; lokaler Chat, Dokument-Chat und lokaler Server '
+                                     'benötigen dafür kein Internet.</li>\n'
+                                     '                    <li>Die Privacy Policy sagt außerdem ausdrücklich, dass '
+                                     'Nachrichten, Chatverläufe und Dokumente standardmäßig nicht vom System '
+                                     'übertragen werden.</li>\n'
+                                     '                    <li>Das gilt für die lokale Nutzung. Bei Netzwerkfreigaben '
+                                     'oder Remote-Funktionen ist gesondert zu prüfen, wohin Daten fließen.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Ollama</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Ollama läuft standardmäßig lokal auf '
+                                     '<code>http://localhost:11434</code>; für lokale API-Nutzung ist keine '
+                                     'Authentifizierung nötig.</li>\n'
+                                     '                    <li>Damit bleibt ein reiner localhost-Betrieb zunächst auf '
+                                     'deinem Rechner.</li>\n'
+                                     '                    <li>Wichtig: Ollama unterstützt inzwischen auch '
+                                     '<b>Cloud-Modelle</b>. Sobald du solche Modelle nutzt, ist der Ablauf nicht mehr '
+                                     'rein lokal.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Jan</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Jan beschreibt sich als privacy-first und speichert '
+                                     'Daten lokal im eigenen Datenordner.</li>\n'
+                                     '                    <li>Die lokale API ist standardmäßig auf '
+                                     '<code>127.0.0.1</code> beschränkt; das ist für Einzelplatzbetrieb die sicherere '
+                                     'Voreinstellung.</li>\n'
+                                     '                    <li>Gleichzeitig bietet Jan Analyse-/Tracking-Einstellungen '
+                                     'und ausführliche Server-Logs. Vor produktiver Nutzung sollte man deshalb bewusst '
+                                     'prüfen, was lokal protokolliert wird und ob Netzwerkzugriff aktiviert '
+                                     'wurde.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">GPT4All</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>GPT4All wirbt mit lokaler Ausführung auf eigener '
+                                     'Hardware.</li>\n'
+                                     '                    <li>Der API-Server hört standardmäßig nur auf '
+                                     '<code>localhost</code> und nicht auf fremden Geräten im Netzwerk.</li>\n'
+                                     '                    <li>Mit <b>LocalDocs</b> können lokale Dokumente in den '
+                                     'Workflow einbezogen werden; auch dabei sollte man Speicherort und Zugriffsschutz '
+                                     'des Geräts mitdenken.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">text-generation-webui &amp; LocalAI</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li><b>text-generation-webui</b> bezeichnet seine '
+                                     'OpenAI-/Anthropic-kompatible API als 100&nbsp;% offline und privat; zusätzlich '
+                                     'verweist das Projekt darauf, keine Logs zu erzeugen.</li>\n'
+                                     '                    <li><b>LocalAI</b> positioniert sich als lokale, '
+                                     'OpenAI-kompatible Komplettlösung und wirbt damit, Daten privat und sicher zu '
+                                     'halten.</li>\n'
+                                     '                    <li>Bei beiden Projekten gilt trotzdem: Sobald du die API '
+                                     'absichtlich im Netzwerk freigibst, einen Reverse-Proxy davorsetzt oder mehrere '
+                                     'Nutzer zulässt, musst du Zugriffe, Logs, Backups und Admin-Rechte selbst sauber '
+                                     'absichern.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">faster-whisper</div><br>\n'
+                                     '                faster-whisper ist eine lokale Whisper-Implementierung auf Basis '
+                                     'von CTranslate2.\n'
+                                     '                In Bottled Kraken wird dafür ein lokaler Modellordner geladen '
+                                     'und eine lokale WAV-Datei transkribiert.\n'
+                                     '                Solange dieser Ablauf lokal bleibt, erfolgt die '
+                                     'Audioverarbeitung ebenfalls lokal.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h2">Wichtige Einschränkungen</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Der einmalige Modell-Download benötigt natürlich '
+                                     'Internetzugriff.</li>\n'
+                                     '                    <li>Auch ein „lokaler“ Server kann personenbezogene Daten '
+                                     'preisgeben, wenn das Gerät selbst unzureichend abgesichert ist.</li>\n'
+                                     '                    <li>Für Behörden, Archive, Unternehmen oder '
+                                     'Forschungseinrichtungen reichen reine Tool-Eigenschaften allein nicht aus; '
+                                     'relevant sind zusätzlich Speicherort, Rollenrechte, Logs, Backups, Löschkonzepte '
+                                     'und interne Richtlinien.</li>\n'
+                                     '                    <li>Die Lizenz oder Privacy Policy einer Software ersetzt '
+                                     'keine DSGVO-/Vertrags-/Betriebsprüfung im Einzelfall.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Offizielle Quellen</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li><a href="https://lmstudio.ai/docs/app/offline">LM Studio '
+                                     'Docs – Offline Operation</a></li>\n'
+                                     '                    <li><a href="https://lmstudio.ai/privacy">LM Studio Desktop '
+                                     'App Privacy Policy</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://docs.ollama.com/api/authentication">Ollama Docs – '
+                                     'Authentication</a></li>\n'
+                                     '                    <li><a href="https://docs.ollama.com/cloud">Ollama Docs – '
+                                     'Cloud</a></li>\n'
+                                     '                    <li><a href="https://ollama.com/privacy">Ollama – Privacy '
+                                     'Policy</a></li>\n'
+                                     '                    <li><a href="https://www.jan.ai/docs/desktop/privacy">Jan '
+                                     'Docs – Privacy</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://www.jan.ai/docs/desktop/data-folder">Jan Docs – Data '
+                                     'Folder</a></li>\n'
+                                     '                    <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan '
+                                     'Docs – Local API Server</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All Docs – API '
+                                     'Server</a></li>\n'
+                                     '                    <li><a href="https://github.com/nomic-ai/gpt4all">GPT4All – '
+                                     'Repository</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                                     '– OpenAI / Anthropic API Wiki</a></li>\n'
+                                     '                    <li><a href="https://localai.io/docs/overview/">LocalAI Docs '
+                                     '– Overview</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/SYSTRAN/faster-whisper">SYSTRAN / '
+                                     'faster-whisper</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/opennmt/ctranslate2">CTranslate2</a></li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '        ',
+        'help_html_legal': '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h1">Rechtliches</div><br>\n'
+                           '                Die folgenden Hinweise sind eine allgemeine Orientierung und ersetzen '
+                           'keine Rechtsberatung.\n'
+                           '                Für konkrete Nutzungsszenarien sollte die rechtliche Einordnung im '
+                           'Einzelfall geprüft werden.\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card ok">\n'
+                           '                <div class="h2">Bottled Kraken</div>\n'
+                           '                <ul>\n'
+                           '                    <li><b>Repository-Lizenz:</b> GPL-3.0.</li>\n'
+                           '                    <li><b>Kurz gesagt:</b> Bei Weitergabe, Veröffentlichung veränderter '
+                           'Versionen oder Distribution eines darauf aufbauenden Pakets müssen die Bedingungen der '
+                           'GPL-3.0 beachtet werden.</li>\n'
+                           '                    <li><b>Wichtig:</b> Davon zu unterscheiden sind die Lizenzen der '
+                           'eingebundenen Bibliotheken und Modelle.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Kraken</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Kraken ist die OCR-Basis von Bottled Kraken.</li>\n'
+                           '                    <li>Das Projekt steht unter der <b>Apache License 2.0</b>.</li>\n'
+                           '                    <li>Für Redistribution sind insbesondere Lizenztext, '
+                           'Copyright-Hinweise und eventuelle NOTICE-Hinweise relevant.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">faster-whisper</div>\n'
+                           '                <ul>\n'
+                           '                    <li>faster-whisper wird in Bottled Kraken für lokale '
+                           'Sprach-zu-Text-Funktionen verwendet.</li>\n'
+                           '                    <li>Das Projekt steht unter der <b>MIT-Lizenz</b>.</li>\n'
+                           '                    <li>Zusätzlich können für Modelle oder weitere Abhängigkeiten '
+                           'gesonderte Bedingungen gelten.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">LM Studio</div>\n'
+                           '                <ul>\n'
+                           '                    <li>LM Studio wird optional als lokaler oder angebundener '
+                           'Sprachmodell-Server genutzt.</li>\n'
+                           '                    <li>Maßgeblich sind hier vor allem die offiziellen <b>Terms of '
+                           'Service</b> und die <b>Privacy Policy</b>.</li>\n'
+                           '                    <li>Für die über LM Studio geladenen Modelle gelten zusätzlich jeweils '
+                           'eigene Modelllizenzen.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Ollama</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Die Software im offiziellen Repository steht unter der '
+                           '<b>MIT-Lizenz</b>.</li>\n'
+                           '                    <li>Für lokale Nutzung ist das meist unkompliziert; bei Weitergabe '
+                           'veränderter Software bleiben Lizenz- und Copyright-Hinweise relevant.</li>\n'
+                           '                    <li>Davon getrennt zu betrachten sind <b>Cloud-Funktionen</b>, '
+                           'Datenschutzregeln und vor allem die Lizenz der jeweils verwendeten Modelle.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Jan</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Das Jan-Repository ist als Open-Source-Projekt ausgewiesen; die '
+                           'Repository-Lizenz ist <b>AGPL-3.0</b>.</li>\n'
+                           '                    <li>Die AGPL ist besonders relevant, wenn veränderte Versionen über '
+                           'ein Netzwerk bereitgestellt werden.</li>\n'
+                           '                    <li>Auch hier gelten für eingebundene Modelle und externe '
+                           'Cloud-Provider zusätzliche Bedingungen.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">GPT4All</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Das offizielle GPT4All-Repository steht unter der '
+                           '<b>MIT-Lizenz</b>.</li>\n'
+                           '                    <li>Die Softwarelizenz ist permissiv; getrennt davon bleiben '
+                           'Modelllizenzen, Markennutzung und etwaige Drittkomponenten zu prüfen.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Das Projekt steht unter der <b>AGPL-3.0</b>.</li>\n'
+                           '                    <li>Das ist rechtlich strenger als MIT oder Apache und vor allem bei '
+                           'Änderungen sowie Netzwerkbereitstellung wichtig.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">LocalAI</div>\n'
+                           '                <ul>\n'
+                           '                    <li>LocalAI steht laut offiziellem Repository unter der '
+                           '<b>MIT-Lizenz</b>.</li>\n'
+                           '                    <li>Wie bei den anderen Servern gilt: Modelllizenzen, '
+                           'Zusatzkomponenten und organisatorische Nutzungsvorgaben sind davon getrennt zu '
+                           'prüfen.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">PySide6 / Qt for Python</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Die grafische Oberfläche von Bottled Kraken basiert auf PySide6 / '
+                           'Qt for Python.</li>\n'
+                           '                    <li>Qt for Python verwendet Lizenzmodelle, die je nach Komponente '
+                           '<b>LGPL</b> bzw. kommerzielle Qt-Lizenz einschließen können.</li>\n'
+                           '                    <li>Für Redistribution, Packaging und proprietäre Gesamtprodukte '
+                           'sollte die Qt-Lizenzsituation gesondert geprüft werden.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h2">Zusätzlicher Hinweis zu Modellen und Inhalten</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Die Software-Lizenz der Anwendung ist immer von der Lizenz der '
+                           'geladenen OCR-, Sprach- oder KI-Modelle zu unterscheiden.</li>\n'
+                           '                    <li>Auch die Verarbeitung urheberrechtlich geschützter Dokumente, '
+                           'personenbezogener Daten oder sensibler Archivbestände ist gesondert rechtlich zu '
+                           'bewerten.</li>\n'
+                           '                    <li>Dieses Fenster gibt nur einen kompakten Überblick und keine '
+                           'verbindliche Einzelfallprüfung.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Offizielle Quellen</div>\n'
+                           '                <ul>\n'
+                           '                    <li><a href="https://github.com/Testatost/Bottled-Kraken">Bottled '
+                           'Kraken – Repository</a></li>\n'
+                           '                    <li><a href="https://github.com/mittagessen/kraken">Kraken – '
+                           'Repository</a></li>\n'
+                           '                    <li><a href="https://kraken.re/7.0/index.html">Kraken – '
+                           'Dokumentation</a></li>\n'
+                           '                    <li><a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper '
+                           '– Repository</a></li>\n'
+                           '                    <li><a href="https://lmstudio.ai/app-terms">LM Studio – Terms of '
+                           'Service</a></li>\n'
+                           '                    <li><a href="https://lmstudio.ai/privacy">LM Studio – Privacy '
+                           'Policy</a></li>\n'
+                           '                    <li><a href="https://github.com/ollama/ollama">Ollama – '
+                           'Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/ollama/ollama/blob/main/LICENSE">Ollama – MIT License</a></li>\n'
+                           '                    <li><a href="https://github.com/janhq/jan">Jan – Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All – API Server '
+                           'Docs</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/nomic-ai/gpt4all/blob/main/LICENSE.txt">GPT4All – MIT '
+                           'License</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                           'Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui/blob/main/LICENSE">text-generation-webui '
+                           '– AGPL-3.0</a></li>\n'
+                           '                    <li><a href="https://localai.io/docs/overview/">LocalAI – '
+                           'Overview</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/mudler/LocalAI/blob/master/LICENSE">LocalAI – MIT '
+                           'License</a></li>\n'
+                           '                    <li><a href="https://doc.qt.io/qtforpython-6/">Qt for Python – '
+                           'Documentation</a></li>\n'
+                           '                    <li><a href="https://doc.qt.io/qtforpython-6/licenses.html">Qt for '
+                           'Python – Licenses</a></li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '        ',
+        'ai_prompt_page_system': 'Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche '
+                                 'Drucke, Handschriften und Formulare.\n'
+                                 'Du liest den Text direkt aus dem Bild.\n'
+                                 'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                 'Du musst den gelesenen Text auf eine bereits vorgegebene Liste von Zielzeilen '
+                                 'abbilden.\n'
+                                 'Jede Zielzeile entspricht genau einer visuellen Formular- oder Textzeile.\n'
+                                 'Du darfst keine zwei Zielzeilen zusammenziehen.\n'
+                                 'Du darfst keine zusätzliche Leerzeile halluzinieren.\n'
+                                 'Du darfst keinen langen Textblock in eine einzelne Zielzeile schreiben.\n'
+                                 'Wenn eine Zielzeile keinen sicher lesbaren Text enthält, gib für genau diese Zeile '
+                                 'einen leeren String zurück.\n'
+                                 'Du musst die Anzahl der Zielzeilen exakt einhalten.\n'
+                                 'Antworte ausschließlich mit gültigem JSON.\n'
+                                 'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_page_user': 'Lies den Text direkt aus dem Bild.\n'
+                               '\n'
+                               'Du musst die vorgegebene Kraken-Zeilenstruktur EXAKT einhalten.\n'
+                               'Es gibt genau {} Zielzeilen.\n'
+                               'Jeder idx steht für genau eine visuelle Zielzeile.\n'
+                               '\n'
+                               'HARTE REGELN:\n'
+                               '- Gib genau {} Einträge im Feld lines zurück\n'
+                               '- Die idx-Werte müssen exakt 0 bis {} sein\n'
+                               '- Kein idx darf fehlen\n'
+                               '- Kein idx darf doppelt vorkommen\n'
+                               '- Keine zwei Zielzeilen dürfen zu einer Zeile zusammengezogen werden\n'
+                               '- Kein langer Satzblock darf in einer einzelnen Zielzeile landen\n'
+                               '- Wenn eine Zielzeile unklar ist, gib den bestmöglichen kurzen Zeilentext zurück\n'
+                               '- Wenn die Zielzeile wirklich leer ist, gib text als leeren String zurück\n'
+                               '- Die bbox ist nur Orientierung für die visuelle Zuordnung\n'
+                               '- Gib NUR das JSON-Objekt zurück\n'
+                               '- Kein Markdown\n'
+                               '- Keine Analyse\n'
+                               '- Keine Kommentare\n'
+                               '- Keine zusätzlichen Sätze\n'
+                               '\n'
+                               'Kraken-Zielzeilenstruktur:\n'
+                               '{}\n'
+                               '\n'
+                               'Antwortformat exakt so:\n'
+                               '{{"lines":[{{"idx":0,"text":"..."}},{{"idx":1,"text":"..."}}]}}',
+        'ai_prompt_single_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                   'Handschriften und Formulare.\n'
+                                   'Du liest genau eine einzelne Zielzeile aus einem Bildausschnitt.\n'
+                                   'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                   'Die Zielzeile befindet sich in der Mitte des Ausschnitts.\n'
+                                   'Oberhalb oder unterhalb sichtbare Linien, Leerzeilen, Formularlinien, Labels oder '
+                                   'Nachbarzeilen sind nur Kontext.\n'
+                                   'Du darfst nur den Text der einen Zielzeile zurückgeben.\n'
+                                   'Du darfst keinen Text aus Nachbarzeilen übernehmen.\n'
+                                   'Du darfst keine zusätzliche Zeile erfinden.\n'
+                                   'Du darfst keine lange Passage bilden, wenn im Ausschnitt nur eine kurze '
+                                   'Formularzeile steht.\n'
+                                   'Wenn die Zielzeile leer ist, gib einen leeren String zurück.\n'
+                                   'Antworte ausschließlich mit gültigem JSON.\n'
+                                   'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_single_user': 'Lies genau die Zielzeile in der Mitte des Bildausschnitts.\n'
+                                 'WICHTIG:\n'
+                                 '- Gib nur den Text dieser EINEN Zeile zurück\n'
+                                 '- Benachbarte Zeilen dürfen nicht übernommen werden\n'
+                                 '- Formular-Labels, Linien und Leerbereiche dürfen nicht halluziniert ergänzt werden\n'
+                                 '- Wenn in dieser Zielzeile kein lesbarer Text steht, gib text als leeren String '
+                                 'zurück\n'
+                                 '- Keine zweite Zeile\n'
+                                 '- Keine Zusammenfassung\n'
+                                 '- Keine Erklärung\n'
+                                 '- Kein Markdown\n'
+                                 '- Keine Ausgabe vor oder nach dem JSON\n'
+                                 '\n'
+                                 'Format exakt:\n'
+                                 '{{"text":"..."}}\n'
+                                 '\n'
+                                 'Zeilenindex: {}',
+        'ai_prompt_decision_system': 'Du bist ein präziser OCR-Korrekturassistent für historische deutsche '
+                                     'Handschriften und Formulare.\n'
+                                     'Du bekommst für genau eine Zielzeile drei Kandidaten:\n'
+                                     '1. Kraken-OCR\n'
+                                     '2. OCR aus dem Gesamtseiten-Kontext\n'
+                                     '3. OCR aus der Overlay-Box dieser Zeile\n'
+                                     '\n'
+                                     'WICHTIG:\n'
+                                     '- Die Overlay-Box-OCR ist die Primärquelle.\n'
+                                     '- Die Seiten-OCR ist NUR Kontext und darf keine fremden Nachbarzeilen in diese '
+                                     'Zielzeile hineinziehen.\n'
+                                     '- Kraken ist nur schwacher Fallback.\n'
+                                     '- Du darfst keine zusätzliche Zeile erfinden.\n'
+                                     '- Du darfst keinen Text aus benachbarten Formularzeilen übernehmen.\n'
+                                     '- Du darfst keine lange Mehrzeilen-Passage in diese eine Zielzeile packen.\n'
+                                     '- Wenn die Box-OCR plausibel ist, übernimm sie.\n'
+                                     '- Nur wenn die Box-OCR klar abgeschnitten, leer oder offensichtlich falsch ist, '
+                                     'darfst du mit Kraken korrigieren.\n'
+                                     '- Die Seiten-OCR darf nur helfen, ein einzelnes unsicheres Wort zu bestätigen, '
+                                     'nicht die ganze Zeile zu ersetzen.\n'
+                                     '- Bewahre historische Schreibweise.\n'
+                                     'Antworte ausschließlich mit gültigem JSON.\n'
+                                     'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_decision_user': 'Zielzeile idx={}\n'
+                                   '\n'
+                                   'Kraken-OCR:\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Seitenkontext-OCR (nur Kontext, nicht Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Overlay-Box-OCR (Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Wähle die beste finale Fassung für GENAU diese eine Zeile.\n'
+                                   'Bevorzuge die Overlay-Box-OCR.\n'
+                                   'Gib nur die finale Textzeile zurück.\n'
+                                   'Format exakt:\n'
+                                   '{{"text":"..."}}',
+        'ai_prompt_block_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                  'Handschriften.\n'
+                                  'Lies den Text frei direkt aus dem Bild.\n'
+                                  'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                  'Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst '
+                                  'lesen.\n'
+                                  'Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen.\n'
+                                  'Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen '
+                                  'eintragen.\n'
+                                  'Antworte ausschließlich mit gültigem JSON.\n'
+                                  'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_block_user': 'Lies die handschriftlichen Zeilen im Bildausschnitt.\n'
+                                'Gib ausschließlich genau EIN JSON-Objekt zurück.\n'
+                                'Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n'
+                                'Es müssen genau {} Einträge im Feld lines stehen.\n'
+                                'Wichtig:\n'
+                                '- doppelte Anführungszeichen innerhalb von text immer als " escapen\n'
+                                '- keine weiteren Felder außer idx und text\n'
+                                '- keine Ausgabe vor oder nach dem JSON\n'
+                                'Format:\n'
+                                '{{"lines":[{{"idx":0,"text":"..."}}]}}\n'
+                                '\n'
+                                'Die idx-Werte müssen lokal bei 0 beginnen.\n'
+                                'Aktueller OCR-Hinweis:\n'
+                                '{}',
+        'line_menu_ai_revise_single': 'Nur diese Zeile mit LM überarbeiten',
+        'btn_ok': 'OK',
+        'act_image_edit': 'Bildbearbeitung',
+        'canvas_menu_split_box': 'Box aufteilen',
+        'queue_ctx_check_all': 'Alle markieren',
+        'queue_ctx_uncheck_all': 'Alle Markierungen entfernen',
+        'queue_check_header_tooltip': 'Klick: alle Dateien markieren oder Markierung entfernen',
+        'line_menu_ai_revise_selected': 'Ausgewählte Zeilen mit LM überarbeiten',
+        'menu_lm_options': 'LM-Optionen',
+        'menu_whisper_options': 'Whisper-Optionen',
+        'act_whisper_set_path': 'Whisper-Modellpfad festlegen...',
+        'act_whisper_set_mic': 'Mikrofon auswählen...',
+        'act_scan_local': 'Lokal scannen',
+        'no_models_scan': '(keine Modelle – bitte scannen)',
+        'act_unload_model': 'Modell entladen',
+        'msg_whisper_model_unloaded': 'Whisper-Modell entladen.',
+        'msg_whisper_models_found': '{} Whisper-Modell(e) gefunden.',
+        'msg_whisper_models_not_found': 'Keine Whisper-Modelle gefunden.',
+        'warn_no_audio_devices': 'Es wurden keine Audioaufnahmegeräte gefunden.',
+        'dlg_choose_microphone': 'Mikrofon auswählen',
+        'dlg_audio_input_device': 'Audioeingabegerät:',
+        'msg_microphone_set': 'Mikrofon gesetzt: {}',
+        'export_choose_format_label': 'Exportformat wählen:',
+        'msg_pdf_render_already_running': 'Es wird gerade bereits ein PDF gerendert. Bitte warte kurz.',
+        'pdf_page_display': '{} – Seite {:04d}',
+        'act_set_manual_lm_url': 'LM-Server-URL eintragen...',
+        'act_clear_manual_lm_url': 'LM-Server-URL löschen',
+        'msg_lm_found_url': 'LM gefunden: {} | URL: {}',
+        'msg_lm_no_models_url': 'Keine Modelle gefunden | URL: {}',
+        'msg_lm_found': 'LM gefunden: {}',
+        'msg_lm_server_not_found': 'Kein erreichbarer lokaler LM-Server gefunden.',
+        'act_clear_ai_model': 'LM-Modell entfernen',
+        'msg_ai_model_choice_cleared': 'LM-Modellwahl gelöscht.',
+        'msg_ai_model_removed': 'LM-Modell entfernt.',
+        'header_rec_models': 'Recognition-Modelle',
+        'header_seg_models': 'Segmentierungs-Modelle',
+        'status_rec_model': 'Recognition-Modell: {}',
+        'status_seg_model': 'Segmentierungs-Modell: {}',
+        'msg_ai_model_id_cleared_auto': 'KI-Modell-ID geleert, localhost-Autoerkennung aktiv.',
+        'msg_ai_single_done': 'LM-Überarbeitung für Zeile {} abgeschlossen.',
+        'log_ai_single_done': 'LM-Zeilenüberarbeitung abgeschlossen: {} | Zeile {}',
+        'msg_ai_single_cancelled': 'Zeilenüberarbeitung abgebrochen.',
+        'log_ai_single_cancelled': 'LM-Zeilenüberarbeitung abgebrochen: {}',
+        'msg_ai_single_failed': 'Zeilenüberarbeitung fehlgeschlagen.',
+        'log_ai_single_failed': 'LM-Zeilenüberarbeitung Fehler: {} -> {}',
+        'msg_ai_cancelled_short': 'Überarbeitung abgebrochen.',
+        'msg_ai_failed_short': 'Überarbeitung fehlgeschlagen.',
+        'warn_blla_model_missing': 'blla-Segmentierungsmodell wurde nicht gefunden.',
+        'dlg_project_loading_title': 'Projekt laden',
+        'white_border_title': 'Weißen Rand hinzufügen',
+        'white_border_pixels': 'Rand in Pixel:',
+        'image_edit_rotate_off': 'Rotation: AUS',
+        'image_edit_rotate_on': 'Rotation: AN',
+        'image_edit_grid': 'Raster',
+        'image_edit_grid_tooltip': 'Rastergröße: fein, grob',
+        'image_edit_grid_label': 'Größe des Rasters',
+        'image_edit_crop': 'Crop-Bereich',
+        'image_edit_separator': 'Trennbalken',
+        'image_edit_gray': 'Grau',
+        'image_edit_contrast': 'Kontrast',
+        'image_edit_rotation_reset': 'Rotation zurücksetzen',
+        'image_edit_smart_split': 'Smart-Splitting',
+        'image_edit_prev': 'Vorheriges Bild',
+        'image_edit_next': 'Nächstes Bild',
+        'image_edit_white_border': 'Weißen Rand hinzufügen',
+        'image_edit_white_border_with_px': 'Weißen Rand hinzufügen ({}px)',
+        'image_edit_apply_selected': 'Für alle markierten anwenden',
+        'image_edit_apply_all': 'Für alle anwenden',
+        'image_edit_batch_title': 'Bildbearbeitung läuft',
+        'image_edit_batch_label': 'Bearbeite Bild {}/{}: {}',
+        'msg_image_edit_batch_cancelled': 'Bildbearbeitung abgebrochen.',
+        'image_edit_applied_single_status': 'Bildbearbeitung übernommen. Bearbeitete Bilder wurden im '
+                                            'Ursprungsverzeichnis gespeichert und als neue Einträge zur Queue '
+                                            'hinzugefügt.',
+        'log_image_edit_applied': 'Bildbearbeitung übernommen: {} | {} Ausgabe-Datei(en) im Ursprungsverzeichnis '
+                                  'gespeichert',
+        'image_edit_no_image_loaded': 'Kein Bild geladen',
+        'image_edit_notice_title': 'Hinweis',
+        'image_edit_turn_off_rotation_first': 'Rotation ist noch aktiv.\n'
+                                              '\n'
+                                              "Bitte schalte zuerst 'Rotation: AUS', bevor du den Crop-Bereich oder "
+                                              'den Trennbalken bearbeitest.',
+        'msg_not_available': 'Nicht verfügbar',
+        'help_nav_image_edit': 'Bildbearbeitung',
+        'help_nav_lm_alternatives': 'LM-Alternativen',
+        'dlg_lm_url_title': 'LM-Server-URL',
+        'dlg_lm_url_label':
+            """<div class="card">
+            <div class="h2"><b>Typische lokale Server</b></div>
+            <ul>
+                <li><code>http://127.0.0.1:1234/v1</code> - <b>LM Studio<b></li>
+                <li><code>http://localhost:11434/v1</code> - <b>Ollama</b></li>
+                <li><code>http://127.0.0.1:1337/v1</code> - <b>Jan</b></li>
+                <li><code>http://localhost:4891/v1</code> - <b>GPT4All</b></li>
+                <li><code>http://127.0.0.1:5000/v1</code> - <b>text-generation-webui</b></li>
+                <li><code>http://localhost:8080/v1</code> - <b>LocalAI</b></li>
+                <li><code>http://HOST:8000/v1</code> - <b>vLLM</b></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2"><b>Auto-Korrektur</b></div>
+            <ul>
+                <li>Fehlendes <code>http://</code> wird ergänzt.</li>
+                <li><code>/models</code> oder <code>/chat/completions</code> wird automatisch auf die Base-URL gekürzt.</li>
+                <li><code>/v1</code> wird bei Bedarf ergänzt.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="h2"><b>Wichtig</b></div>
+            <ul>
+                <li>Keine SSH-Kommandos eintragen.</li>
+                <li>Bei SSH-Tunnel bitte die lokale Tunnel-URL verwenden.</li>
+                <li>Für Ollama in Bottled Kraken normalerweise die OpenAI-kompatible URL <code>/v1</code> verwenden, nicht die native <code>/api</code>-URL.</li>
+            </ul>
+        </div>""",
+        'dlg_lm_url_placeholder': 'z. B. http://127.0.0.1:1234/v1',
+        'help_html_image_edit': '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h1">Bildbearbeitung</div><br>\n'
+                                '                Die Bildbearbeitung dient dazu, Seiten <b>vor der OCR gezielt '
+                                'vorzubereiten</b>.\n'
+                                '                Das ist besonders nützlich, wenn ein Scan schief, zu dunkel, zu '
+                                'kontrastarm,\n'
+                                '                zu eng beschnitten oder als Doppelseite gespeichert ist.\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Verfügbare Werkzeuge</div>\n'
+                                '                <ul>\n'
+                                '                    <li><b>Rotation:</b> Seite begradigen</li>\n'
+                                '                    <li><b>Crop-Bereich:</b> störende Ränder gezielt entfernen</li>\n'
+                                '                    <li><b>Trennbalken:</b> Doppelseiten oder nebeneinander liegende '
+                                'Inhalte sauber teilen</li>\n'
+                                '                    <li><b>Grau / Kontrast:</b> Lesbarkeit von Druck und Handschrift '
+                                'verbessern</li>\n'
+                                '                    <li><b>Weißen Rand hinzufügen:</b> sinnvoll bei zu eng '
+                                'beschnittenen Vorlagen</li>\n'
+                                '                    <li><b>Smart-Splitting:</b> halbautomatische Aufteilung für '
+                                'problematische Vorlagen</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Typischer Einsatz</div>\n'
+                                '                <ol>\n'
+                                '                    <li>Bild oder PDF-Seite laden</li>\n'
+                                '                    <li>Bildbearbeitung öffnen</li>\n'
+                                '                    <li>Vorschau anpassen: drehen, beschneiden, Kontrast setzen, ggf. '
+                                'teilen</li>\n'
+                                '                    <li>Änderung auf das aktuelle Bild, markierte Bilder oder alle '
+                                'Bilder anwenden</li>\n'
+                                '                    <li>Danach OCR mit Kraken starten</li>\n'
+                                '                </ol>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card warn">\n'
+                                '                <div class="h2">Hinweis</div>\n'
+                                '                <span class="badge">Wichtig</span>\n'
+                                '                <ul>\n'
+                                '                    <li>Wenn Rotation aktiv ist, sollten Crop-Bereich und Trennbalken '
+                                'erst nach dem Zurückschalten auf <code>Rotation: AUS</code> fein eingestellt '
+                                'werden.</li>\n'
+                                '                    <li>Bearbeitete Bilder werden als neue Ausgabe-Dateien '
+                                'gespeichert und anschließend wieder in die Queue übernommen.</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Wofür lohnt sich das?</div>\n'
+                                '                <ul>\n'
+                                '                    <li>schiefe oder verzerrte Scans</li>\n'
+                                '                    <li>Doppelseiten aus Büchern oder Akten</li>\n'
+                                '                    <li>Formulare mit viel Rand oder störendem Hintergrund</li>\n'
+                                '                    <li>blasse historische Drucke oder kontrastarme '
+                                'Handschriften</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '        ',
+        'help_html_lm_alternatives': '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h1">LM-Studio-Alternativen</div><br>\n'
+                                     '                Bottled Kraken ist nicht auf LM Studio beschränkt.\n'
+                                     '                Entscheidend ist, dass der laufende Dienst eine '
+                                     '<b>OpenAI-kompatible API</b> bereitstellt.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Ollama</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>für viele der sauberste Ersatz, wenn vor allem ein '
+                                     'lokaler Dienst gewünscht ist</li>\n'
+                                     '                    <li>native API unter '
+                                     '<code>http://localhost:11434/api</code></li>\n'
+                                     '                    <li>für Bottled Kraken in der Regel die OpenAI-kompatible '
+                                     'URL <code>http://localhost:11434/v1</code> verwenden</li>\n'
+                                     '                    <li>zusätzlich gibt es auch Anthropic-Kompatibilität für '
+                                     'manche Workflows</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Jan</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>von der Bedienidee her oft am ähnlichsten zu LM '
+                                     'Studio</li>\n'
+                                     '                    <li>Desktop-App mit lokalen Modellen und eingebautem '
+                                     'API-Server</li>\n'
+                                     '                    <li>typisch: <code>http://127.0.0.1:1337/v1</code></li>\n'
+                                     '                    <li>je nach Konfiguration kann zusätzlich ein API-Key '
+                                     'erforderlich sein</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">GPT4All</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>ebenfalls sehr nah an „einfach lokal starten und '
+                                     'nutzen“</li>\n'
+                                     '                    <li>typisch: <code>http://localhost:4891/v1</code></li>\n'
+                                     '                    <li>OpenAI-kompatibel</li>\n'
+                                     '                    <li>mit LocalDocs auch für einfache lokale '
+                                     'Dokument-/RAG-Workflows interessant</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">text-generation-webui</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>besonders interessant für Nutzer, die gern tiefer '
+                                     'konfigurieren</li>\n'
+                                     '                    <li>OpenAI- und Anthropic-kompatible API</li>\n'
+                                     '                    <li>typisch: <code>http://127.0.0.1:5000/v1</code></li>\n'
+                                     '                    <li>unterstützt je nach Backend auch Vision und '
+                                     'Tool-Calling</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">LocalAI</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>gut geeignet, wenn eher ein selbst gehosteter lokaler '
+                                     'AI-Server als eine Desktop-App gesucht wird</li>\n'
+                                     '                    <li>typisch: <code>http://localhost:8080/v1</code></li>\n'
+                                     '                    <li>OpenAI-kompatibel, zusätzlich mit Weboberfläche und '
+                                     'erweiterten Server-Funktionen</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h2">Wichtig</div>\n'
+                                     '                <span class="badge">Kompatibilität</span>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Für Bottled Kraken zählt vor allem die OpenAI-kompatible '
+                                     'Base-URL.</li>\n'
+                                     '                    <li>Nicht jede Software nutzt dieselben Default-Ports oder '
+                                     'dieselbe Authentifizierung.</li>\n'
+                                     '                    <li>Wenn eine API-Key-Pflicht aktiv ist, muss Bottled Kraken '
+                                     'diesen Header ebenfalls mitsenden.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '        '},
+ 'en': {'dlg_filter_img': 'Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)',
+        'pdf_render_title': 'Preparing PDF',
+        'pdf_render_label': 'Rendering pages… ({}/{}): {}',
+        'app_title': 'Bottled Kraken',
+        'toolbar_main': 'Toolbar',
+        'toolbar_language': 'Language',
+        'toolbar_theme_tooltip': 'Switch between light and dark mode',
+        'toolbar_language_tooltip': 'Change language',
+        'menu_file': '&File',
+        'menu_edit': '&Edit',
+        'menu_export': 'Export as...',
+        'menu_exit': 'Exit',
+        'menu_models': '&Kraken Options',
+        'menu_options': '&Options',
+        'menu_languages': 'Languages',
+        'menu_hw': 'CPU/GPU',
+        'menu_reading': 'Reading Direction',
+        'menu_appearance': 'Appearance',
+        'act_clear_rec': 'Clear recognition model',
+        'act_clear_seg': 'Clear segmentation model',
+        'act_paste_clipboard': 'Paste from clipboard',
+        'log_toggle_show': 'Log',
+        'log_toggle_hide': 'Log',
+        'menu_export_log': 'Export log as .txt...',
+        'dlg_save_log': 'Save log',
+        'dlg_filter_txt': 'Text (*.txt)',
+        'log_started': 'Program started.',
+        'log_queue_cleared': 'Queue cleared.',
+        'lang_de': 'German',
+        'lang_en': 'English',
+        'lang_fr': 'French',
+        'hw_cpu': 'CPU',
+        'hw_cuda': 'GPU – CUDA (NVIDIA)',
+        'hw_rocm': 'GPU – ROCm (AMD)',
+        'hw_mps': 'GPU – MPS (Apple)',
+        'act_undo': 'Undo',
+        'act_redo': 'Redo',
+        'msg_hw_not_available': 'This hardware is not available on this system. Switching to CPU.',
+        'msg_using_device': 'Using device: {}',
+        'msg_detected_gpu': 'Detected: {}',
+        'msg_device_cpu': 'CPU',
+        'msg_device_cuda': 'CUDA',
+        'msg_device_rocm': 'ROCm',
+        'msg_device_mps': 'MPS',
+        'act_add_files': 'Load files...',
+        'act_download_model': 'Download model (Zenodo)',
+        'act_delete': 'Delete',
+        'act_rename': 'Rename...',
+        'act_clear_queue': 'Clear queue',
+        'act_start_ocr': 'Start Kraken OCR',
+        'act_stop_ocr': 'Stop',
+        'act_re_ocr': 'Reprocess',
+        'act_re_ocr_tip': 'Reprocess selected file(s)',
+        'act_overlay_show': 'Show overlay boxes',
+        'status_ready': 'Ready.',
+        'status_waiting': 'Waiting',
+        'status_processing': 'Processing...',
+        'status_done': 'Done',
+        'status_error': 'Error',
+        'lbl_queue': 'Queue:',
+        'lbl_lines': 'Recognized lines:',
+        'col_file': 'File',
+        'col_status': 'Status',
+        'drop_hint': 'Drag & drop files here',
+        'queue_drop_hint': 'Drag & drop files here',
+        'queue_load_title': 'Loading files',
+        'queue_load_label': 'Loading file {}/{}: {}',
+        'queue_load_cancelled': 'File loading cancelled.',
+        'queue_load_pdf_started': 'Loading PDF into queue: {}',
+        'info_title': 'Information',
+        'warn_title': 'Warning',
+        'err_title': 'Error',
+        'theme_bright': 'Bright',
+        'theme_dark': 'Dark',
+        'warn_queue_empty': 'Queue is empty or all items are processed.',
+        'warn_select_done': 'No file(s) loaded for re-OCR.',
+        'warn_need_rec': 'Please select a format model (recognition) first.',
+        'warn_need_seg': 'Please select a segmentation model first.',
+        'msg_stopping': 'Stopping...',
+        'msg_finished': 'Batch finished.',
+        'msg_device': 'Device set to: {}',
+        'msg_exported': 'Exported: {}',
+        'msg_loaded_rec': 'Format model: {}',
+        'msg_loaded_seg': 'Segmentation model: {}',
+        'err_load': 'Cannot load image: {}',
+        'dlg_title_rename': 'Rename',
+        'dlg_label_name': 'New filename:',
+        'dlg_save': 'Save',
+        'dlg_load_img': 'Choose images',
+        'dlg_choose_rec': 'recognition model: ',
+        'dlg_choose_seg': 'segmentation model: ',
+        'dlg_filter_model': 'Models (*.mlmodel)',
+        'reading_tb_lr': 'Top → Bottom + Left → Right',
+        'reading_tb_rl': 'Top → Bottom + Right → Left',
+        'reading_bt_lr': 'Bottom → Top + Left → Right',
+        'reading_bt_rl': 'Bottom → Top + Right → Left',
+        'line_menu_move_up': 'Move line up',
+        'line_menu_move_down': 'Move line down',
+        'line_menu_delete': 'Delete line',
+        'line_menu_add_above': 'Add line above',
+        'line_menu_add_below': 'Add line below',
+        'line_menu_draw_box': 'Draw overlay box',
+        'line_menu_edit_box': 'Edit overlay box (move/resize)',
+        'line_menu_move_to': 'Move line to…',
+        'dlg_new_line_title': 'New line',
+        'dlg_new_line_label': 'Text of the new line:',
+        'dlg_move_to_title': 'Move line',
+        'dlg_move_to_label': 'Target line number (1…):',
+        'canvas_menu_add_box_draw': 'Add overlay box (draw)',
+        'canvas_menu_delete_box': 'Delete overlay box',
+        'canvas_menu_edit_box': 'Edit overlay box…',
+        'canvas_menu_select_line': 'Select line',
+        'dlg_box_title': 'Overlay box',
+        'dlg_box_left': 'left',
+        'dlg_box_top': 'top',
+        'dlg_box_right': 'right',
+        'dlg_box_bottom': 'bottom',
+        'dlg_box_apply': 'Apply',
+        'export_choose_mode_title': 'Export',
+        'export_mode_all': 'Export all files',
+        'export_mode_selected': 'Export selected files',
+        'export_select_files_title': 'Select files',
+        'export_select_files_hint': 'Choose files to export:',
+        'export_choose_folder': 'Choose destination folder',
+        'export_need_done': 'At least one selected file is not finished.',
+        'export_none_selected': 'No files selected.',
+        'undo_nothing': 'Nothing to undo.',
+        'redo_nothing': 'Nothing to redo.',
+        'overlay_only_after_ocr': 'Overlay editing is only available after OCR is finished.',
+        'new_line_from_box_title': 'New line',
+        'new_line_from_box_label': 'Text for the new line (optional):',
+        'log_added_files': '{} file(s) added to the queue.',
+        'log_ocr_started': 'OCR started: {} file(s), Device={}, Reading={}',
+        'log_stop_requested': 'OCR stop requested.',
+        'log_file_started': 'Starting file: {}',
+        'log_file_done': 'Done: {} ({} lines)',
+        'log_file_error': 'Error: {} -> {}',
+        'log_export_done': 'Export finished: {} file(s) as {} to {}',
+        'log_export_single': 'Export: {} -> {}',
+        'log_export_log_done': 'Log exported: {}',
+        'act_ai_revise': 'LM Revision',
+        'act_ai_revise_tip': 'Revise OCR text with local LLM',
+        'msg_ai_started': 'AI revision started...',
+        'msg_ai_done': 'AI revision finished.',
+        'msg_ai_model_set': 'AI model ID: {}',
+        'msg_ai_disabled': 'AI revision not available.',
+        'warn_lm_url_invalid': 'No valid LM server address was entered.\n'
+                               'Please check the instructions and try a different address.',
+        'warn_need_done_for_ai': 'Please select a finished OCR item first.',
+        'warn_need_ai_model': 'No model was found via the configured LM server URL. Please start a local '
+                              'OpenAI-compatible server or set a valid URL or model ID (for example LM Studio, Ollama, '
+                              'Jan, GPT4All, text-generation-webui, LocalAI, or vLLM).',
+        'warn_ai_server': 'Local LM server is not reachable. Please load the model and start the OpenAI-compatible '
+                          'server.',
+        'dlg_choose_ai_model': 'LM model identifier',
+        'dlg_choose_ai_model_label': 'Optional model ID. Leave empty to automatically use the running model from the '
+                                     'configured server:',
+        'log_ai_started': 'AI revision started: {}',
+        'log_ai_done': 'AI revision finished: {}',
+        'log_ai_error': 'AI revision error: {} -> {}',
+        'status_ai_processing': 'AI revising...',
+        'status_exporting': 'Exporting...',
+        'menu_project_save': 'Save project',
+        'menu_project_save_as': 'Save project as...',
+        'menu_project_load': 'Load project...',
+        'dlg_filter_project': 'Bottled Kraken Project (*.json)',
+        'msg_project_saved': 'Project saved: {}',
+        'msg_project_loaded': 'Project loaded: {}',
+        'warn_project_load_failed': 'Project could not be loaded: {}',
+        'warn_project_save_failed': 'Project could not be saved: {}',
+        'warn_project_file_missing': 'File not found: {}',
+        'line_menu_swap_with': 'Swap line with…',
+        'dlg_swap_title': 'Swap lines',
+        'dlg_swap_label': 'Swap with line number (1…):',
+        'act_voice_fill': 'Speak lines',
+        'act_voice_fill_tip': 'Overwrite lines from microphone with faster-whisper',
+        'act_voice_stop': 'Stop recording',
+        'msg_voice_started': 'Voice recording started...',
+        'msg_voice_stopped': 'Voice recording stopped. Transcribing...',
+        'msg_voice_done': 'Voice import finished.',
+        'msg_voice_cancelled': 'Voice recording cancelled.',
+        'warn_voice_need_done': 'Please select a finished OCR item first.',
+        'warn_voice_model_missing': 'Faster-Whisper model directory was not found.',
+        'status_voice_recording': 'Recording...',
+        'lines_tree_header': 'Recognized lines and words',
+        'col_loaded_files': 'Loaded files',
+        'btn_rec_model_empty': 'Recognition model: -',
+        'btn_rec_model_value': 'Recognition model: {}',
+        'btn_seg_model_empty': 'Segmentation model: -',
+        'btn_seg_model_value': 'Segmentation model: {}',
+        'act_load_rec_model': 'Load recognition model...',
+        'act_load_seg_model': 'Load segmentation model...',
+        'submenu_available_kraken_models': 'Available Kraken models',
+        'submenu_available_ai_models': 'Available LM models',
+        'submenu_available_whisper_models': 'Available Whisper models',
+        'btn_cancel': 'Cancel',
+        'progress_status_ready': 'Ready',
+        'voice_record_title': '🎤 Change line with audio',
+        'voice_record_info': 'Audio recording controls:',
+        'voice_record_start': 'Start recording',
+        'voice_record_stop': 'Stop recording',
+        'voice_record_processing': 'Whisper is processing audio … please wait a moment.',
+        'warn_select_line_first': 'Please select a line first.',
+        'warn_selected_line_invalid': 'The selected line is invalid.',
+        'warn_whisper_model_not_loaded': "No loaded Whisper model is active. Please choose a model under 'Whisper "
+                                         "options'.",
+        'warn_no_microphone_available': 'No microphone is available.',
+        'log_voice_stopping': 'Stopping voice recording...',
+        'image_edit_title': 'Image editing – {}',
+        'image_edit_erase_rect': 'Remove area (rectangle)',
+        'image_edit_erase_ellipse': 'Remove area (circle)',
+        'image_edit_erase_clear': 'Clear removal area',
+        'warn_select_image_or_pdf_page': 'Please select an image or a PDF page first.',
+        'warn_image_load_failed_detail': 'The image could not be loaded:\n{}',
+        'info_no_marked_images_found': 'No marked images found.',
+        'msg_image_edit_selected_applied': 'Image editing applied to marked images.',
+        'msg_image_edit_all_applied': 'Image editing applied to all images.',
+        'log_image_edit_error': 'Image editing error: {} -> {}',
+        'act_help': 'Help',
+        'act_ai_revise_all': 'Revise all',
+        'act_ai_revise_all_tip': 'Revise all fully recognized files',
+        'warn_select_multiple_lines_first': 'Please select multiple lines first.',
+        'msg_ai_selected_lines_started': 'LM revision started for {} selected lines...',
+        'log_ai_multi_started': 'LM multi-line revision started: {} | lines {}',
+        'dlg_ai_multi_title': 'AI multi-line revision',
+        'dlg_ai_multi_status': 'Revising {} selected lines ...',
+        'btn_import_lines': 'Import lines',
+        'btn_import_lines_tip': 'Load recognized lines from TXT/JSON',
+        'act_import_lines_current': 'For current image',
+        'act_import_lines_selected': 'For selected images',
+        'act_import_lines_all': 'For all images',
+        'warn_import_unsupported_format': 'Unsupported import format: {}',
+        'warn_import_no_usable_lines': 'The import file contains no usable lines.',
+        'info_no_current_image_loaded': 'No current image loaded.',
+        'dlg_import_lines_current': 'Import lines',
+        'info_no_images_selected_or_marked': 'No images selected or marked.',
+        'dlg_import_lines_selected': 'Load line files for selected images',
+        'info_no_images_loaded': 'No images loaded.',
+        'dlg_import_lines_all': 'Load line files for all images',
+        'warn_no_matching_import_for_selected': 'No import file matches the selected images.\n'
+                                                '\n'
+                                                'The filenames must match by base name.',
+        'warn_no_matching_import_for_loaded': 'No import file matches the loaded images.\n'
+                                              '\n'
+                                              'The filenames must match by base name.',
+        'log_import_error': 'Import error: {} -> {}',
+        'log_voice_import_started': 'Sprachimport gestartet: {} | Zeile {} | Mikrofon: {} | Modell: {}',
+        'warn_voice_cancelled': 'Aufnahme abgebrochen.',
+        'warn_voice_not_finished': 'Aufnahme wurde nicht regulär beendet.',
+        'warn_voice_no_audio_data': 'Keine Audiodaten aufgenommen.',
+        'voice_status_prepare_wav': 'Audiodatei wird vorbereitet...',
+        'voice_status_load_whisper': 'Lade faster-whisper...',
+        'voice_status_transcribe_line': 'Transkribiere ausgewählte Zeile lokal ({}/{})...',
+        'voice_status_fallback_cpu': 'Initialisierung auf {}/{} fehlgeschlagen. Neuer Versuch mit CPU/int8 …',
+        'voice_status_finalize': 'Bereite Text auf...',
+        'voice_status_microphone_active': "Mikrofon aktiv … bitte sprechen. Zum Beenden 'Aufnahme stoppen' klicken.",
+        'voice_status_input_device': 'Aufnahmegerät: {}',
+        'audio_device_default_mic': 'Systemstandard-Mikrofon',
+        'audio_device_generic': 'Gerät {}',
+        'whisper_status_model': 'Modell: {}',
+        'whisper_status_mic': 'Mikrofon: {}',
+        'whisper_status_path': 'Pfad: {}',
+        'dlg_whisper_model_dir': 'Whisper-Modellordner wählen',
+        'msg_whisper_path_set': 'Whisper-Pfad gesetzt: {}',
+        'warn_whisper_model_present': 'Das Faster-Whisper large-v3 Modell ist bereits vorhanden.\n'
+                                      '\n'
+                                      'Pfad:\n'
+                                      '{}\n'
+                                      '\n'
+                                      'Ein erneuter Download ist nicht nötig.',
+        'msg_whisper_model_already_present': 'Whisper-Modell bereits vorhanden: {}',
+        'warn_whisper_download_start_failed': 'Download des Whisper-Modells konnte nicht gestartet werden:\n{}',
+        'msg_whisper_download_start_failed': 'Whisper-Download konnte nicht gestartet werden.',
+        'msg_whisper_model_loaded': 'Whisper-Modell geladen: {}',
+        'info_whisper_model_downloaded': 'Das Faster-Whisper-Modell wurde erfolgreich heruntergeladen.\n'
+                                         '\n'
+                                         'Zielordner:\n'
+                                         '{}',
+        'msg_whisper_download_failed': 'Whisper-Download fehlgeschlagen.',
+        'warn_whisper_download_failed': 'Download des Whisper-Modells fehlgeschlagen:\n{}',
+        'dlg_help_title': 'Hinweise',
+        'help_nav_quick': 'Workflow',
+        'help_nav_kraken': 'Kraken',
+        'help_nav_lm_server': 'LM server',
+        'help_nav_ssh': 'SSH tunnel',
+        'help_nav_whisper': 'Whisper',
+        'help_nav_shortcuts': 'Shortcuts',
+        'help_nav_data_protection': 'Data protection',
+        'help_nav_legal': 'Legal',
+        'help_whisper_download_label': '<b>Download the Whisper model with a button:</b>',
+        'help_os_windows': 'Windows',
+        'help_os_arch': 'Arch',
+        'help_os_debian': 'Debian',
+        'help_os_fedora': 'Fedora',
+        'help_os_macos': 'macOS',
+        'whisper_hint_debian': 'Note for Debian/Ubuntu/Linux Mint:\n'
+                               'The app uses its own Python environment (venv) here to avoid PEP-668 errors with the '
+                               'system Python.\n'
+                               '\n'
+                               'If creating the venv fails, required system packages are usually missing. Run:\n'
+                               '\n'
+                               'sudo apt update\n'
+                               'sudo apt install -y python3-venv python3-pip ffmpeg portaudio19-dev',
+        'whisper_hint_fedora': 'Optional note for Fedora:\n'
+                               'If sounddevice causes problems later, these system packages may help.\n'
+                               '\n'
+                               'sudo dnf install -y python3-pip ffmpeg portaudio-devel',
+        'whisper_hint_arch': 'Optional note for Arch Linux:\n'
+                             'If sounddevice causes problems later, these system packages may help.\n'
+                             '\n'
+                             'sudo pacman -S --needed python-pip ffmpeg portaudio',
+        'whisper_hint_macos': 'Optional note for macOS:\n'
+                              'If sounddevice causes problems later, these packages may help.\n'
+                              '\n'
+                              'brew install ffmpeg portaudio',
+        'whisper_hint_windows': 'Optional note for Windows:\n'
+                                'Usually no additional system packages are required. If audio problems appear later, '
+                                'they are usually related to drivers or microphone permissions.',
+        'whisper_hint_generic': 'Optional note:\n'
+                                'If sounddevice causes problems later, additional system packages may be required.',
+        'whisper_system_hint_dialog': 'Optional system note:\n'
+                                      '\n'
+                                      '{}\n'
+                                      '\n'
+                                      'The actual download still runs only through Python (sys.executable -m pip / '
+                                      'Python API of huggingface_hub).',
+        'warn_whisper_download_running': 'A Whisper download is already running.',
+        'msg_whisper_download_prepare_target': 'Starting requirement installation and model download to: {}',
+        'dlg_whisper_download_title': 'Loading Whisper model',
+        'dlg_whisper_download_prepare': 'Starting Whisper setup ...',
+        'hf_status_waiting_for_lock': 'Waiting for file lock in the target folder ...',
+        'hf_status_files_done': 'Files finished: {}/{}',
+        'hf_status_current_file': 'Current: {}',
+        'hf_status_last_finished': 'Last finished: {}',
+        'hf_status_download_done': 'Download completed.',
+        'hf_error_cancelled': 'Download cancelled.',
+        'hf_error_hf_exit': "'hf download' exited with code {}.",
+        'hf_error_command_exit': 'Command exited with code {}:\n{}',
+        'hf_error_python_missing': 'Python or a required module could not be found.\n'
+                                   '\n'
+                                   'Please check whether the application is running with a working Python environment.',
+        'hf_error_externally_managed': 'The system Python installation must not be modified directly.\n'
+                                       '\n'
+                                       'The app should automatically use its own environment for this. If this still '
+                                       'happened, python3-venv is probably missing.\n'
+                                       '\n'
+                                       'Please run:\n'
+                                       'sudo apt update\n'
+                                       'sudo apt install -y python3-venv python3-pip',
+        'hf_error_no_venv': 'Python venv support is missing on this system.\n'
+                            '\n'
+                            'Please run:\n'
+                            'sudo apt update\n'
+                            'sudo apt install -y python3-venv python3-pip',
+        'hf_error_python3_missing': 'python3 was not found.\n\nPlease check whether Python 3 is installed.',
+        'warn_invalid_line': 'Invalid line.',
+        'btn_ai_model_value': 'KI: {}',
+        'llm_status_value': 'LLM: {}',
+        'lm_status_model_value': 'Modell: {}',
+        'lm_mode_value': 'Modus: {}',
+        'lm_server_value': 'Server: {}',
+        'dlg_ai_title': 'AI revision',
+        'dlg_ai_connecting': 'Connecting to local LM server…',
+        'dlg_ai_single_title': 'AI line revision',
+        'dlg_ai_single_status': 'Überarbeite nur Zeile {} …',
+        'msg_ai_single_started': 'LM-Überarbeitung für Zeile {} gestartet...',
+        'log_ai_single_started': 'LM-Zeilenüberarbeitung gestartet: {} | Zeile {}',
+        'msg_ai_multi_done': 'LM-Überarbeitung für {} ausgewählte Zeilen abgeschlossen.',
+        'log_ai_multi_done': 'LM-Mehrfachzeilenüberarbeitung abgeschlossen: {} | Zeilen {}',
+        'msg_ai_multi_cancelled': 'Mehrfachzeilenüberarbeitung abgebrochen.',
+        'log_ai_multi_cancelled': 'LM-Mehrfachzeilenüberarbeitung abgebrochen: {}',
+        'msg_ai_multi_failed': 'Mehrfachzeilenüberarbeitung fehlgeschlagen.',
+        'log_ai_multi_failed': 'LM-Mehrfachzeilenüberarbeitung Fehler: {} -> {}',
+        'msg_ai_batch_finished': 'AI batch finished.',
+        'log_ai_batch_debug_return': 'KI Batch Rückgabe für {}: {} Zeilen, OCR hatte {} Zeilen',
+        'log_ai_batch_debug_old_first': 'ALT erste Zeile: {}',
+        'log_ai_batch_debug_new_first': 'NEU erste Zeile: {}',
+        'log_ai_batch_debug_all': 'NEU alle Zeilen: {}',
+        'msg_ai_cancelled': 'Revision cancelled.',
+        'ai_status_start_free_ocr': 'Starte freie KI-OCR: {}',
+        'ai_status_step1_title': '1/3 Zeilenweise Box-OCR: {}',
+        'ai_status_step1_line': '1/3 Box-OCR Zeile {}/{}: {}',
+        'ai_status_step2_form': '2/3 Block-Kontext-OCR (Formularmodus): {}',
+        'ai_status_step2_plain': '2/3 Block-Kontext-OCR: {}',
+        'ai_status_step2_chunk': '2/3 Block-Kontext {}/{}: Zeilen {}-{}',
+        'ai_status_step3_merge': '3/3 Merge: Box primär, Page nur wenn lokal konsistent: {}',
+        'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
+        'ai_err_bad_scheme': 'Unsupported scheme: {}',
+        'ai_err_invalid_endpoint': 'Invalid endpoint.',
+        'ai_err_timeout': 'Timeout while waiting for LM Studio.',
+        'ai_err_invalid_json': 'Invalid JSON response from LM Studio: {}',
+        'ai_err_http': 'HTTP error: {}\n{}',
+        'ai_err_server_unreachable': 'LM Studio not reachable: {}',
+        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
+                                      'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
+                                      'verwende ein nicht-thinkendes Modell.',
+        'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
+                                 'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
+                                 'reasoning.',
+        'ai_err_no_content': 'LM Studio returned no usable response content.',
+        'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
+        'ai_err_page_no_usable_lines': 'Seiten-OCR lieferte keine verwertbaren Zeilen: {}/{}',
+        'ai_err_block_invalid_json': 'Block-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_block_invalid_lines': "Block-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_final_merge_count': 'Finale Merge-Ausgabe gab {} statt {} Zeilen zurück.',
+        'help_html_quick': '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h1">Workflow</div>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <ol>\n'
+                           '                    <li>Load an image or PDF</li>\n'
+                           '                    <li>Optional: use image editing for preparation</li>\n'
+                           '                    <li>Load the recognition model</li>\n'
+                           '                    <li>Load the segmentation model</li>\n'
+                           '                    <li>Start Kraken OCR</li>\n'
+                           '                    <li>Check the recognized lines and correct them if needed</li>\n'
+                           '                    <li>Optional: use LM revision or Whisper</li>\n'
+                           '                    <li>Export the result as TXT, CSV, JSON, ALTO, hOCR, or PDF</li>\n'
+                           '                </ol>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Preparation</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>Image editing can already be used <b>before</b> OCR if a scan is '
+                           'poorly cropped, too low in contrast, or contains too much surrounding content.</li>\n'
+                           '                    <li>The most useful tools here are <b>crop area</b>, <b>separator '
+                           'bar</b>, <b>gray</b>, <b>contrast</b>, and <b>smart splitting</b>.</li>\n'
+                           '                    <li>This makes it easier to prepare double pages, form halves, '
+                           'margins, or distracting neighboring content before the actual OCR pass.</li>\n'
+                           '                    <li>It is especially helpful for record pages, forms, batch scans, and '
+                           'badly digitized archival material.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Post-processing</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>Load an LM model via LM Studio or another compatible LM '
+                           'server</li>\n'
+                           '                    <li>Smooth OCR lines linguistically or semantically with a local '
+                           'language model</li>\n'
+                           '                    <li>Re-record individual lines with Faster-Whisper through the '
+                           'microphone</li>\n'
+                           '                    <li>Import lines from TXT or JSON</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Overlay boxes &amp; lines</div>\n'
+                           '                <span class="badge">Optional</span>\n'
+                           '                <ul>\n'
+                           '                    <li>Lines and overlay boxes can be moved, split, added, or '
+                           'deleted.</li>\n'
+                           '                    <li>This allows the line structure to be improved in a targeted way '
+                           'before running OCR again.</li>\n'
+                           '                    <li>Especially useful for forms, column layouts, and badly segmented '
+                           'handwriting.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">What does Bottled Kraken do?</div><br>\n'
+                           '                Bottled Kraken combines classic OCR with preparatory image editing, manual '
+                           'post-processing, and optional local AI support.\n'
+                           '                This lets you improve difficult historical prints, handwriting, or form '
+                           'pages step by step.\n'
+                           '            </div>\n'
+                           '        ',
+        'help_html_kraken': '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h1">Kraken</div><br>\n'
+                            '        Kraken is the OCR/ATR foundation of Bottled Kraken.\n'
+                            '        It is an open-source system for automatic text recognition,\n'
+                            '        developed especially for historical prints, handwriting, and non-Latin scripts.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">What is important about it for Bottled Kraken?</div>\n'
+                            '        <ul>\n'
+                            '            <li><b>Segmentation:</b> Detects layout, text regions, lines, and reading '
+                            'order.</li>\n'
+                            '            <li><b>Recognition:</b> Reads the actual text from the detected lines.</li>\n'
+                            '            <li><b>Models:</b> Segmentation and recognition run via trained models that '
+                            'must match the material.</li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Typical Kraken workflow</div>\n'
+                            '        <ol>\n'
+                            '            <li>Prepare the image</li>\n'
+                            '            <li>Segment the page (<code>segment</code>)</li>\n'
+                            '            <li>Recognize the text (<code>ocr</code>)</li>\n'
+                            '            <li>Structure / export the result</li>\n'
+                            '        </ol>\n'
+                            '        In Bottled Kraken, these exact steps are transferred into the interface:\n'
+                            '        first the segmentation model, then the recognition model, then OCR and export.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Key strengths of Kraken</div>\n'
+                            '        <ul>\n'
+                            '            <li>trainable layout analysis, reading order, and character recognition</li>\n'
+                            '            <li>support for right-to-left, BiDi, and top-to-bottom</li>\n'
+                            '            <li>output as ALTO, PageXML, abbyyXML, and hOCR</li>\n'
+                            '            <li>word bounding boxes and character cuts</li>\n'
+                            '            <li>public model collection via HTRMoPo / Zenodo</li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Models</div><br>\n'
+                            '        Kraken works in a model-based way.\n'
+                            '        Good results depend heavily on the model matching the document type.\n'
+                            '        A model trained on historical prints is usually much better for historical '
+                            'prints\n'
+                            '        than a general model for modern material.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Interfaces</div><br>\n'
+                            '        Kraken offers two main approaches:\n'
+                            '        <ul>\n'
+                            '            <li><b>CLI:</b> for classic OCR workflows</li>\n'
+                            '            <li><b>Python API:</b> for custom applications and integrations</li>\n'
+                            '        </ul>\n'
+                            '        Bottled Kraken uses the Python library directly in the program code.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Official sources</div>\n'
+                            '        <ul>\n'
+                            '            <li><a href="https://github.com/mittagessen/kraken">GitHub: '
+                            'mittagessen/kraken</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/index.html">Kraken Documentation '
+                            '7.0</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/getting_started.html">Getting '
+                            'Started</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/user_guide/models.html">Model '
+                            'Management</a></li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card warn">\n'
+                            '        <div class="h2">Note</div>\n'
+                            '        <span class="badge">Important</span><br>\n'
+                            '        If the segmentation is not clean, recognition will also perform worse.\n'
+                            '        That is exactly why Bottled Kraken uses <code>blla.mlmodell</code> by default\n'
+                            '        instead of the legacy segmentation model <code>pageseg</code>.\n'
+                            '    </div>\n',
+        'help_html_lm_server': '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h1">LM server / local model servers</div><br>\n'
+                               '                This section is meant for <b>local language-model '
+                               'post-processing</b>.\n'
+                               '                For this, Bottled Kraken expects an <b>OpenAI-compatible base URL</b>, '
+                               'usually including <code>/v1</code>.\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Base URLs that fit Bottled Kraken directly</div>\n'
+                               '                <pre>LM Studio:               http://localhost:1234/v1\n'
+                               'Ollama (OpenAI compat):  http://localhost:11434/v1\n'
+                               'GPT4All:                 http://localhost:4891/v1\n'
+                               'text-generation-webui:   http://127.0.0.1:5000/v1\n'
+                               'LocalAI:                 http://localhost:8080/v1</pre>\n'
+                               '                <div class="muted">\n'
+                               '                    Important: with Ollama, enter the <b>OpenAI-compatible</b> '
+                               '<code>/v1</code> URL in Bottled Kraken, not the raw <code>/api</code> route.\n'
+                               '                </div>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">LM Studio</div>\n'
+                               '                <ul>\n'
+                               '                    <li>For many users, this is the easiest starting point if you want '
+                               'a desktop app with model management and local serving.</li>\n'
+                               '                    <li>LM Studio exposes local models through REST, '
+                               'OpenAI-compatible, and Anthropic-compatible endpoints.</li>\n'
+                               '                    <li>The standard Bottled Kraken case is '
+                               '<code>http://localhost:1234/v1</code>.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Ollama</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Usually the cleanest choice if you mainly want a local service '
+                               'and a lean CLI/daemon workflow.</li>\n'
+                               '                    <li>Ollama starts locally on <code>http://localhost:11434</code>, '
+                               'offers its own <code>/api</code> interface, and also provides OpenAI compatibility '
+                               'under <code>/v1</code>.</li>\n'
+                               '                    <li>It also supports Anthropic-compatible usage for workflows such '
+                               'as Claude Code.</li>\n'
+                               '                    <li>For Bottled Kraken, <code>http://localhost:11434/v1</code> is '
+                               'usually the best choice.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Jan</div>\n'
+                               '                <ul>\n'
+                               '                    <li>In terms of interaction style, Jan is often the closest '
+                               'alternative to LM Studio: desktop app, local models, built-in OpenAI-compatible API '
+                               'server.</li>\n'
+                               '                    <li>By default, Jan listens on <code>http://127.0.0.1:1337</code> '
+                               'with the API prefix <code>/v1</code>; the default host <code>127.0.0.1</code> is '
+                               'intentionally local-only.</li>\n'
+                               '                    <li>Jan also requires an API key by default. In practice, that '
+                               'means Jan is most useful with Bottled Kraken if you adapt the expected header behavior '
+                               'or place a small local proxy in between.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">GPT4All</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Very close to “just start locally and use it”.</li>\n'
+                               '                    <li>Its local API server runs by default on '
+                               '<code>http://localhost:4891/v1</code>, is OpenAI-compatible, and listens only on '
+                               '<code>localhost</code>.</li>\n'
+                               '                    <li>On top of that, GPT4All includes <b>LocalDocs</b> for a simple '
+                               'local document/RAG workflow.</li>\n'
+                               '                    <li>For Bottled Kraken, it is usually one of the most '
+                               'straightforward LM Studio alternatives.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Most interesting for people who like to tweak things, switch '
+                               'backends, and control many settings themselves.</li>\n'
+                               '                    <li>The project supports several backends such as '
+                               '<code>llama.cpp</code>, <code>Transformers</code>, <code>ExLlamaV3</code>, and '
+                               '<code>TensorRT-LLM</code>.</li>\n'
+                               '                    <li>Its OpenAI-/Anthropic-compatible API can be used as a drop-in '
+                               'replacement; by default it typically uses port <code>5000</code>.</li>\n'
+                               '                    <li>It also includes tool calling, vision, and file '
+                               'attachments.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">LocalAI</div>\n'
+                               '                <ul>\n'
+                               '                    <li>Best suited if you are thinking more in terms of a self-hosted '
+                               'local AI server than a classic desktop app.</li>\n'
+                               '                    <li>LocalAI exposes an OpenAI-compatible API; the typical Bottled '
+                               'Kraken setup is <code>http://localhost:8080/v1</code>.</li>\n'
+                               '                    <li>It also supports additional compatible API formats, a web UI, '
+                               'and agent/MCP features.</li>\n'
+                               '                    <li>A good choice if you want to bundle several local services or '
+                               'build a small internal AI stack.</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Practical selection guide</div>\n'
+                               '                <ul>\n'
+                               '                    <li><b>LM Studio:</b> if you want a GUI, local serving, and low '
+                               'friction</li>\n'
+                               '                    <li><b>Ollama:</b> if you prefer a clean local service or CLI '
+                               'workflow</li>\n'
+                               '                    <li><b>Jan:</b> if you want LM-Studio-like desktop handling and '
+                               'can live with API-key/proxy setup</li>\n'
+                               '                    <li><b>GPT4All:</b> if you want a simple desktop solution plus '
+                               'LocalDocs</li>\n'
+                               '                    <li><b>text-generation-webui:</b> if you want fine control over '
+                               'backends, vision, and tooling</li>\n'
+                               '                    <li><b>LocalAI:</b> if you want a more self-hosted local server '
+                               'with broader API/agent focus</li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '\n'
+                               '            <div class="card">\n'
+                               '                <div class="h2">Official sources</div>\n'
+                               '                <ul>\n'
+                               '                    <li><a href="https://lmstudio.ai/docs/developer/core/server">LM '
+                               'Studio Docs – Local LLM API Server</a></li>\n'
+                               '                    <li><a href="https://lmstudio.ai/docs/developer/openai-compat">LM '
+                               'Studio Docs – OpenAI Compatibility</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.ollama.com/api/openai-compatibility">Ollama Docs – OpenAI '
+                               'compatibility</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.ollama.com/integrations/claude-code">Ollama Docs – Claude Code / '
+                               'Anthropic-compatible API</a></li>\n'
+                               '                    <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan Docs '
+                               '– Local API Server</a></li>\n'
+                               '                    <li><a '
+                               'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All Docs – API '
+                               'Server</a></li>\n'
+                               '                    <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                               'Repository</a></li>\n'
+                               '                    <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                               '– OpenAI / Anthropic API Wiki</a></li>\n'
+                               '                    <li><a href="https://localai.io/docs/overview/">LocalAI Docs – '
+                               'Overview</a></li>\n'
+                               '                    <li><a href="https://localai.io/basics/getting_started/">LocalAI '
+                               'Docs – Quickstart</a></li>\n'
+                               '                </ul>\n'
+                               '            </div>\n'
+                               '        ',
+        'help_html_ssh': '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h1">Remote access via SSH tunnel</div><br>\n'
+                         '        An SSH tunnel is useful when your LM server is running on another machine\n'
+                         '        but is only bound to <code>127.0.0.1</code> there and is therefore not directly '
+                         'reachable on the network.\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">What happens here?</div><br>\n'
+                         '        The tunnel forwards a local port on your computer to a port on the remote machine.\n'
+                         '        For Bottled Kraken, it then looks as if the LM server were running locally on your '
+                         'own computer.\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">Example</div>\n'
+                         '        <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
+                         '        Then use this in Bottled Kraken:\n'
+                         '        <pre>http://127.0.0.1:1234/v1</pre>\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">Typical workflow</div>\n'
+                         '        <ol>\n'
+                         '            <li>Start LM Studio or vLLM on the target machine</li>\n'
+                         '            <li>Check which port the local API server is using</li>\n'
+                         '            <li>Open the SSH tunnel from your own computer</li>\n'
+                         '            <li>Enter the local tunnel URL in Bottled Kraken</li>\n'
+                         '        </ol>\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card warn">\n'
+                         '        <div class="h2">Important</div>\n'
+                         '        <ul>\n'
+                         '            <li>In Bottled Kraken, you do <b>not</b> enter the SSH command.</li>\n'
+                         '            <li>You always enter the resulting HTTP URL, for example '
+                         '<code>http://127.0.0.1:1234/v1</code>.</li>\n'
+                         '            <li>The SSH tunnel must remain open as long as Bottled Kraken should use the '
+                         'server.</li>\n'
+                         '        </ul>\n'
+                         '    </div>\n',
+        'help_html_whisper_intro': '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h1">Faster-Whisper</div>\n'
+                                   '        <p>\n'
+                                   '            Faster-Whisper is a fast local speech-to-text recognizer.\n'
+                                   '            In Bottled Kraken, you can use it to re-dictate individual OCR lines '
+                                   'via microphone\n'
+                                   '            and insert them directly as text.\n'
+                                   '        </p>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">What is this useful for?</div>\n'
+                                   '        <ul>\n'
+                                   '            <li>when an OCR line is badly damaged or was recognized '
+                                   'incorrectly</li>\n'
+                                   '            <li>when you can dictate individual fields or names faster than typing '
+                                   'them</li>\n'
+                                   '            <li>when you want to make targeted corrections line by line</li>\n'
+                                   '        </ul>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">What gets downloaded?</div>\n'
+                                   '        <p>\n'
+                                   '            The model <span class="badge">Systran/faster-whisper-large-v3</span> '
+                                   'is loaded.\n'
+                                   '        </p>\n'
+                                   '        <p class="muted">\n'
+                                   '            Before the download, Bottled Kraken automatically installs the '
+                                   'required Python packages.\n'
+                                   '            The actual model download is handled through the Hugging Face CLI via '
+                                   '<code>hf download</code>.\n'
+                                   '            Under Linux and macOS, a separate venv environment is used '
+                                   'automatically for this.\n'
+                                   '        </p>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">Workflow in Bottled Kraken</div>\n'
+                                   '        <ol>\n'
+                                   '            <li>Download the Whisper model or scan for an existing model</li>\n'
+                                   '            <li>Select a microphone</li>\n'
+                                   '            <li>Mark a line</li>\n'
+                                   '            <li>Start audio recording</li>\n'
+                                   '            <li>The spoken input is transcribed locally and replaces the '
+                                   'line</li>\n'
+                                   '        </ol>\n'
+                                   '    </div>\n',
+        'help_html_shortcuts': '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h1">Keyboard Shortcuts</div>\n'
+                               '        <table class="table">\n'
+                               '            <tr><td class="section" colspan="2">Project</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + S</span></td><td>Save project</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Save project '
+                               'as</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + I</span></td><td>Load project</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + E</span></td><td>Export</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + Q</span></td><td>Quit program</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + K</span></td><td>Start Kraken '
+                               'OCR</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + P</span></td><td>Stop Kraken '
+                               'OCR</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + L</span></td><td>Start LM '
+                               'revision</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + M</span></td><td>Start Faster-Whisper / '
+                               'microphone</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">Selection</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + A</span></td><td>Select everything in the '
+                               'current context</td></tr>\n'
+                               '            <tr><td><span class="kbd">Entf</span></td><td>Delete selected lines or '
+                               'boxes</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">Function Keys</td></tr>\n'
+                               '            <tr><td><span class="kbd">F1</span></td><td>Shortcut help</td></tr>\n'
+                               '            <tr><td><span class="kbd">F2</span></td><td>Load recognition '
+                               'model</td></tr>\n'
+                               '            <tr><td><span class="kbd">F3</span></td><td>Load segmentation '
+                               'model</td></tr>\n'
+                               '            <tr><td><span class="kbd">F4</span></td><td>Enter LM server URL</td></tr>\n'
+                               '            <tr><td><span class="kbd">F5</span></td><td>Start LM scan</td></tr>\n'
+                               '            <tr><td><span class="kbd">F6</span></td><td>Scan Whisper models + set '
+                               'first microphone</td></tr>\n'
+                               '            <tr><td><span class="kbd">F7</span></td><td>Toggle log window</td></tr>\n'
+                               '        </table>\n'
+                               '    </div>\n',
+        'help_html_data_protection': '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h1">Data protection</div><br>\n'
+                                     '                The following notes summarize the <b>standard local operating '
+                                     'mode</b>.\n'
+                                     '                They do not replace a case-by-case privacy review.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">General rule</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Local models and local servers are generally more '
+                                     'privacy-friendly because prompts, documents, and audio are not automatically '
+                                     'sent to a cloud service.</li>\n'
+                                     '                    <li>That is only true as long as the software is actually '
+                                     'used <b>locally</b> and without cloud or network routing.</li>\n'
+                                     '                    <li>As soon as network exposure, tunnels, reverse proxies, '
+                                     'remote instances, or cloud models are involved, the privacy situation '
+                                     'changes.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">LM Studio</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>According to the official documentation, LM Studio can '
+                                     'operate fully offline; local chat, document chat, and the local server do not '
+                                     'require internet access for that.</li>\n'
+                                     '                    <li>The privacy policy also states explicitly that messages, '
+                                     'chat histories, and documents are not transmitted off the system by '
+                                     'default.</li>\n'
+                                     '                    <li>That applies to local use. If you enable network serving '
+                                     'or remote features, you need to review where data goes.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Ollama</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Ollama runs locally by default on '
+                                     '<code>http://localhost:11434</code>; no authentication is required for purely '
+                                     'local API use.</li>\n'
+                                     '                    <li>That keeps a localhost-only setup on your own '
+                                     'machine.</li>\n'
+                                     '                    <li>Important: Ollama also supports <b>cloud models</b>. As '
+                                     'soon as you use them, the workflow is no longer purely local.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Jan</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Jan presents itself as privacy-first and stores data '
+                                     'locally in its own data folder.</li>\n'
+                                     '                    <li>Its local API is restricted to <code>127.0.0.1</code> by '
+                                     'default, which is the safer default for single-user use.</li>\n'
+                                     '                    <li>At the same time, Jan offers analytics/tracking settings '
+                                     'and detailed server logs. Before productive use, it is worth checking '
+                                     'consciously what is logged locally and whether network access has been '
+                                     'enabled.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">GPT4All</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>GPT4All emphasizes local execution on your own '
+                                     'hardware.</li>\n'
+                                     '                    <li>Its API server listens on <code>localhost</code> only by '
+                                     'default, not to other devices on the network.</li>\n'
+                                     '                    <li>With <b>LocalDocs</b>, local documents can be added to '
+                                     'the workflow; even then, storage location and device access control still '
+                                     'matter.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">text-generation-webui &amp; LocalAI</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li><b>text-generation-webui</b> describes its '
+                                     'OpenAI-/Anthropic-compatible API as 100% offline and private, and also states '
+                                     'that it does not create logs.</li>\n'
+                                     '                    <li><b>LocalAI</b> positions itself as a local '
+                                     'OpenAI-compatible stack and advertises that it keeps your data private and '
+                                     'secure.</li>\n'
+                                     '                    <li>For both projects, the same practical rule applies: once '
+                                     'you expose the API on the network, put it behind a reverse proxy, or allow '
+                                     'multiple users, you need to secure access, logs, backups, and admin permissions '
+                                     'yourself.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">faster-whisper</div><br>\n'
+                                     '                faster-whisper is a local Whisper implementation based on '
+                                     'CTranslate2.\n'
+                                     '                In Bottled Kraken, a local model directory is loaded and a local '
+                                     'WAV file is transcribed.\n'
+                                     '                As long as this workflow remains local, audio processing also '
+                                     'remains local.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h2">Important limitations</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>The one-time model download naturally requires internet '
+                                     'access.</li>\n'
+                                     '                    <li>Even a “local” server can expose personal data if the '
+                                     'device itself is not secured properly.</li>\n'
+                                     '                    <li>For public institutions, archives, companies, or '
+                                     'research organizations, tool properties alone are not enough; storage location, '
+                                     'role concepts, logs, backups, deletion rules, and internal policies matter as '
+                                     'well.</li>\n'
+                                     '                    <li>A software license or privacy policy does not replace a '
+                                     'GDPR, contractual, or operational review for a specific deployment.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Official sources</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li><a href="https://lmstudio.ai/docs/app/offline">LM Studio '
+                                     'Docs – Offline Operation</a></li>\n'
+                                     '                    <li><a href="https://lmstudio.ai/privacy">LM Studio Desktop '
+                                     'App Privacy Policy</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://docs.ollama.com/api/authentication">Ollama Docs – '
+                                     'Authentication</a></li>\n'
+                                     '                    <li><a href="https://docs.ollama.com/cloud">Ollama Docs – '
+                                     'Cloud</a></li>\n'
+                                     '                    <li><a href="https://ollama.com/privacy">Ollama – Privacy '
+                                     'Policy</a></li>\n'
+                                     '                    <li><a href="https://www.jan.ai/docs/desktop/privacy">Jan '
+                                     'Docs – Privacy</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://www.jan.ai/docs/desktop/data-folder">Jan Docs – Data '
+                                     'Folder</a></li>\n'
+                                     '                    <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan '
+                                     'Docs – Local API Server</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All Docs – API '
+                                     'Server</a></li>\n'
+                                     '                    <li><a href="https://github.com/nomic-ai/gpt4all">GPT4All – '
+                                     'Repository</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                                     '– OpenAI / Anthropic API Wiki</a></li>\n'
+                                     '                    <li><a href="https://localai.io/docs/overview/">LocalAI Docs '
+                                     '– Overview</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/SYSTRAN/faster-whisper">SYSTRAN / '
+                                     'faster-whisper</a></li>\n'
+                                     '                    <li><a '
+                                     'href="https://github.com/opennmt/ctranslate2">CTranslate2</a></li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '        ',
+        'help_html_legal': '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h1">Legal</div><br>\n'
+                           '                The following notes are general guidance and do not replace legal advice.\n'
+                           '                For concrete use cases, the legal situation should be reviewed '
+                           'individually.\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card ok">\n'
+                           '                <div class="h2">Bottled Kraken</div>\n'
+                           '                <ul>\n'
+                           '                    <li><b>Repository license:</b> GPL-3.0.</li>\n'
+                           '                    <li><b>In short:</b> if you redistribute the software, publish '
+                           'modified versions, or distribute a package built on top of it, the GPL-3.0 terms must be '
+                           'respected.</li>\n'
+                           '                    <li><b>Important:</b> this is separate from the licenses of the '
+                           'bundled libraries and the model files you use.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Kraken</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Kraken is the OCR foundation of Bottled Kraken.</li>\n'
+                           '                    <li>The project is licensed under the <b>Apache License 2.0</b>.</li>\n'
+                           '                    <li>For redistribution, the license text, copyright notices, and '
+                           'possible NOTICE requirements are especially relevant.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">faster-whisper</div>\n'
+                           '                <ul>\n'
+                           '                    <li>faster-whisper is used in Bottled Kraken for local speech-to-text '
+                           'features.</li>\n'
+                           '                    <li>The project is licensed under the <b>MIT License</b>.</li>\n'
+                           '                    <li>Separate conditions may still apply to models and additional '
+                           'dependencies.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">LM Studio</div>\n'
+                           '                <ul>\n'
+                           '                    <li>LM Studio is used optionally as a local or connected '
+                           'language-model server.</li>\n'
+                           '                    <li>The main governing documents here are the official <b>Terms of '
+                           'Service</b> and <b>Privacy Policy</b>.</li>\n'
+                           '                    <li>In addition, every model loaded through LM Studio may have its own '
+                           'model license.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Ollama</div>\n'
+                           '                <ul>\n'
+                           '                    <li>The software in the official repository is licensed under the '
+                           '<b>MIT License</b>.</li>\n'
+                           '                    <li>That is usually straightforward for local use; if you redistribute '
+                           'modified software, license and copyright notices still matter.</li>\n'
+                           '                    <li>Separate from that are <b>cloud features</b>, privacy rules, and '
+                           'above all the license terms of the models you run.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Jan</div>\n'
+                           '                <ul>\n'
+                           '                    <li>The Jan repository is published as an open-source project; its '
+                           'repository license is <b>AGPL-3.0</b>.</li>\n'
+                           '                    <li>The AGPL is especially relevant when modified versions are made '
+                           'available over a network.</li>\n'
+                           '                    <li>As with the other tools, additional conditions may apply to '
+                           'embedded models and external cloud providers.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">GPT4All</div>\n'
+                           '                <ul>\n'
+                           '                    <li>The official GPT4All repository is licensed under the <b>MIT '
+                           'License</b>.</li>\n'
+                           '                    <li>The software license is permissive; separate checks are still '
+                           'needed for model licenses, trademark use, and third-party components.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                           '                <ul>\n'
+                           '                    <li>The project is licensed under <b>AGPL-3.0</b>.</li>\n'
+                           '                    <li>That is legally stricter than MIT or Apache, especially when you '
+                           'modify the software or make it available over a network.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">LocalAI</div>\n'
+                           '                <ul>\n'
+                           '                    <li>According to the official repository, LocalAI is licensed under '
+                           'the <b>MIT License</b>.</li>\n'
+                           '                    <li>As with the other servers, model licenses, extra components, and '
+                           'organizational usage rules still need separate review.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">PySide6 / Qt for Python</div>\n'
+                           '                <ul>\n'
+                           '                    <li>Bottled Kraken’s graphical interface is based on PySide6 / Qt for '
+                           'Python.</li>\n'
+                           '                    <li>Qt for Python uses license models that can involve <b>LGPL</b> or '
+                           'commercial Qt licensing, depending on the component and distribution model.</li>\n'
+                           '                    <li>For redistribution, packaging, and proprietary combined products, '
+                           'the Qt licensing situation should be checked separately.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card warn">\n'
+                           '                <div class="h2">Additional note on models and content</div>\n'
+                           '                <ul>\n'
+                           '                    <li>The software license of an application must always be '
+                           'distinguished from the license of the OCR, speech, or AI models loaded into it.</li>\n'
+                           '                    <li>The processing of copyrighted documents, personal data, or '
+                           'sensitive archival materials also requires a separate legal assessment.</li>\n'
+                           '                    <li>This window gives only a compact overview, not a binding '
+                           'case-specific legal review.</li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '\n'
+                           '            <div class="card">\n'
+                           '                <div class="h2">Official sources</div>\n'
+                           '                <ul>\n'
+                           '                    <li><a href="https://github.com/Testatost/Bottled-Kraken">Bottled '
+                           'Kraken – Repository</a></li>\n'
+                           '                    <li><a href="https://github.com/mittagessen/kraken">Kraken – '
+                           'Repository</a></li>\n'
+                           '                    <li><a href="https://kraken.re/7.0/index.html">Kraken – '
+                           'Documentation</a></li>\n'
+                           '                    <li><a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper '
+                           '– Repository</a></li>\n'
+                           '                    <li><a href="https://lmstudio.ai/app-terms">LM Studio – Terms of '
+                           'Service</a></li>\n'
+                           '                    <li><a href="https://lmstudio.ai/privacy">LM Studio – Privacy '
+                           'Policy</a></li>\n'
+                           '                    <li><a href="https://github.com/ollama/ollama">Ollama – '
+                           'Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/ollama/ollama/blob/main/LICENSE">Ollama – MIT License</a></li>\n'
+                           '                    <li><a href="https://github.com/janhq/jan">Jan – Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All – API Server '
+                           'Docs</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/nomic-ai/gpt4all/blob/main/LICENSE.txt">GPT4All – MIT '
+                           'License</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                           'Repository</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui/blob/main/LICENSE">text-generation-webui '
+                           '– AGPL-3.0</a></li>\n'
+                           '                    <li><a href="https://localai.io/docs/overview/">LocalAI – '
+                           'Overview</a></li>\n'
+                           '                    <li><a '
+                           'href="https://github.com/mudler/LocalAI/blob/master/LICENSE">LocalAI – MIT '
+                           'License</a></li>\n'
+                           '                    <li><a href="https://doc.qt.io/qtforpython-6/">Qt for Python – '
+                           'Documentation</a></li>\n'
+                           '                    <li><a href="https://doc.qt.io/qtforpython-6/licenses.html">Qt for '
+                           'Python – Licenses</a></li>\n'
+                           '                </ul>\n'
+                           '            </div>\n'
+                           '        ',
+        'ai_prompt_page_system': 'Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche '
+                                 'Drucke, Handschriften und Formulare.\n'
+                                 'Du liest den Text direkt aus dem Bild.\n'
+                                 'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                 'Du musst den gelesenen Text auf eine bereits vorgegebene Liste von Zielzeilen '
+                                 'abbilden.\n'
+                                 'Jede Zielzeile entspricht genau einer visuellen Formular- oder Textzeile.\n'
+                                 'Du darfst keine zwei Zielzeilen zusammenziehen.\n'
+                                 'Du darfst keine zusätzliche Leerzeile halluzinieren.\n'
+                                 'Du darfst keinen langen Textblock in eine einzelne Zielzeile schreiben.\n'
+                                 'Wenn eine Zielzeile keinen sicher lesbaren Text enthält, gib für genau diese Zeile '
+                                 'einen leeren String zurück.\n'
+                                 'Du musst die Anzahl der Zielzeilen exakt einhalten.\n'
+                                 'Antworte ausschließlich mit gültigem JSON.\n'
+                                 'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_page_user': 'Lies den Text direkt aus dem Bild.\n'
+                               '\n'
+                               'Du musst die vorgegebene Kraken-Zeilenstruktur EXAKT einhalten.\n'
+                               'Es gibt genau {} Zielzeilen.\n'
+                               'Jeder idx steht für genau eine visuelle Zielzeile.\n'
+                               '\n'
+                               'HARTE REGELN:\n'
+                               '- Gib genau {} Einträge im Feld lines zurück\n'
+                               '- Die idx-Werte müssen exakt 0 bis {} sein\n'
+                               '- Kein idx darf fehlen\n'
+                               '- Kein idx darf doppelt vorkommen\n'
+                               '- Keine zwei Zielzeilen dürfen zu einer Zeile zusammengezogen werden\n'
+                               '- Kein langer Satzblock darf in einer einzelnen Zielzeile landen\n'
+                               '- Wenn eine Zielzeile unklar ist, gib den bestmöglichen kurzen Zeilentext zurück\n'
+                               '- Wenn die Zielzeile wirklich leer ist, gib text als leeren String zurück\n'
+                               '- Die bbox ist nur Orientierung für die visuelle Zuordnung\n'
+                               '- Gib NUR das JSON-Objekt zurück\n'
+                               '- Kein Markdown\n'
+                               '- Keine Analyse\n'
+                               '- Keine Kommentare\n'
+                               '- Keine zusätzlichen Sätze\n'
+                               '\n'
+                               'Kraken-Zielzeilenstruktur:\n'
+                               '{}\n'
+                               '\n'
+                               'Antwortformat exakt so:\n'
+                               '{{"lines":[{{"idx":0,"text":"..."}},{{"idx":1,"text":"..."}}]}}',
+        'ai_prompt_single_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                   'Handschriften und Formulare.\n'
+                                   'Du liest genau eine einzelne Zielzeile aus einem Bildausschnitt.\n'
+                                   'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                   'Die Zielzeile befindet sich in der Mitte des Ausschnitts.\n'
+                                   'Oberhalb oder unterhalb sichtbare Linien, Leerzeilen, Formularlinien, Labels oder '
+                                   'Nachbarzeilen sind nur Kontext.\n'
+                                   'Du darfst nur den Text der einen Zielzeile zurückgeben.\n'
+                                   'Du darfst keinen Text aus Nachbarzeilen übernehmen.\n'
+                                   'Du darfst keine zusätzliche Zeile erfinden.\n'
+                                   'Du darfst keine lange Passage bilden, wenn im Ausschnitt nur eine kurze '
+                                   'Formularzeile steht.\n'
+                                   'Wenn die Zielzeile leer ist, gib einen leeren String zurück.\n'
+                                   'Antworte ausschließlich mit gültigem JSON.\n'
+                                   'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_single_user': 'Lies genau die Zielzeile in der Mitte des Bildausschnitts.\n'
+                                 'WICHTIG:\n'
+                                 '- Gib nur den Text dieser EINEN Zeile zurück\n'
+                                 '- Benachbarte Zeilen dürfen nicht übernommen werden\n'
+                                 '- Formular-Labels, Linien und Leerbereiche dürfen nicht halluziniert ergänzt werden\n'
+                                 '- Wenn in dieser Zielzeile kein lesbarer Text steht, gib text als leeren String '
+                                 'zurück\n'
+                                 '- Keine zweite Zeile\n'
+                                 '- Keine Zusammenfassung\n'
+                                 '- Keine Erklärung\n'
+                                 '- Kein Markdown\n'
+                                 '- Keine Ausgabe vor oder nach dem JSON\n'
+                                 '\n'
+                                 'Format exakt:\n'
+                                 '{{"text":"..."}}\n'
+                                 '\n'
+                                 'Zeilenindex: {}',
+        'ai_prompt_decision_system': 'Du bist ein präziser OCR-Korrekturassistent für historische deutsche '
+                                     'Handschriften und Formulare.\n'
+                                     'Du bekommst für genau eine Zielzeile drei Kandidaten:\n'
+                                     '1. Kraken-OCR\n'
+                                     '2. OCR aus dem Gesamtseiten-Kontext\n'
+                                     '3. OCR aus der Overlay-Box dieser Zeile\n'
+                                     '\n'
+                                     'WICHTIG:\n'
+                                     '- Die Overlay-Box-OCR ist die Primärquelle.\n'
+                                     '- Die Seiten-OCR ist NUR Kontext und darf keine fremden Nachbarzeilen in diese '
+                                     'Zielzeile hineinziehen.\n'
+                                     '- Kraken ist nur schwacher Fallback.\n'
+                                     '- Du darfst keine zusätzliche Zeile erfinden.\n'
+                                     '- Du darfst keinen Text aus benachbarten Formularzeilen übernehmen.\n'
+                                     '- Du darfst keine lange Mehrzeilen-Passage in diese eine Zielzeile packen.\n'
+                                     '- Wenn die Box-OCR plausibel ist, übernimm sie.\n'
+                                     '- Nur wenn die Box-OCR klar abgeschnitten, leer oder offensichtlich falsch ist, '
+                                     'darfst du mit Kraken korrigieren.\n'
+                                     '- Die Seiten-OCR darf nur helfen, ein einzelnes unsicheres Wort zu bestätigen, '
+                                     'nicht die ganze Zeile zu ersetzen.\n'
+                                     '- Bewahre historische Schreibweise.\n'
+                                     'Antworte ausschließlich mit gültigem JSON.\n'
+                                     'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_decision_user': 'Zielzeile idx={}\n'
+                                   '\n'
+                                   'Kraken-OCR:\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Seitenkontext-OCR (nur Kontext, nicht Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Overlay-Box-OCR (Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Wähle die beste finale Fassung für GENAU diese eine Zeile.\n'
+                                   'Bevorzuge die Overlay-Box-OCR.\n'
+                                   'Gib nur die finale Textzeile zurück.\n'
+                                   'Format exakt:\n'
+                                   '{{"text":"..."}}',
+        'ai_prompt_block_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                  'Handschriften.\n'
+                                  'Lies den Text frei direkt aus dem Bild.\n'
+                                  'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                  'Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst '
+                                  'lesen.\n'
+                                  'Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen.\n'
+                                  'Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen '
+                                  'eintragen.\n'
+                                  'Antworte ausschließlich mit gültigem JSON.\n'
+                                  'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_block_user': 'Lies die handschriftlichen Zeilen im Bildausschnitt.\n'
+                                'Gib ausschließlich genau EIN JSON-Objekt zurück.\n'
+                                'Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n'
+                                'Es müssen genau {} Einträge im Feld lines stehen.\n'
+                                'Wichtig:\n'
+                                '- doppelte Anführungszeichen innerhalb von text immer als " escapen\n'
+                                '- keine weiteren Felder außer idx und text\n'
+                                '- keine Ausgabe vor oder nach dem JSON\n'
+                                'Format:\n'
+                                '{{"lines":[{{"idx":0,"text":"..."}}]}}\n'
+                                '\n'
+                                'Die idx-Werte müssen lokal bei 0 beginnen.\n'
+                                'Aktueller OCR-Hinweis:\n'
+                                '{}',
+        'line_menu_ai_revise_single': 'Revise only this line with LM',
+        'btn_ok': 'OK',
+        'act_image_edit': 'Image editing',
+        'canvas_menu_split_box': 'Split box',
+        'queue_ctx_check_all': 'Check all',
+        'queue_ctx_uncheck_all': 'Clear all checkmarks',
+        'queue_check_header_tooltip': 'Click to check all files or clear all checks',
+        'line_menu_ai_revise_selected': 'Revise selected lines with LM',
+        'menu_lm_options': 'LM options',
+        'menu_whisper_options': 'Whisper options',
+        'act_whisper_set_path': 'Set Whisper model path...',
+        'act_whisper_set_mic': 'Choose microphone...',
+        'act_scan_local': 'Scan locally',
+        'no_models_scan': '(no models – please scan)',
+        'act_unload_model': 'Unload model',
+        'msg_whisper_model_unloaded': 'Whisper model unloaded.',
+        'msg_whisper_models_found': '{} Whisper model(s) found.',
+        'msg_whisper_models_not_found': 'No Whisper models found.',
+        'warn_no_audio_devices': 'No audio input devices were found.',
+        'dlg_choose_microphone': 'Choose microphone',
+        'dlg_audio_input_device': 'Audio input device:',
+        'msg_microphone_set': 'Microphone set: {}',
+        'export_choose_format_label': 'Choose export format:',
+        'msg_pdf_render_already_running': 'A PDF is already being rendered. Please wait a moment.',
+        'pdf_page_display': '{} – Page {:04d}',
+        'act_set_manual_lm_url': 'Set LM server URL...',
+        'act_clear_manual_lm_url': 'Clear LM server URL',
+        'msg_lm_found_url': 'LM found: {} | URL: {}',
+        'msg_lm_no_models_url': 'No models found | URL: {}',
+        'msg_lm_found': 'LM found: {}',
+        'msg_lm_server_not_found': 'No reachable local LM server found.',
+        'act_clear_ai_model': 'Remove LM model',
+        'msg_ai_model_choice_cleared': 'LM model selection cleared.',
+        'msg_ai_model_removed': 'LM model removed.',
+        'header_rec_models': 'Recognition models',
+        'header_seg_models': 'Segmentation models',
+        'status_rec_model': 'Recognition model: {}',
+        'status_seg_model': 'Segmentation model: {}',
+        'msg_ai_model_id_cleared_auto': 'AI model ID cleared, localhost auto-detection active.',
+        'msg_ai_single_done': 'LM revision for line {} completed.',
+        'log_ai_single_done': 'LM line revision completed: {} | line {}',
+        'msg_ai_single_cancelled': 'Line revision cancelled.',
+        'log_ai_single_cancelled': 'LM line revision cancelled: {}',
+        'msg_ai_single_failed': 'Line revision failed.',
+        'log_ai_single_failed': 'LM line revision error: {} -> {}',
+        'msg_ai_cancelled_short': 'Revision cancelled.',
+        'msg_ai_failed_short': 'Revision failed.',
+        'warn_blla_model_missing': 'The blla segmentation model could not be found.',
+        'dlg_project_loading_title': 'Load project',
+        'white_border_title': 'Add white border',
+        'white_border_pixels': 'Border in pixels:',
+        'image_edit_rotate_off': 'Rotation: OFF',
+        'image_edit_rotate_on': 'Rotation: ON',
+        'image_edit_grid': 'Grid',
+        'image_edit_grid_tooltip': 'Grid size: fine to coarse',
+        'image_edit_grid_label': 'Grid size',
+        'image_edit_crop': 'Crop area',
+        'image_edit_separator': 'Separator bar',
+        'image_edit_gray': 'Grayscale',
+        'image_edit_contrast': 'Contrast',
+        'image_edit_rotation_reset': 'Reset rotation',
+        'image_edit_smart_split': 'Smart splitting',
+        'image_edit_prev': 'Previous image',
+        'image_edit_next': 'Next image',
+        'image_edit_white_border': 'Add white border',
+        'image_edit_white_border_with_px': 'Add white border ({} px)',
+        'image_edit_apply_selected': 'Apply to all marked',
+        'image_edit_apply_all': 'Apply to all',
+        'image_edit_applied_single_status': "Image editing applied. Edited images were saved in the folder 'Bottled "
+                                            "Kraken edited Bilder' and added to the queue as new entries.",
+        'log_image_edit_applied': "Image editing applied: {} | {} output file(s) saved in the folder 'Bottled Kraken "
+                                  "edited Bilder'",
+        'image_edit_no_image_loaded': 'No image loaded',
+        'image_edit_batch_title': 'Image editing in progress',
+        'image_edit_batch_label': 'Processing image {}/{}: {}',
+        'msg_image_edit_batch_cancelled': 'Image editing cancelled.',
+        'image_edit_notice_title': 'Notice',
+        'image_edit_turn_off_rotation_first': 'Rotation is still active.\n'
+                                              '\n'
+                                              "Please switch to 'Rotation: OFF' before editing the crop area or the "
+                                              'separator bar.',
+        'msg_not_available': 'Not available',
+        'help_nav_image_edit': 'Image editing',
+        'help_nav_lm_alternatives': 'LM alternatives',
+        'dlg_lm_url_title': 'LM server URL',
+        'dlg_lm_url_label': """<div class="card">
+        <div class="h2"><b>Typical local servers</b></div>
+        <ul>
+            <li><code>http://127.0.0.1:1234/v1</code> - <b>LM Studio</b></li>
+            <li><code>http://localhost:11434/v1</code> - <b>Ollama</b></li>
+            <li><code>http://127.0.0.1:1337/v1</code> - <b>Jan</b></li>
+            <li><code>http://localhost:4891/v1</code> - <b>GPT4All</b></li>
+            <li><code>http://127.0.0.1:5000/v1</code> - <b>text-generation-webui</b></li>
+            <li><code>http://localhost:8080/v1</code> - <b>LocalAI</b></li>
+            <li><code>http://HOST:8000/v1</code> - <b>vLLM</b></li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <div class="h2"><b>Auto-correction</b></div>
+        <ul>
+            <li>A missing <code>http://</code> prefix is added automatically.</li>
+            <li><code>/models</code> or <code>/chat/completions</code> is automatically trimmed back to the base URL.</li>
+            <li><code>/v1</code> is added if needed.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <div class="h2"><b>Important</b></div>
+        <ul>
+            <li>Do not enter SSH commands.</li>
+            <li>For SSH tunnels, use the local tunnel URL.</li>
+            <li>For Ollama in Bottled Kraken, normally use the OpenAI-compatible <code>/v1</code> URL, not the native <code>/api</code> URL.</li>
+        </ul>
+    </div>""",
+        'dlg_lm_url_placeholder': 'e.g. http://127.0.0.1:1234/v1',
+        'help_html_image_edit': '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h1">Image editing</div><br>\n'
+                                '                Image editing is meant to <b>prepare pages before OCR</b>.\n'
+                                '                This is especially useful when a scan is skewed, too dark, '
+                                'low-contrast,\n'
+                                '                tightly cropped, or stored as a double page.\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Available tools</div>\n'
+                                '                <ul>\n'
+                                '                    <li><b>Rotation:</b> straighten a page</li>\n'
+                                '                    <li><b>Crop area:</b> remove disturbing margins</li>\n'
+                                '                    <li><b>Separator bar:</b> split double pages or side-by-side '
+                                'content cleanly</li>\n'
+                                '                    <li><b>Grayscale / Contrast:</b> improve readability of print and '
+                                'handwriting</li>\n'
+                                '                    <li><b>Add white border:</b> useful for pages that are cropped '
+                                'too tightly</li>\n'
+                                '                    <li><b>Smart splitting:</b> semi-automatic splitting for '
+                                'difficult source material</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Typical workflow</div>\n'
+                                '                <ol>\n'
+                                '                    <li>Load an image or PDF page</li>\n'
+                                '                    <li>Open image editing</li>\n'
+                                '                    <li>Adjust the preview: rotate, crop, change contrast, split if '
+                                'needed</li>\n'
+                                '                    <li>Apply the result to the current image, marked images, or all '
+                                'images</li>\n'
+                                '                    <li>Run Kraken OCR afterwards</li>\n'
+                                '                </ol>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card warn">\n'
+                                '                <div class="h2">Note</div>\n'
+                                '                <span class="badge">Important</span>\n'
+                                '                <ul>\n'
+                                '                    <li>If rotation is active, fine-tune the crop area and separator '
+                                'bar only after switching back to <code>Rotation: OFF</code>.</li>\n'
+                                '                    <li>Edited images are saved as new output files and then added '
+                                'back to the queue.</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">When is it worth using?</div>\n'
+                                '                <ul>\n'
+                                '                    <li>skewed or distorted scans</li>\n'
+                                '                    <li>double-page book or archival scans</li>\n'
+                                '                    <li>forms with too much margin or noisy background</li>\n'
+                                '                    <li>faded historical prints or low-contrast handwriting</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '        ',
+        'help_html_lm_alternatives': '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h1">LM Studio alternatives</div><br>\n'
+                                     '                Bottled Kraken is not limited to LM Studio.\n'
+                                     '                What matters is that the running service provides an '
+                                     '<b>OpenAI-compatible API</b>.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Ollama</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>for many users the cleanest replacement when a local '
+                                     'service is the main goal</li>\n'
+                                     '                    <li>native API at '
+                                     '<code>http://localhost:11434/api</code></li>\n'
+                                     '                    <li>for Bottled Kraken, usually use the OpenAI-compatible '
+                                     'URL <code>http://localhost:11434/v1</code></li>\n'
+                                     '                    <li>also offers Anthropic compatibility for some '
+                                     'workflows</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Jan</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>often the closest to LM Studio in terms of desktop '
+                                     'workflow</li>\n'
+                                     '                    <li>desktop app with local models and a built-in API '
+                                     'server</li>\n'
+                                     '                    <li>typical URL: <code>http://127.0.0.1:1337/v1</code></li>\n'
+                                     '                    <li>depending on configuration, an API key may also be '
+                                     'required</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">GPT4All</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>also very close to “start locally and use it”</li>\n'
+                                     '                    <li>typical URL: <code>http://localhost:4891/v1</code></li>\n'
+                                     '                    <li>OpenAI-compatible</li>\n'
+                                     '                    <li>LocalDocs can also be useful for simple local document / '
+                                     'RAG workflows</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">text-generation-webui</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>especially useful for users who like more control and '
+                                     'configuration</li>\n'
+                                     '                    <li>OpenAI- and Anthropic-compatible API</li>\n'
+                                     '                    <li>typical URL: <code>http://127.0.0.1:5000/v1</code></li>\n'
+                                     '                    <li>depending on the backend, it can also support vision and '
+                                     'tool calling</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">LocalAI</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>well suited when you want a self-hosted local AI server '
+                                     'rather than a classic desktop app</li>\n'
+                                     '                    <li>typical URL: <code>http://localhost:8080/v1</code></li>\n'
+                                     '                    <li>OpenAI-compatible, plus a web UI and extended server '
+                                     'features</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h2">Important</div>\n'
+                                     '                <span class="badge">Compatibility</span>\n'
+                                     '                <ul>\n'
+                                     '                    <li>For Bottled Kraken, the main thing is the '
+                                     'OpenAI-compatible base URL.</li>\n'
+                                     '                    <li>Not every tool uses the same default ports or '
+                                     'authentication.</li>\n'
+                                     '                    <li>If API key authentication is enabled, Bottled Kraken '
+                                     'must send that header as well.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '        '},
+ 'fr': {'dlg_filter_img': 'Images/PDF (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.pdf)',
+        'pdf_render_title': 'Préparation du PDF',
+        'pdf_render_label': 'Rendu des pages… ({}/{}): {}',
+        'app_title': 'Bottled Kraken',
+        'toolbar_main': 'Barre d’outils',
+        'toolbar_language': 'Langue',
+        'toolbar_theme_tooltip': 'Basculer entre le mode clair et sombre',
+        'toolbar_language_tooltip': 'Changer la langue',
+        'menu_file': '&Fichier',
+        'menu_edit': '&Édition',
+        'menu_export': 'Exporter en tant que...',
+        'menu_exit': 'Quitter',
+        'menu_models': '&Options Kraken',
+        'menu_options': '&Options',
+        'menu_languages': 'Langues',
+        'menu_hw': 'CPU/GPU',
+        'menu_reading': 'Direction de lecture',
+        'menu_appearance': 'Apparence',
+        'act_clear_rec': 'Retirer le modèle de reconnaissance',
+        'act_clear_seg': 'Retirer le modèle de segmentation',
+        'act_paste_clipboard': 'Coller depuis le presse-papiers',
+        'log_toggle_show': 'Log',
+        'log_toggle_hide': 'Log',
+        'menu_export_log': 'Exporter le log en .txt...',
+        'dlg_save_log': 'Enregistrer le log',
+        'dlg_filter_txt': 'Texte (*.txt)',
+        'log_started': 'Programme démarré.',
+        'log_queue_cleared': 'File d’attente vidée.',
+        'lang_de': 'Allemand',
+        'lang_en': 'Anglais',
+        'lang_fr': 'Français',
+        'hw_cpu': 'CPU',
+        'hw_cuda': 'GPU – CUDA (NVIDIA)',
+        'hw_rocm': 'GPU – ROCm (AMD)',
+        'hw_mps': 'GPU – MPS (Apple)',
+        'act_undo': 'Annuler',
+        'act_redo': 'Rétablir',
+        'msg_hw_not_available': 'Ce matériel n’est pas disponible sur ce système. Retour au CPU.',
+        'msg_using_device': 'Appareil utilisé : {}',
+        'msg_detected_gpu': 'Détecté : {}',
+        'msg_device_cpu': 'CPU',
+        'msg_device_cuda': 'CUDA',
+        'msg_device_rocm': 'ROCm',
+        'msg_device_mps': 'MPS',
+        'act_add_files': 'Charger des fichiers…',
+        'act_download_model': 'Télécharger le modèle (Zenodo)',
+        'act_delete': 'Supprimer',
+        'act_rename': 'Renommer...',
+        'act_clear_queue': 'Vider la file d’attente',
+        'act_start_ocr': 'Démarrer Kraken OCR',
+        'act_stop_ocr': 'Arrêter',
+        'act_re_ocr': 'Relancer',
+        'act_re_ocr_tip': 'Relancer le traitement du/des fichier(s) sélectionné(s)',
+        'act_overlay_show': 'Afficher les boîtes de superposition',
+        'status_ready': 'Prêt.',
+        'status_waiting': 'En attente',
+        'status_processing': 'Traitement...',
+        'status_done': 'Terminé',
+        'status_error': 'Erreur',
+        'lbl_queue': 'File d’attente:',
+        'lbl_lines': 'Lignes reconnues:',
+        'col_file': 'Fichier',
+        'col_status': 'Statut',
+        'drop_hint': 'Glissez-déposez des fichiers ici',
+        'queue_drop_hint': 'Glissez-déposez des fichiers ici',
+        'queue_load_title': 'Chargement des fichiers',
+        'queue_load_label': 'Chargement du fichier {}/{} : {}',
+        'queue_load_cancelled': 'Chargement des fichiers annulé.',
+        'queue_load_pdf_started': 'Chargement du PDF dans la file d’attente : {}',
+        'info_title': 'Information',
+        'warn_title': 'Avertissement',
+        'err_title': 'Erreur',
+        'theme_bright': 'Clair',
+        'theme_dark': 'Sombre',
+        'warn_queue_empty': 'La file d’attente est vide ou tous les éléments ont été traités.',
+        'warn_select_done': 'Aucun fichier chargé pour relancer l’OCR.',
+        'warn_need_rec': 'Veuillez d’abord sélectionner un modèle de format (reconnaissance).',
+        'warn_need_seg': 'Veuillez d’abord sélectionner un modèle de segmentation.',
+        'msg_stopping': 'Arrêt...',
+        'msg_finished': 'Traitement terminé.',
+        'msg_device': 'Appareil réglé sur: {}',
+        'msg_exported': 'Exporté: {}',
+        'msg_loaded_rec': 'Modèle de format: {}',
+        'msg_loaded_seg': 'Modèle de segmentation: {}',
+        'err_load': 'Impossible de charger l’image: {}',
+        'dlg_title_rename': 'Renommer',
+        'dlg_label_name': 'Nouveau nom de fichier:',
+        'dlg_save': 'Enregistrer',
+        'dlg_load_img': 'Choisir des images',
+        'dlg_choose_rec': 'le modèle de reconnaissance: ',
+        'dlg_choose_seg': 'le modèle de segmentation: ',
+        'dlg_filter_model': 'Modèles (*.mlmodel)',
+        'reading_tb_lr': 'Haut → Bas + Gauche → Droite',
+        'reading_tb_rl': 'Haut → Bas + Droite → Gauche',
+        'reading_bt_lr': 'Bas → Haut + Gauche → Droite',
+        'reading_bt_rl': 'Bas → Haut + Droite → Gauche',
+        'line_menu_move_up': 'Monter la ligne',
+        'line_menu_move_down': 'Descendre la ligne',
+        'line_menu_delete': 'Supprimer la ligne',
+        'line_menu_add_above': 'Ajouter une ligne au-dessus',
+        'line_menu_add_below': 'Ajouter une ligne en dessous',
+        'line_menu_draw_box': 'Dessiner la boîte',
+        'line_menu_edit_box': 'Modifier la boîte (déplacer/redimensionner)',
+        'line_menu_move_to': 'Déplacer la ligne vers…',
+        'dlg_new_line_title': 'Nouvelle ligne',
+        'dlg_new_line_label': 'Texte de la nouvelle ligne:',
+        'dlg_move_to_title': 'Déplacer la ligne',
+        'dlg_move_to_label': 'Numéro de ligne cible (1…):',
+        'canvas_menu_add_box_draw': 'Ajouter une boîte (dessiner)',
+        'canvas_menu_delete_box': 'Supprimer la boîte',
+        'canvas_menu_edit_box': 'Modifier la boîte…',
+        'canvas_menu_select_line': 'Sélectionner la ligne',
+        'dlg_box_title': 'Boîte de superposition',
+        'dlg_box_left': 'gauche',
+        'dlg_box_top': 'haut',
+        'dlg_box_right': 'droite',
+        'dlg_box_bottom': 'bas',
+        'dlg_box_apply': 'Appliquer',
+        'export_choose_mode_title': 'Export',
+        'export_mode_all': 'Exporter tous les fichiers',
+        'export_mode_selected': 'Exporter les fichiers sélectionnés',
+        'export_select_files_title': 'Sélectionner des fichiers',
+        'export_select_files_hint': 'Choisissez les fichiers à exporter :',
+        'export_choose_folder': 'Choisir le dossier de destination',
+        'export_need_done': 'Au moins un fichier sélectionné n’est pas terminé.',
+        'export_none_selected': 'Aucun fichier sélectionné.',
+        'undo_nothing': 'Rien à annuler.',
+        'redo_nothing': 'Rien à rétablir.',
+        'overlay_only_after_ocr': 'L’édition des overlays n’est disponible qu’après l’OCR.',
+        'new_line_from_box_title': 'Nouvelle ligne',
+        'new_line_from_box_label': 'Texte pour la nouvelle ligne (optionnel):',
+        'log_added_files': '{} fichier(s) ajouté(s) à la file d’attente.',
+        'log_ocr_started': 'OCR démarré : {} fichier(s), Appareil={}, Lecture={}',
+        'log_stop_requested': 'Arrêt de l’OCR demandé.',
+        'log_file_started': 'Traitement du fichier : {}',
+        'log_file_done': 'Terminé : {} ({} lignes)',
+        'log_file_error': 'Erreur : {} -> {}',
+        'log_export_done': 'Export terminé : {} fichier(s) en {} vers {}',
+        'log_export_single': 'Export : {} -> {}',
+        'log_export_log_done': 'Log exporté : {}',
+        'act_ai_revise': 'Révision LM',
+        'act_ai_revise_tip': 'Réviser le texte OCR avec un LLM local',
+        'msg_ai_started': 'Révision IA démarrée...',
+        'msg_ai_done': 'Révision IA terminée.',
+        'msg_ai_model_set': 'ID du modèle IA : {}',
+        'msg_ai_disabled': 'Révision IA non disponible.',
+        'warn_lm_url_invalid': 'Aucune adresse de serveur LM valide n’a été saisie.\n'
+                               'Veuillez consulter les indications et essayer une autre adresse.',
+        'warn_need_done_for_ai': "Veuillez d'abord sélectionner un fichier OCR terminé.",
+        'warn_need_ai_model': 'Aucun modèle n’a été trouvé via l’URL du serveur LM configurée. Veuillez démarrer un '
+                              'serveur local compatible OpenAI ou définir une URL ou un identifiant de modèle valide '
+                              '(par exemple LM Studio, Ollama, Jan, GPT4All, text-generation-webui, LocalAI ou vLLM).',
+        'warn_ai_server': 'Le serveur LM local est inaccessible. Veuillez charger le modèle et démarrer le serveur '
+                          'compatible OpenAI.',
+        'dlg_choose_ai_model': 'Identifiant du modèle LM',
+        'dlg_choose_ai_model_label': 'Identifiant de modèle facultatif. Laissez vide pour utiliser automatiquement le '
+                                     'modèle du serveur configuré :',
+        'log_ai_started': 'Révision IA démarrée : {}',
+        'log_ai_done': 'Révision IA terminée : {}',
+        'log_ai_error': 'Erreur de révision IA : {} -> {}',
+        'status_ai_processing': 'Révision IA...',
+        'status_exporting': 'Export en cours...',
+        'menu_project_save': 'Enregistrer le projet',
+        'menu_project_save_as': 'Enregistrer le projet sous...',
+        'menu_project_load': 'Charger un projet...',
+        'dlg_filter_project': 'Projet Bottled Kraken (*.json)',
+        'msg_project_saved': 'Projet enregistré : {}',
+        'msg_project_loaded': 'Projet chargé : {}',
+        'warn_project_load_failed': 'Impossible de charger le projet : {}',
+        'warn_project_save_failed': 'Impossible d’enregistrer le projet : {}',
+        'warn_project_file_missing': 'Fichier introuvable : {}',
+        'line_menu_swap_with': 'Échanger la ligne avec…',
+        'dlg_swap_title': 'Échanger les lignes',
+        'dlg_swap_label': 'Échanger avec le numéro de ligne (1…) :',
+        'act_voice_fill': 'Dicter les lignes',
+        'act_voice_fill_tip': 'Remplacer les lignes reconnues via le microphone avec faster-whisper',
+        'act_voice_stop': 'Arrêter l’enregistrement',
+        'msg_voice_started': 'Enregistrement vocal démarré...',
+        'msg_voice_stopped': 'Enregistrement terminé. Transcription en cours...',
+        'msg_voice_done': 'Import vocal terminé.',
+        'msg_voice_cancelled': 'Enregistrement vocal annulé.',
+        'warn_voice_need_done': "Veuillez d'abord sélectionner un fichier OCR terminé.",
+        'warn_voice_model_missing': 'Le dossier du modèle Faster-Whisper est introuvable.',
+        'status_voice_recording': 'Enregistrement...',
+        'lines_tree_header': 'Lignes et mots reconnus',
+        'col_loaded_files': 'Fichiers chargés',
+        'btn_rec_model_empty': 'Modèle de reconnaissance : -',
+        'btn_rec_model_value': 'Modèle de reconnaissance : {}',
+        'btn_seg_model_empty': 'Modèle de segmentation : -',
+        'btn_seg_model_value': 'Modèle de segmentation : {}',
+        'act_load_rec_model': 'Charger le modèle de reconnaissance...',
+        'act_load_seg_model': 'Charger le modèle de segmentation...',
+        'submenu_available_kraken_models': 'Modèles Kraken disponibles',
+        'submenu_available_ai_models': 'Modèles LM disponibles',
+        'submenu_available_whisper_models': 'Modèles Whisper disponibles',
+        'btn_cancel': 'Annuler',
+        'progress_status_ready': 'Prêt',
+        'voice_record_title': '🎤 Modifier la ligne avec l’audio',
+        'voice_record_info': 'Contrôle de l’enregistrement audio :',
+        'voice_record_start': 'Démarrer l’enregistrement',
+        'voice_record_stop': 'Arrêter l’enregistrement',
+        'voice_record_processing': 'Whisper verarbeitet Audio … bitte kurz warten.',
+        'warn_select_line_first': 'Veuillez d’abord sélectionner une ligne.',
+        'warn_selected_line_invalid': 'La ligne sélectionnée est invalide.',
+        'warn_whisper_model_not_loaded': 'Aucun modèle Whisper chargé n’est actif. Veuillez choisir un modèle dans '
+                                         "'Options Whisper'.",
+        'warn_no_microphone_available': 'Aucun microphone n’est disponible.',
+        'log_voice_stopping': 'Arrêt de l’enregistrement vocal...',
+        'image_edit_title': 'Édition d’image – {}',
+        'image_edit_erase_rect': 'Supprimer une zone (rectangle)',
+        'image_edit_erase_ellipse': 'Supprimer une zone (cercle)',
+        'image_edit_erase_clear': 'Effacer la zone de suppression',
+        'warn_select_image_or_pdf_page': 'Veuillez d’abord sélectionner une image ou une page PDF.',
+        'warn_image_load_failed_detail': 'Impossible de charger l’image :\n{}',
+        'info_no_marked_images_found': 'Aucune image marquée trouvée.',
+        'msg_image_edit_selected_applied': 'Édition d’image appliquée aux images marquées.',
+        'msg_image_edit_all_applied': 'Édition d’image appliquée à toutes les images.',
+        'log_image_edit_error': 'Erreur d’édition d’image : {} -> {}',
+        'act_help': 'Aide',
+        'act_ai_revise_all': 'Tout réviser',
+        'act_ai_revise_all_tip': 'Réviser tous les fichiers entièrement reconnus',
+        'warn_select_multiple_lines_first': 'Veuillez d’abord sélectionner plusieurs lignes.',
+        'msg_ai_selected_lines_started': 'Révision LM démarrée pour {} lignes sélectionnées...',
+        'log_ai_multi_started': 'Révision LM multi-lignes démarrée : {} | lignes {}',
+        'dlg_ai_multi_title': 'Révision IA multi-lignes',
+        'dlg_ai_multi_status': 'Révision de {} lignes sélectionnées ...',
+        'btn_import_lines': 'Importer des lignes',
+        'btn_import_lines_tip': 'Charger les lignes reconnues depuis TXT/JSON',
+        'act_import_lines_current': 'Pour l’image actuelle',
+        'act_import_lines_selected': 'Pour les images sélectionnées',
+        'act_import_lines_all': 'Pour toutes les images',
+        'warn_import_unsupported_format': 'Format d’import non pris en charge : {}',
+        'warn_import_no_usable_lines': 'Le fichier d’import ne contient aucune ligne exploitable.',
+        'info_no_current_image_loaded': 'Aucune image actuelle chargée.',
+        'dlg_import_lines_current': 'Importer des lignes',
+        'info_no_images_selected_or_marked': 'Aucune image sélectionnée ou marquée.',
+        'dlg_import_lines_selected': 'Charger les fichiers de lignes pour les images sélectionnées',
+        'info_no_images_loaded': 'Aucune image chargée.',
+        'dlg_import_lines_all': 'Charger les fichiers de lignes pour toutes les images',
+        'warn_no_matching_import_for_selected': 'Aucun fichier d’import ne correspond aux images sélectionnées.\n'
+                                                '\n'
+                                                'Les noms de fichiers doivent correspondre par le nom de base.',
+        'warn_no_matching_import_for_loaded': 'Aucun fichier d’import ne correspond aux images chargées.\n'
+                                              '\n'
+                                              'Les noms de fichiers doivent correspondre par le nom de base.',
+        'log_import_error': 'Erreur d’import : {} -> {}',
+        'log_voice_import_started': 'Sprachimport gestartet: {} | Zeile {} | Mikrofon: {} | Modell: {}',
+        'warn_voice_cancelled': 'Aufnahme abgebrochen.',
+        'warn_voice_not_finished': 'Aufnahme wurde nicht regulär beendet.',
+        'warn_voice_no_audio_data': 'Keine Audiodaten aufgenommen.',
+        'voice_status_prepare_wav': 'Audiodatei wird vorbereitet...',
+        'voice_status_load_whisper': 'Lade faster-whisper...',
+        'voice_status_transcribe_line': 'Transkribiere ausgewählte Zeile lokal ({}/{})...',
+        'voice_status_fallback_cpu': 'Initialisierung auf {}/{} fehlgeschlagen. Neuer Versuch mit CPU/int8 …',
+        'voice_status_finalize': 'Bereite Text auf...',
+        'voice_status_microphone_active': "Mikrofon aktiv … bitte sprechen. Zum Beenden 'Aufnahme stoppen' klicken.",
+        'voice_status_input_device': 'Aufnahmegerät: {}',
+        'audio_device_default_mic': 'Systemstandard-Mikrofon',
+        'audio_device_generic': 'Gerät {}',
+        'whisper_status_model': 'Modell: {}',
+        'whisper_status_mic': 'Mikrofon: {}',
+        'whisper_status_path': 'Pfad: {}',
+        'dlg_whisper_model_dir': 'Whisper-Modellordner wählen',
+        'msg_whisper_path_set': 'Whisper-Pfad gesetzt: {}',
+        'warn_whisper_model_present': 'Das Faster-Whisper large-v3 Modell ist bereits vorhanden.\n'
+                                      '\n'
+                                      'Pfad:\n'
+                                      '{}\n'
+                                      '\n'
+                                      'Ein erneuter Download ist nicht nötig.',
+        'msg_whisper_model_already_present': 'Whisper-Modell bereits vorhanden: {}',
+        'warn_whisper_download_start_failed': 'Download des Whisper-Modells konnte nicht gestartet werden:\n{}',
+        'msg_whisper_download_start_failed': 'Whisper-Download konnte nicht gestartet werden.',
+        'msg_whisper_model_loaded': 'Whisper-Modell geladen: {}',
+        'info_whisper_model_downloaded': 'Das Faster-Whisper-Modell wurde erfolgreich heruntergeladen.\n'
+                                         '\n'
+                                         'Zielordner:\n'
+                                         '{}',
+        'msg_whisper_download_failed': 'Whisper-Download fehlgeschlagen.',
+        'warn_whisper_download_failed': 'Download des Whisper-Modells fehlgeschlagen:\n{}',
+        'dlg_help_title': 'Hinweise',
+        'help_nav_quick': 'Flux',
+        'help_nav_kraken': 'Kraken',
+        'help_nav_lm_server': 'Serveur LM',
+        'help_nav_ssh': 'Tunnel SSH',
+        'help_nav_whisper': 'Whisper',
+        'help_nav_shortcuts': 'Raccourcis',
+        'help_nav_data_protection': 'Protection des données',
+        'help_nav_legal': 'Mentions légales',
+        'help_whisper_download_label': '<b>Télécharger le modèle Whisper avec un bouton :</b>',
+        'help_os_windows': 'Windows',
+        'help_os_arch': 'Arch',
+        'help_os_debian': 'Debian',
+        'help_os_fedora': 'Fedora',
+        'help_os_macos': 'macOS',
+        'whisper_hint_debian': 'Remarque pour Debian/Ubuntu/Linux Mint :\n'
+                               'L’application utilise ici automatiquement son propre environnement Python (venv) pour '
+                               'éviter les erreurs PEP-668 avec le Python système.\n'
+                               '\n'
+                               'Si la création du venv échoue, des paquets système requis manquent probablement. '
+                               'Exécutez :\n'
+                               '\n'
+                               'sudo apt update\n'
+                               'sudo apt install -y python3-venv python3-pip ffmpeg portaudio19-dev',
+        'whisper_hint_fedora': 'Remarque facultative pour Fedora :\n'
+                               'Si sounddevice pose problème plus tard, ces paquets système peuvent aider.\n'
+                               '\n'
+                               'sudo dnf install -y python3-pip ffmpeg portaudio-devel',
+        'whisper_hint_arch': 'Remarque facultative pour Arch Linux :\n'
+                             'Si sounddevice pose problème plus tard, ces paquets système peuvent aider.\n'
+                             '\n'
+                             'sudo pacman -S --needed python-pip ffmpeg portaudio',
+        'whisper_hint_macos': 'Remarque facultative pour macOS :\n'
+                              'Si sounddevice pose problème plus tard, ces paquets peuvent aider.\n'
+                              '\n'
+                              'brew install ffmpeg portaudio',
+        'whisper_hint_windows': 'Remarque facultative pour Windows :\n'
+                                'Normalement, aucun paquet système supplémentaire n’est nécessaire. Si des problèmes '
+                                'audio apparaissent plus tard, ils sont généralement liés aux pilotes ou aux '
+                                'autorisations du microphone.',
+        'whisper_hint_generic': 'Remarque facultative :\n'
+                                'Si sounddevice pose problème plus tard, des paquets système supplémentaires peuvent '
+                                'être nécessaires.',
+        'whisper_system_hint_dialog': 'Remarque système facultative :\n'
+                                      '\n'
+                                      '{}\n'
+                                      '\n'
+                                      'Le téléchargement réel passe malgré tout uniquement par Python (sys.executable '
+                                      '-m pip / API Python de huggingface_hub).',
+        'warn_whisper_download_running': 'Un téléchargement Whisper est déjà en cours.',
+        'msg_whisper_download_prepare_target': 'Démarrage de l’installation des dépendances et du téléchargement du '
+                                               'modèle vers : {}',
+        'dlg_whisper_download_title': 'Chargement du modèle Whisper',
+        'dlg_whisper_download_prepare': 'Démarrage de la préparation de Whisper ...',
+        'hf_status_waiting_for_lock': 'En attente du verrou de fichier dans le dossier cible ...',
+        'hf_status_files_done': 'Fichiers terminés : {}/{}',
+        'hf_status_current_file': 'Actuel : {}',
+        'hf_status_last_finished': 'Dernier terminé : {}',
+        'hf_status_download_done': 'Téléchargement terminé.',
+        'hf_error_cancelled': 'Téléchargement annulé.',
+        'hf_error_hf_exit': "'hf download' s’est terminé avec le code {}.",
+        'hf_error_command_exit': 'La commande s’est terminée avec le code {} :\n{}',
+        'hf_error_python_missing': 'Python ou un module requis n’a pas été trouvé.\n'
+                                   '\n'
+                                   'Veuillez vérifier que l’application fonctionne avec un environnement Python '
+                                   'valide.',
+        'hf_error_externally_managed': 'L’installation Python du système ne doit pas être modifiée directement.\n'
+                                       '\n'
+                                       'L’application devrait utiliser automatiquement son propre environnement. Si ce '
+                                       'n’est pas le cas, python3-venv manque probablement.\n'
+                                       '\n'
+                                       'Veuillez exécuter :\n'
+                                       'sudo apt update\n'
+                                       'sudo apt install -y python3-venv python3-pip',
+        'hf_error_no_venv': 'La prise en charge de Python venv manque sur ce système.\n'
+                            '\n'
+                            'Veuillez exécuter :\n'
+                            'sudo apt update\n'
+                            'sudo apt install -y python3-venv python3-pip',
+        'hf_error_python3_missing': 'python3 est introuvable.\n\nVeuillez vérifier que Python 3 est installé.',
+        'warn_invalid_line': 'Ligne invalide.',
+        'btn_ai_model_value': 'KI: {}',
+        'llm_status_value': 'LLM: {}',
+        'lm_status_model_value': 'Modell: {}',
+        'lm_mode_value': 'Modus: {}',
+        'lm_server_value': 'Server: {}',
+        'dlg_ai_title': 'Révision IA',
+        'dlg_ai_connecting': 'Connexion au serveur LM local…',
+        'dlg_ai_single_title': 'Révision IA de ligne',
+        'dlg_ai_single_status': 'Überarbeite nur Zeile {} …',
+        'msg_ai_single_started': 'LM-Überarbeitung für Zeile {} gestartet...',
+        'log_ai_single_started': 'LM-Zeilenüberarbeitung gestartet: {} | Zeile {}',
+        'msg_ai_multi_done': 'LM-Überarbeitung für {} ausgewählte Zeilen abgeschlossen.',
+        'log_ai_multi_done': 'LM-Mehrfachzeilenüberarbeitung abgeschlossen: {} | Zeilen {}',
+        'msg_ai_multi_cancelled': 'Mehrfachzeilenüberarbeitung abgebrochen.',
+        'log_ai_multi_cancelled': 'LM-Mehrfachzeilenüberarbeitung abgebrochen: {}',
+        'msg_ai_multi_failed': 'Mehrfachzeilenüberarbeitung fehlgeschlagen.',
+        'log_ai_multi_failed': 'LM-Mehrfachzeilenüberarbeitung Fehler: {} -> {}',
+        'msg_ai_batch_finished': 'Lot IA terminé.',
+        'log_ai_batch_debug_return': 'KI Batch Rückgabe für {}: {} Zeilen, OCR hatte {} Zeilen',
+        'log_ai_batch_debug_old_first': 'ALT erste Zeile: {}',
+        'log_ai_batch_debug_new_first': 'NEU erste Zeile: {}',
+        'log_ai_batch_debug_all': 'NEU alle Zeilen: {}',
+        'msg_ai_cancelled': 'Révision annulée.',
+        'ai_status_start_free_ocr': 'Starte freie KI-OCR: {}',
+        'ai_status_step1_title': '1/3 Zeilenweise Box-OCR: {}',
+        'ai_status_step1_line': '1/3 Box-OCR Zeile {}/{}: {}',
+        'ai_status_step2_form': '2/3 Block-Kontext-OCR (Formularmodus): {}',
+        'ai_status_step2_plain': '2/3 Block-Kontext-OCR: {}',
+        'ai_status_step2_chunk': '2/3 Block-Kontext {}/{}: Zeilen {}-{}',
+        'ai_status_step3_merge': '3/3 Merge: Box primär, Page nur wenn lokal konsistent: {}',
+        'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
+        'ai_err_bad_scheme': 'Nicht unterstütztes Schema: {}',
+        'ai_err_invalid_endpoint': 'Ungültiger Endpoint.',
+        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Studio.',
+        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Studio: {}',
+        'ai_err_http': 'HTTP-Fehler: {}\n{}',
+        'ai_err_server_unreachable': 'LM Studio nicht erreichbar: {}',
+        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
+                                      'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
+                                      'verwende ein nicht-thinkendes Modell.',
+        'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
+                                 'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
+                                 'reasoning.',
+        'ai_err_no_content': 'LM Studio lieferte keinen verwertbaren Antwortinhalt.',
+        'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
+        'ai_err_page_no_usable_lines': 'Seiten-OCR lieferte keine verwertbaren Zeilen: {}/{}',
+        'ai_err_block_invalid_json': 'Block-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
+        'ai_err_block_invalid_lines': "Block-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
+        'ai_err_final_merge_count': 'Finale Merge-Ausgabe gab {} statt {} Zeilen zurück.',
+        'help_html_quick': '\n'
+                           '    <div class="card warn">\n'
+                           '        <div class="h1">Déroulement</div>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <ol>\n'
+                           '            <li>Charger une image ou un PDF</li>\n'
+                           '            <li>Optionnel : utiliser l’édition d’image comme préparation</li>\n'
+                           '            <li>Charger le modèle de reconnaissance</li>\n'
+                           '            <li>Charger le modèle de segmentation</li>\n'
+                           '            <li>Démarrer Kraken OCR</li>\n'
+                           '            <li>Vérifier les lignes détectées et les corriger si nécessaire</li>\n'
+                           '            <li>Optionnel : utiliser la révision LM ou Whisper</li>\n'
+                           '            <li>Exporter le résultat en TXT, CSV, JSON, ALTO, hOCR ou PDF</li>\n'
+                           '        </ol>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Préparation</div>\n'
+                           '        <span class="badge">Optionnel</span>\n'
+                           '        <ul>\n'
+                           '            <li>L’édition d’image peut déjà être utilisée <b>avant</b> l’OCR lorsqu’un '
+                           'scan est mal recadré, trop peu contrasté ou contient trop d’éléments autour du contenu '
+                           'utile.</li>\n'
+                           '            <li>Les outils les plus utiles ici sont la <b>zone de recadrage</b>, la '
+                           '<b>barre de séparation</b>, le mode <b>gris</b>, le <b>contraste</b> et le <b>smart '
+                           'splitting</b>.</li>\n'
+                           '            <li>Cela permet de préparer précisément des doubles pages, des moitiés de '
+                           'formulaires, des marges ou du contenu voisin gênant avant le passage OCR proprement '
+                           'dit.</li>\n'
+                           '            <li>C’est particulièrement utile pour les dossiers, les formulaires, les scans '
+                           'groupés et les fonds d’archives mal numérisés.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Post-traitement</div>\n'
+                           '        <span class="badge">Optionnel</span>\n'
+                           '        <ul>\n'
+                           '            <li>Charger un modèle LM via LM Studio ou un autre serveur LM compatible</li>\n'
+                           '            <li>Lisser les lignes OCR sur le plan linguistique ou sémantique avec un '
+                           'modèle de langage local</li>\n'
+                           '            <li>Réenregistrer des lignes individuelles au microphone avec '
+                           'Faster-Whisper</li>\n'
+                           '            <li>Importer des lignes depuis TXT ou JSON</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Boîtes d’overlay &amp; lignes</div>\n'
+                           '        <span class="badge">Optionnel</span>\n'
+                           '        <ul>\n'
+                           '            <li>Les lignes et les boîtes d’overlay peuvent être déplacées, divisées, '
+                           'ajoutées ou supprimées.</li>\n'
+                           '            <li>Cela permet d’améliorer de manière ciblée la structure des lignes avant un '
+                           'nouveau passage OCR.</li>\n'
+                           '            <li>Particulièrement utile pour les formulaires, les mises en page en colonnes '
+                           'et les écritures manuscrites mal segmentées.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Que fait Bottled Kraken&nbsp;?</div><br>\n'
+                           '        Bottled Kraken combine l’OCR classique avec une préparation par édition d’image, '
+                           'un post-traitement manuel et une assistance IA locale optionnelle.\n'
+                           '        Cela permet d’améliorer pas à pas des imprimés historiques difficiles, des '
+                           'manuscrits ou des pages de formulaires.\n'
+                           '    </div>\n',
+        'help_html_kraken': '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h1">Kraken</div><br>\n'
+                            '        Kraken est la base OCR/ATR de Bottled Kraken.\n'
+                            '        Il s’agit d’un système open source de reconnaissance automatique de texte,\n'
+                            '        développé spécialement pour les imprimés historiques, les manuscrits et les '
+                            'écritures non latines.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Qu’est-ce qui est important pour Bottled Kraken ?</div>\n'
+                            '        <ul>\n'
+                            '            <li><b>Segmentation :</b> détecte la mise en page, les zones de texte, les '
+                            'lignes et l’ordre de lecture.</li>\n'
+                            '            <li><b>Reconnaissance :</b> lit le texte proprement dit à partir des lignes '
+                            'détectées.</li>\n'
+                            '            <li><b>Modèles :</b> la segmentation et la reconnaissance fonctionnent avec '
+                            'des modèles entraînés qui doivent correspondre au type de document.</li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Flux de travail typique avec Kraken</div>\n'
+                            '        <ol>\n'
+                            '            <li>Préparer l’image</li>\n'
+                            '            <li>Segmenter la page (<code>segment</code>)</li>\n'
+                            '            <li>Reconnaître le texte (<code>ocr</code>)</li>\n'
+                            '            <li>Structurer / exporter le résultat</li>\n'
+                            '        </ol>\n'
+                            '        Dans Bottled Kraken, ces étapes sont reprises directement dans l’interface :\n'
+                            '        d’abord le modèle de segmentation, puis le modèle de reconnaissance, ensuite '
+                            'l’OCR et l’export.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Principaux points forts de Kraken</div>\n'
+                            '        <ul>\n'
+                            '            <li>analyse de mise en page, ordre de lecture et reconnaissance des '
+                            'caractères entraînables</li>\n'
+                            '            <li>prise en charge de l’écriture de droite à gauche, BiDi et de haut en '
+                            'bas</li>\n'
+                            '            <li>sortie en ALTO, PageXML, abbyyXML et hOCR</li>\n'
+                            '            <li>boîtes englobantes des mots et découpes des caractères</li>\n'
+                            '            <li>collection publique de modèles via HTRMoPo / Zenodo</li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Modèles</div><br>\n'
+                            '        Kraken fonctionne de manière basée sur des modèles.\n'
+                            '        La qualité des résultats dépend fortement de l’adéquation entre le modèle et le '
+                            'type de document.\n'
+                            '        Un modèle entraîné sur des imprimés historiques est en général nettement meilleur '
+                            'pour ce type de documents\n'
+                            '        qu’un modèle général destiné à des documents modernes.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Interfaces</div><br>\n'
+                            '        Kraken propose deux approches principales :\n'
+                            '        <ul>\n'
+                            '            <li><b>CLI :</b> pour les flux de travail OCR classiques</li>\n'
+                            '            <li><b>API Python :</b> pour les applications personnalisées et les '
+                            'intégrations</li>\n'
+                            '        </ul>\n'
+                            '        Bottled Kraken utilise directement la bibliothèque Python dans le code du '
+                            'programme.\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Sources officielles</div>\n'
+                            '        <ul>\n'
+                            '            <li><a href="https://github.com/mittagessen/kraken">GitHub : '
+                            'mittagessen/kraken</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/index.html">Documentation Kraken '
+                            '7.0</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/getting_started.html">Prise en '
+                            'main</a></li>\n'
+                            '            <li><a href="https://kraken.re/7.0/user_guide/models.html">Gestion des '
+                            'modèles</a></li>\n'
+                            '        </ul>\n'
+                            '    </div>\n'
+                            '\n'
+                            '    <div class="card warn">\n'
+                            '        <div class="h2">Remarque</div>\n'
+                            '        <span class="badge">Important</span><br>\n'
+                            '        Si la segmentation n’est pas propre, la reconnaissance sera également moins '
+                            'bonne.\n'
+                            '        C’est précisément pour cela que Bottled Kraken utilise par défaut '
+                            '<code>blla.mlmodell</code>\n'
+                            '        au lieu de l’ancien modèle de segmentation <code>pageseg</code>.\n'
+                            '    </div>\n',
+        'help_html_lm_server': '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h1">Serveur LM / serveurs de modèles locaux</div><br>\n'
+                               '        Cette section est destinée au <b>post-traitement local par modèle de '
+                               'langage</b>.\n'
+                               '        Pour cela, Bottled Kraken attend une <b>URL de base compatible OpenAI</b>, '
+                               'généralement avec <code>/v1</code>.\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">URLs de base directement adaptées à Bottled Kraken</div>\n'
+                               '        <pre>LM Studio :              http://localhost:1234/v1\n'
+                               'Ollama (compat. OpenAI) : http://localhost:11434/v1\n'
+                               'GPT4All :                http://localhost:4891/v1\n'
+                               'text-generation-webui :  http://127.0.0.1:5000/v1\n'
+                               'LocalAI :                http://localhost:8080/v1</pre>\n'
+                               '        <div class="muted">\n'
+                               '            Important : avec Ollama, il faut saisir dans Bottled Kraken l’URL '
+                               '<b>compatible OpenAI</b> en <code>/v1</code>, et non la route brute '
+                               '<code>/api</code>.\n'
+                               '        </div>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">LM Studio</div>\n'
+                               '        <ul>\n'
+                               '            <li>Pour beaucoup d’utilisateurs, c’est l’option la plus simple si l’on '
+                               'veut une application de bureau avec gestion des modèles et serveur local.</li>\n'
+                               '            <li>LM Studio expose les modèles locaux via REST ainsi que via des points '
+                               'd’accès compatibles OpenAI et Anthropic.</li>\n'
+                               '            <li>Le cas standard dans Bottled Kraken est '
+                               '<code>http://localhost:1234/v1</code>.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">Ollama</div>\n'
+                               '        <ul>\n'
+                               '            <li>Souvent le choix le plus propre si l’on veut surtout un service local '
+                               'et un flux de travail léger en CLI / daemon.</li>\n'
+                               '            <li>Ollama démarre localement sur <code>http://localhost:11434</code>, '
+                               'propose sa propre interface <code>/api</code> et fournit aussi une compatibilité '
+                               'OpenAI sous <code>/v1</code>.</li>\n'
+                               '            <li>Il prend également en charge une utilisation compatible Anthropic pour '
+                               'des workflows comme Claude Code.</li>\n'
+                               '            <li>Pour Bottled Kraken, le meilleur choix est en général '
+                               '<code>http://localhost:11434/v1</code>.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">Jan</div>\n'
+                               '        <ul>\n'
+                               '            <li>Par sa logique d’utilisation, Jan est souvent l’alternative la plus '
+                               'proche de LM Studio : application desktop, modèles locaux, serveur API compatible '
+                               'OpenAI intégré.</li>\n'
+                               '            <li>Par défaut, Jan écoute sur <code>http://127.0.0.1:1337</code> avec le '
+                               'préfixe API <code>/v1</code> ; l’hôte par défaut <code>127.0.0.1</code> est '
+                               'volontairement limité à la machine locale.</li>\n'
+                               '            <li>Jan impose aussi par défaut une clé API. En pratique, Jan est donc '
+                               'surtout utile avec Bottled Kraken si l’on adapte le comportement d’en-tête attendu ou '
+                               'si l’on place un petit proxy local entre les deux.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">GPT4All</div>\n'
+                               '        <ul>\n'
+                               '            <li>Très proche de l’idée «&nbsp;on lance localement et on '
+                               'utilise&nbsp;».</li>\n'
+                               '            <li>Son serveur API local tourne par défaut sur '
+                               '<code>http://localhost:4891/v1</code>, est compatible OpenAI et n’écoute que sur '
+                               '<code>localhost</code>.</li>\n'
+                               '            <li>En plus, GPT4All propose <b>LocalDocs</b> pour un flux simple de '
+                               'documents locaux / RAG local.</li>\n'
+                               '            <li>Pour Bottled Kraken, c’est généralement l’une des alternatives les '
+                               'plus simples à LM Studio.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                               '        <ul>\n'
+                               '            <li>Particulièrement intéressant pour les personnes qui aiment tout régler '
+                               'elles-mêmes, changer de backend et contrôler de nombreux paramètres.</li>\n'
+                               '            <li>Le projet prend en charge plusieurs backends comme '
+                               '<code>llama.cpp</code>, <code>Transformers</code>, <code>ExLlamaV3</code> et '
+                               '<code>TensorRT-LLM</code>.</li>\n'
+                               '            <li>Son API compatible OpenAI / Anthropic peut servir de remplacement '
+                               'direct ; par défaut elle utilise généralement le port <code>5000</code>.</li>\n'
+                               '            <li>On y trouve aussi le tool calling, la vision et les pièces jointes de '
+                               'fichiers.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">LocalAI</div>\n'
+                               '        <ul>\n'
+                               '            <li>Très adapté si l’on pense davantage en termes de serveur IA local '
+                               'auto-hébergé qu’en application de bureau classique.</li>\n'
+                               '            <li>LocalAI expose une API compatible OpenAI ; dans Bottled Kraken, la '
+                               'configuration typique est <code>http://localhost:8080/v1</code>.</li>\n'
+                               '            <li>Il prend aussi en charge d’autres formats d’API compatibles, une '
+                               'interface web et des fonctions d’agents / MCP.</li>\n'
+                               '            <li>C’est un bon choix si l’on veut regrouper plusieurs services locaux ou '
+                               'construire une petite pile IA interne.</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">Guide pratique de choix</div>\n'
+                               '        <ul>\n'
+                               '            <li><b>LM Studio :</b> si vous voulez une interface graphique, du serving '
+                               'local et peu de friction</li>\n'
+                               '            <li><b>Ollama :</b> si vous préférez un service local propre ou un '
+                               'workflow CLI</li>\n'
+                               '            <li><b>Jan :</b> si vous voulez une ergonomie proche de LM Studio et '
+                               'pouvez vivre avec une clé API / un proxy</li>\n'
+                               '            <li><b>GPT4All :</b> si vous voulez une solution desktop simple avec '
+                               'LocalDocs</li>\n'
+                               '            <li><b>text-generation-webui :</b> si vous voulez un contrôle fin des '
+                               'backends, de la vision et des outils</li>\n'
+                               '            <li><b>LocalAI :</b> si vous voulez un serveur local plus auto-hébergé '
+                               'avec une orientation API / agents plus large</li>\n'
+                               '        </ul>\n'
+                               '    </div>\n'
+                               '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h2">Sources officielles</div>\n'
+                               '        <ul>\n'
+                               '            <li><a href="https://lmstudio.ai/docs/developer/core/server">LM Studio '
+                               'Docs – Local LLM API Server</a></li>\n'
+                               '            <li><a href="https://lmstudio.ai/docs/developer/openai-compat">LM Studio '
+                               'Docs – OpenAI Compatibility</a></li>\n'
+                               '            <li><a href="https://docs.ollama.com/api/openai-compatibility">Ollama Docs '
+                               '– OpenAI compatibility</a></li>\n'
+                               '            <li><a href="https://docs.ollama.com/integrations/claude-code">Ollama Docs '
+                               '– Claude Code / API compatible Anthropic</a></li>\n'
+                               '            <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan Docs – Local '
+                               'API Server</a></li>\n'
+                               '            <li><a href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All '
+                               'Docs – API Server</a></li>\n'
+                               '            <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                               'Dépôt</a></li>\n'
+                               '            <li><a '
+                               'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                               '– Wiki API OpenAI / Anthropic</a></li>\n'
+                               '            <li><a href="https://localai.io/docs/overview/">LocalAI Docs – '
+                               'Overview</a></li>\n'
+                               '            <li><a href="https://localai.io/basics/getting_started/">LocalAI Docs – '
+                               'Quickstart</a></li>\n'
+                               '        </ul>\n'
+                               '    </div>\n',
+        'help_html_ssh': '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h1">Accès distant via tunnel SSH</div><br>\n'
+                         '        Un tunnel SSH est utile lorsque ton serveur LM tourne sur une autre machine,\n'
+                         '        mais y est uniquement lié à <code>127.0.0.1</code> et n’est donc pas directement '
+                         'accessible sur le réseau.\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">Que se passe-t-il alors ?</div><br>\n'
+                         '        Le tunnel redirige un port local de ton ordinateur vers un port de la machine '
+                         'distante.\n'
+                         '        Pour Bottled Kraken, cela donne alors l’impression que le serveur LM fonctionne '
+                         'localement sur ton propre ordinateur.\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">Exemple</div>\n'
+                         '        <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
+                         '        Puis utiliser dans Bottled Kraken :\n'
+                         '        <pre>http://127.0.0.1:1234/v1</pre>\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card">\n'
+                         '        <div class="h2">Déroulement typique</div>\n'
+                         '        <ol>\n'
+                         '            <li>Démarrer LM Studio ou vLLM sur la machine cible</li>\n'
+                         '            <li>Vérifier sur quel port le serveur API local fonctionne</li>\n'
+                         '            <li>Ouvrir le tunnel SSH depuis ton propre ordinateur</li>\n'
+                         '            <li>Saisir l’URL locale du tunnel dans Bottled Kraken</li>\n'
+                         '        </ol>\n'
+                         '    </div>\n'
+                         '\n'
+                         '    <div class="card warn">\n'
+                         '        <div class="h2">Important</div>\n'
+                         '        <ul>\n'
+                         '            <li>Dans Bottled Kraken, tu ne saisis <b>pas</b> la commande SSH.</li>\n'
+                         '            <li>Tu saisis toujours l’URL HTTP résultante, par exemple '
+                         '<code>http://127.0.0.1:1234/v1</code>.</li>\n'
+                         '            <li>Le tunnel SSH doit rester ouvert tant que Bottled Kraken doit utiliser le '
+                         'serveur.</li>\n'
+                         '        </ul>\n'
+                         '    </div>\n',
+        'help_html_whisper_intro': '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h1">Faster-Whisper</div>\n'
+                                   '        <p>\n'
+                                   '            Faster-Whisper est une reconnaissance vocale locale rapide.\n'
+                                   '            Dans Bottled Kraken, tu peux l’utiliser pour réenregistrer des lignes '
+                                   'OCR individuelles via le microphone\n'
+                                   '            et les reprendre directement comme texte.\n'
+                                   '        </p>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">À quoi cela sert-il ?</div>\n'
+                                   '        <ul>\n'
+                                   '            <li>lorsqu’une ligne OCR est fortement endommagée ou a été mal '
+                                   'reconnue</li>\n'
+                                   '            <li>lorsque tu peux dicter certains champs ou noms plus rapidement que '
+                                   'les taper</li>\n'
+                                   '            <li>lorsque tu veux effectuer des corrections ciblées ligne par '
+                                   'ligne</li>\n'
+                                   '        </ul>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">Qu’est-ce qui est téléchargé ?</div>\n'
+                                   '        <p>\n'
+                                   '            Le modèle <span class="badge">Systran/faster-whisper-large-v3</span> '
+                                   'est chargé.\n'
+                                   '        </p>\n'
+                                   '        <p class="muted">\n'
+                                   '            Avant le téléchargement, Bottled Kraken installe automatiquement les '
+                                   'paquets Python nécessaires.\n'
+                                   '            Le téléchargement proprement dit du modèle s’effectue via la CLI '
+                                   'Hugging Face avec <code>hf download</code>.\n'
+                                   '            Sous Linux et macOS, un environnement venv séparé est automatiquement '
+                                   'utilisé pour cela.\n'
+                                   '        </p>\n'
+                                   '    </div>\n'
+                                   '\n'
+                                   '    <div class="card">\n'
+                                   '        <div class="h2">Déroulement dans Bottled Kraken</div>\n'
+                                   '        <ol>\n'
+                                   '            <li>Télécharger le modèle Whisper ou rechercher un modèle '
+                                   'existant</li>\n'
+                                   '            <li>Sélectionner un microphone</li>\n'
+                                   '            <li>Marquer une ligne</li>\n'
+                                   '            <li>Démarrer l’enregistrement audio</li>\n'
+                                   '            <li>La saisie vocale est transcrite localement et remplace la '
+                                   'ligne</li>\n'
+                                   '        </ol>\n'
+                                   '    </div>\n',
+        'help_html_shortcuts': '\n'
+                               '    <div class="card">\n'
+                               '        <div class="h1">Raccourcis clavier</div>\n'
+                               '        <table class="table">\n'
+                               '            <tr><td class="section" colspan="2">Projet</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + S</span></td><td>Enregistrer le '
+                               'projet</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Enregistrer le '
+                               'projet sous</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + I</span></td><td>Charger le '
+                               'projet</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + E</span></td><td>Exporter</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + Q</span></td><td>Quitter le '
+                               'programme</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + K</span></td><td>Démarrer Kraken '
+                               'OCR</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + P</span></td><td>Arrêter Kraken '
+                               'OCR</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + L</span></td><td>Démarrer la révision '
+                               'LM</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + M</span></td><td>Démarrer Faster-Whisper '
+                               '/ microphone</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">Sélection</td></tr>\n'
+                               '            <tr><td><span class="kbd">Strg + A</span></td><td>Tout sélectionner dans '
+                               'le contexte actuel</td></tr>\n'
+                               '            <tr><td><span class="kbd">Entf</span></td><td>Supprimer les lignes ou '
+                               'boîtes sélectionnées</td></tr>\n'
+                               '\n'
+                               '            <tr><td class="section" colspan="2">Touches de fonction</td></tr>\n'
+                               '            <tr><td><span class="kbd">F1</span></td><td>Aide des raccourcis</td></tr>\n'
+                               '            <tr><td><span class="kbd">F2</span></td><td>Charger le modèle de '
+                               'reconnaissance</td></tr>\n'
+                               '            <tr><td><span class="kbd">F3</span></td><td>Charger le modèle de '
+                               'segmentation</td></tr>\n'
+                               '            <tr><td><span class="kbd">F4</span></td><td>Saisir l’URL du serveur '
+                               'LM</td></tr>\n'
+                               '            <tr><td><span class="kbd">F5</span></td><td>Démarrer le scan LM</td></tr>\n'
+                               '            <tr><td><span class="kbd">F6</span></td><td>Scanner les modèles Whisper + '
+                               'définir le premier microphone</td></tr>\n'
+                               '            <tr><td><span class="kbd">F7</span></td><td>Afficher / masquer la fenêtre '
+                               'de log</td></tr>\n'
+                               '        </table>\n'
+                               '    </div>\n',
+        'help_html_data_protection': '\n'
+                                     '    <div class="card warn">\n'
+                                     '        <div class="h1">Protection des données</div><br>\n'
+                                     '        Les remarques suivantes résument le <b>mode de fonctionnement local '
+                                     'standard</b>.\n'
+                                     '        Elles ne remplacent pas une analyse au cas par cas.\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">Règle générale</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>Les modèles locaux et les serveurs locaux sont en principe plus '
+                                     'favorables à la protection des données, car les invites, documents et fichiers '
+                                     'audio ne sont pas envoyés automatiquement à un service cloud.</li>\n'
+                                     '            <li>Cela n’est vrai que tant que le logiciel est réellement utilisé '
+                                     '<b>en local</b>, sans routage cloud ni exposition réseau.</li>\n'
+                                     '            <li>Dès qu’il y a exposition sur le réseau, tunnel, reverse proxy, '
+                                     'instance distante ou modèle cloud, la situation change.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">LM Studio</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>D’après la documentation officielle, LM Studio peut fonctionner '
+                                     'entièrement hors ligne ; le chat local, le chat avec documents et le serveur '
+                                     'local n’ont alors pas besoin d’internet.</li>\n'
+                                     '            <li>La politique de confidentialité indique aussi explicitement que '
+                                     'les messages, historiques de chat et documents ne sont pas transmis hors du '
+                                     'système par défaut.</li>\n'
+                                     '            <li>Cela vaut pour l’usage local. Si l’on active un accès réseau ou '
+                                     'des fonctions distantes, il faut vérifier où partent les données.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">Ollama</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>Ollama fonctionne localement par défaut sur '
+                                     '<code>http://localhost:11434</code> ; aucune authentification n’est requise pour '
+                                     'l’usage purement local de l’API.</li>\n'
+                                     '            <li>Un déploiement limité à <code>localhost</code> reste donc sur '
+                                     'votre propre machine.</li>\n'
+                                     '            <li>Important : Ollama prend aussi en charge des <b>modèles '
+                                     'cloud</b>. Dès qu’ils sont utilisés, le flux de travail n’est plus purement '
+                                     'local.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">Jan</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>Jan se présente comme privacy-first et stocke les données '
+                                     'localement dans son propre dossier de données.</li>\n'
+                                     '            <li>Son API locale est limitée par défaut à <code>127.0.0.1</code>, '
+                                     'ce qui constitue la configuration la plus sûre pour un usage individuel.</li>\n'
+                                     '            <li>Jan propose aussi des réglages d’analyse / suivi et des journaux '
+                                     'serveur détaillés. Avant un usage en production, il est donc utile de vérifier '
+                                     'consciemment ce qui est journalisé localement et si un accès réseau a été '
+                                     'activé.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">GPT4All</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>GPT4All met en avant l’exécution locale sur votre propre '
+                                     'matériel.</li>\n'
+                                     '            <li>Son serveur API n’écoute par défaut que sur '
+                                     '<code>localhost</code>, et non depuis d’autres appareils du réseau.</li>\n'
+                                     '            <li>Avec <b>LocalDocs</b>, des documents locaux peuvent être '
+                                     'intégrés au flux de travail ; même dans ce cas, l’emplacement de stockage et le '
+                                     'contrôle d’accès à l’appareil restent importants.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">text-generation-webui &amp; LocalAI</div>\n'
+                                     '        <ul>\n'
+                                     '            <li><b>text-generation-webui</b> décrit son API compatible OpenAI / '
+                                     'Anthropic comme 100&nbsp;% hors ligne et privée, et précise aussi ne pas créer '
+                                     'de logs.</li>\n'
+                                     '            <li><b>LocalAI</b> se présente comme une pile locale compatible '
+                                     'OpenAI et affirme garder les données privées et sécurisées.</li>\n'
+                                     '            <li>Pour les deux projets, la règle pratique reste la même : dès que '
+                                     'l’API est exposée sur le réseau, placée derrière un reverse proxy ou ouverte à '
+                                     'plusieurs utilisateurs, il faut sécuriser soi-même les accès, les logs, les '
+                                     'sauvegardes et les droits d’administration.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">faster-whisper</div><br>\n'
+                                     '        faster-whisper est une implémentation locale de Whisper basée sur '
+                                     'CTranslate2.\n'
+                                     '        Dans Bottled Kraken, un dossier de modèle local est chargé et un fichier '
+                                     'WAV local est transcrit.\n'
+                                     '        Tant que ce flux reste local, le traitement audio reste lui aussi '
+                                     'local.\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card warn">\n'
+                                     '        <div class="h2">Limitations importantes</div>\n'
+                                     '        <ul>\n'
+                                     '            <li>Le téléchargement initial des modèles nécessite naturellement un '
+                                     'accès à Internet.</li>\n'
+                                     '            <li>Même un serveur «&nbsp;local&nbsp;» peut exposer des données '
+                                     'personnelles si l’appareil lui-même n’est pas suffisamment sécurisé.</li>\n'
+                                     '            <li>Pour les administrations, archives, entreprises ou organismes de '
+                                     'recherche, les seules propriétés d’un outil ne suffisent pas ; il faut aussi '
+                                     'prendre en compte l’emplacement de stockage, les rôles, les logs, les '
+                                     'sauvegardes, les règles de suppression et les politiques internes.</li>\n'
+                                     '            <li>Une licence logicielle ou une politique de confidentialité ne '
+                                     'remplace pas une analyse RGPD, contractuelle ou opérationnelle adaptée au '
+                                     'déploiement réel.</li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n'
+                                     '\n'
+                                     '    <div class="card">\n'
+                                     '        <div class="h2">Sources officielles</div>\n'
+                                     '        <ul>\n'
+                                     '            <li><a href="https://lmstudio.ai/docs/app/offline">LM Studio Docs – '
+                                     'Offline Operation</a></li>\n'
+                                     '            <li><a href="https://lmstudio.ai/privacy">LM Studio Desktop App '
+                                     'Privacy Policy</a></li>\n'
+                                     '            <li><a href="https://docs.ollama.com/api/authentication">Ollama Docs '
+                                     '– Authentication</a></li>\n'
+                                     '            <li><a href="https://docs.ollama.com/cloud">Ollama Docs – '
+                                     'Cloud</a></li>\n'
+                                     '            <li><a href="https://ollama.com/privacy">Ollama – Privacy '
+                                     'Policy</a></li>\n'
+                                     '            <li><a href="https://www.jan.ai/docs/desktop/privacy">Jan Docs – '
+                                     'Privacy</a></li>\n'
+                                     '            <li><a href="https://www.jan.ai/docs/desktop/data-folder">Jan Docs – '
+                                     'Data Folder</a></li>\n'
+                                     '            <li><a href="https://www.jan.ai/docs/desktop/api-server">Jan Docs – '
+                                     'Local API Server</a></li>\n'
+                                     '            <li><a '
+                                     'href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All Docs – API '
+                                     'Server</a></li>\n'
+                                     '            <li><a href="https://github.com/nomic-ai/gpt4all">GPT4All – '
+                                     'Dépôt</a></li>\n'
+                                     '            <li><a '
+                                     'href="https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API">text-generation-webui '
+                                     '– Wiki API OpenAI / Anthropic</a></li>\n'
+                                     '            <li><a href="https://localai.io/docs/overview/">LocalAI Docs – '
+                                     'Overview</a></li>\n'
+                                     '            <li><a href="https://github.com/SYSTRAN/faster-whisper">SYSTRAN / '
+                                     'faster-whisper</a></li>\n'
+                                     '            <li><a '
+                                     'href="https://github.com/opennmt/ctranslate2">CTranslate2</a></li>\n'
+                                     '        </ul>\n'
+                                     '    </div>\n',
+        'help_html_legal': '\n'
+                           '    <div class="card warn">\n'
+                           '        <div class="h1">Mentions légales</div><br>\n'
+                           '        Les remarques suivantes constituent une orientation générale et ne remplacent pas '
+                           'un conseil juridique.\n'
+                           '        Pour tout cas d’usage concret, la situation juridique doit être examinée '
+                           'individuellement.\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card ok">\n'
+                           '        <div class="h2">Bottled Kraken</div>\n'
+                           '        <ul>\n'
+                           '            <li><b>Licence du dépôt :</b> GPL-3.0.</li>\n'
+                           '            <li><b>En bref :</b> en cas de redistribution du logiciel, de publication de '
+                           'versions modifiées ou de distribution d’un paquet construit à partir de celui-ci, les '
+                           'conditions de la GPL-3.0 doivent être respectées.</li>\n'
+                           '            <li><b>Important :</b> cela reste distinct des licences des bibliothèques '
+                           'intégrées et des modèles utilisés.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Kraken</div>\n'
+                           '        <ul>\n'
+                           '            <li>Kraken est la base OCR de Bottled Kraken.</li>\n'
+                           '            <li>Le projet est placé sous <b>Apache License 2.0</b>.</li>\n'
+                           '            <li>En cas de redistribution, le texte de licence, les mentions de copyright '
+                           'et d’éventuelles obligations NOTICE sont particulièrement importants.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">faster-whisper</div>\n'
+                           '        <ul>\n'
+                           '            <li>faster-whisper est utilisé dans Bottled Kraken pour les fonctions locales '
+                           'de transcription vocale.</li>\n'
+                           '            <li>Le projet est sous <b>licence MIT</b>.</li>\n'
+                           '            <li>Des conditions séparées peuvent toutefois s’appliquer aux modèles et aux '
+                           'dépendances additionnelles.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">LM Studio</div>\n'
+                           '        <ul>\n'
+                           '            <li>LM Studio est utilisé en option comme serveur de modèles local ou '
+                           'connecté.</li>\n'
+                           '            <li>Les documents de référence sont ici surtout les <b>Terms of Service</b> et '
+                           'la <b>Privacy Policy</b> officielles.</li>\n'
+                           '            <li>En plus de cela, chaque modèle chargé via LM Studio peut avoir sa propre '
+                           'licence.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Ollama</div>\n'
+                           '        <ul>\n'
+                           '            <li>Le logiciel du dépôt officiel est placé sous <b>licence MIT</b>.</li>\n'
+                           '            <li>Cela reste en général simple pour un usage local ; en cas de '
+                           'redistribution d’un logiciel modifié, les mentions de licence et de copyright demeurent '
+                           'importantes.</li>\n'
+                           '            <li>Il faut distinguer cela des <b>fonctions cloud</b>, des règles de '
+                           'confidentialité et surtout des licences propres aux modèles exécutés.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Jan</div>\n'
+                           '        <ul>\n'
+                           '            <li>Le dépôt Jan est publié comme projet open source ; sa licence de dépôt est '
+                           '<b>AGPL-3.0</b>.</li>\n'
+                           '            <li>L’AGPL est particulièrement importante lorsque des versions modifiées sont '
+                           'mises à disposition via un réseau.</li>\n'
+                           '            <li>Comme pour les autres outils, des conditions supplémentaires peuvent '
+                           's’appliquer aux modèles intégrés et aux fournisseurs cloud externes.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">GPT4All</div>\n'
+                           '        <ul>\n'
+                           '            <li>Le dépôt officiel GPT4All est sous <b>licence MIT</b>.</li>\n'
+                           '            <li>La licence logicielle est permissive ; il faut néanmoins vérifier '
+                           'séparément les licences des modèles, l’usage de la marque et les composants tiers.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">text-generation-webui (oobabooga)</div>\n'
+                           '        <ul>\n'
+                           '            <li>Le projet est sous <b>AGPL-3.0</b>.</li>\n'
+                           '            <li>Ce cadre est juridiquement plus strict que MIT ou Apache, en particulier '
+                           'lorsqu’on modifie le logiciel ou qu’on le met à disposition via un réseau.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">LocalAI</div>\n'
+                           '        <ul>\n'
+                           '            <li>D’après le dépôt officiel, LocalAI est sous <b>licence MIT</b>.</li>\n'
+                           '            <li>Comme pour les autres serveurs, les licences des modèles, les composants '
+                           'supplémentaires et les règles d’usage organisationnelles doivent être examinés '
+                           'séparément.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">PySide6 / Qt for Python</div>\n'
+                           '        <ul>\n'
+                           '            <li>L’interface graphique de Bottled Kraken repose sur PySide6 / Qt for '
+                           'Python.</li>\n'
+                           '            <li>Qt for Python utilise des régimes de licence pouvant impliquer la '
+                           '<b>LGPL</b> ou une licence commerciale Qt, selon le composant et le mode de '
+                           'distribution.</li>\n'
+                           '            <li>Pour la redistribution, le packaging et les produits combinés '
+                           'propriétaires, la situation de licence Qt doit être vérifiée séparément.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card warn">\n'
+                           '        <div class="h2">Remarque supplémentaire sur les modèles et les contenus</div>\n'
+                           '        <ul>\n'
+                           '            <li>La licence logicielle d’une application doit toujours être distinguée de '
+                           'la licence des modèles OCR, vocaux ou IA qui y sont chargés.</li>\n'
+                           '            <li>Le traitement de documents protégés par le droit d’auteur, de données '
+                           'personnelles ou de fonds d’archives sensibles nécessite aussi une évaluation juridique '
+                           'distincte.</li>\n'
+                           '            <li>Cette fenêtre ne fournit qu’un aperçu compact, et non une analyse '
+                           'juridique contraignante pour un cas particulier.</li>\n'
+                           '        </ul>\n'
+                           '    </div>\n'
+                           '\n'
+                           '    <div class="card">\n'
+                           '        <div class="h2">Sources officielles</div>\n'
+                           '        <ul>\n'
+                           '            <li><a href="https://github.com/Testatost/Bottled-Kraken">Bottled Kraken – '
+                           'Dépôt</a></li>\n'
+                           '            <li><a href="https://github.com/mittagessen/kraken">Kraken – Dépôt</a></li>\n'
+                           '            <li><a href="https://kraken.re/7.0/index.html">Kraken – '
+                           'Documentation</a></li>\n'
+                           '            <li><a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper – '
+                           'Dépôt</a></li>\n'
+                           '            <li><a href="https://lmstudio.ai/app-terms">LM Studio – Terms of '
+                           'Service</a></li>\n'
+                           '            <li><a href="https://lmstudio.ai/privacy">LM Studio – Privacy Policy</a></li>\n'
+                           '            <li><a href="https://github.com/ollama/ollama">Ollama – Dépôt</a></li>\n'
+                           '            <li><a href="https://github.com/ollama/ollama/blob/main/LICENSE">Ollama – '
+                           'Licence MIT</a></li>\n'
+                           '            <li><a href="https://github.com/janhq/jan">Jan – Dépôt</a></li>\n'
+                           '            <li><a href="https://docs.gpt4all.io/gpt4all_api_server/home.html">GPT4All – '
+                           'Documentation du serveur API</a></li>\n'
+                           '            <li><a '
+                           'href="https://github.com/nomic-ai/gpt4all/blob/main/LICENSE.txt">GPT4All – Licence '
+                           'MIT</a></li>\n'
+                           '            <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui">text-generation-webui – '
+                           'Dépôt</a></li>\n'
+                           '            <li><a '
+                           'href="https://github.com/oobabooga/text-generation-webui/blob/main/LICENSE">text-generation-webui '
+                           '– AGPL-3.0</a></li>\n'
+                           '            <li><a href="https://localai.io/docs/overview/">LocalAI – Overview</a></li>\n'
+                           '            <li><a href="https://github.com/mudler/LocalAI/blob/master/LICENSE">LocalAI – '
+                           'Licence MIT</a></li>\n'
+                           '            <li><a href="https://doc.qt.io/qtforpython-6/">Qt for Python – '
+                           'Documentation</a></li>\n'
+                           '            <li><a href="https://doc.qt.io/qtforpython-6/licenses.html">Qt for Python – '
+                           'Licences</a></li>\n'
+                           '        </ul>\n'
+                           '    </div>\n',
+        'ai_prompt_page_system': 'Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche '
+                                 'Drucke, Handschriften und Formulare.\n'
+                                 'Du liest den Text direkt aus dem Bild.\n'
+                                 'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                 'Du musst den gelesenen Text auf eine bereits vorgegebene Liste von Zielzeilen '
+                                 'abbilden.\n'
+                                 'Jede Zielzeile entspricht genau einer visuellen Formular- oder Textzeile.\n'
+                                 'Du darfst keine zwei Zielzeilen zusammenziehen.\n'
+                                 'Du darfst keine zusätzliche Leerzeile halluzinieren.\n'
+                                 'Du darfst keinen langen Textblock in eine einzelne Zielzeile schreiben.\n'
+                                 'Wenn eine Zielzeile keinen sicher lesbaren Text enthält, gib für genau diese Zeile '
+                                 'einen leeren String zurück.\n'
+                                 'Du musst die Anzahl der Zielzeilen exakt einhalten.\n'
+                                 'Antworte ausschließlich mit gültigem JSON.\n'
+                                 'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_page_user': 'Lies den Text direkt aus dem Bild.\n'
+                               '\n'
+                               'Du musst die vorgegebene Kraken-Zeilenstruktur EXAKT einhalten.\n'
+                               'Es gibt genau {} Zielzeilen.\n'
+                               'Jeder idx steht für genau eine visuelle Zielzeile.\n'
+                               '\n'
+                               'HARTE REGELN:\n'
+                               '- Gib genau {} Einträge im Feld lines zurück\n'
+                               '- Die idx-Werte müssen exakt 0 bis {} sein\n'
+                               '- Kein idx darf fehlen\n'
+                               '- Kein idx darf doppelt vorkommen\n'
+                               '- Keine zwei Zielzeilen dürfen zu einer Zeile zusammengezogen werden\n'
+                               '- Kein langer Satzblock darf in einer einzelnen Zielzeile landen\n'
+                               '- Wenn eine Zielzeile unklar ist, gib den bestmöglichen kurzen Zeilentext zurück\n'
+                               '- Wenn die Zielzeile wirklich leer ist, gib text als leeren String zurück\n'
+                               '- Die bbox ist nur Orientierung für die visuelle Zuordnung\n'
+                               '- Gib NUR das JSON-Objekt zurück\n'
+                               '- Kein Markdown\n'
+                               '- Keine Analyse\n'
+                               '- Keine Kommentare\n'
+                               '- Keine zusätzlichen Sätze\n'
+                               '\n'
+                               'Kraken-Zielzeilenstruktur:\n'
+                               '{}\n'
+                               '\n'
+                               'Antwortformat exakt so:\n'
+                               '{{"lines":[{{"idx":0,"text":"..."}},{{"idx":1,"text":"..."}}]}}',
+        'ai_prompt_single_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                   'Handschriften und Formulare.\n'
+                                   'Du liest genau eine einzelne Zielzeile aus einem Bildausschnitt.\n'
+                                   'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                   'Die Zielzeile befindet sich in der Mitte des Ausschnitts.\n'
+                                   'Oberhalb oder unterhalb sichtbare Linien, Leerzeilen, Formularlinien, Labels oder '
+                                   'Nachbarzeilen sind nur Kontext.\n'
+                                   'Du darfst nur den Text der einen Zielzeile zurückgeben.\n'
+                                   'Du darfst keinen Text aus Nachbarzeilen übernehmen.\n'
+                                   'Du darfst keine zusätzliche Zeile erfinden.\n'
+                                   'Du darfst keine lange Passage bilden, wenn im Ausschnitt nur eine kurze '
+                                   'Formularzeile steht.\n'
+                                   'Wenn die Zielzeile leer ist, gib einen leeren String zurück.\n'
+                                   'Antworte ausschließlich mit gültigem JSON.\n'
+                                   'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_single_user': 'Lies genau die Zielzeile in der Mitte des Bildausschnitts.\n'
+                                 'WICHTIG:\n'
+                                 '- Gib nur den Text dieser EINEN Zeile zurück\n'
+                                 '- Benachbarte Zeilen dürfen nicht übernommen werden\n'
+                                 '- Formular-Labels, Linien und Leerbereiche dürfen nicht halluziniert ergänzt werden\n'
+                                 '- Wenn in dieser Zielzeile kein lesbarer Text steht, gib text als leeren String '
+                                 'zurück\n'
+                                 '- Keine zweite Zeile\n'
+                                 '- Keine Zusammenfassung\n'
+                                 '- Keine Erklärung\n'
+                                 '- Kein Markdown\n'
+                                 '- Keine Ausgabe vor oder nach dem JSON\n'
+                                 '\n'
+                                 'Format exakt:\n'
+                                 '{{"text":"..."}}\n'
+                                 '\n'
+                                 'Zeilenindex: {}',
+        'ai_prompt_decision_system': 'Du bist ein präziser OCR-Korrekturassistent für historische deutsche '
+                                     'Handschriften und Formulare.\n'
+                                     'Du bekommst für genau eine Zielzeile drei Kandidaten:\n'
+                                     '1. Kraken-OCR\n'
+                                     '2. OCR aus dem Gesamtseiten-Kontext\n'
+                                     '3. OCR aus der Overlay-Box dieser Zeile\n'
+                                     '\n'
+                                     'WICHTIG:\n'
+                                     '- Die Overlay-Box-OCR ist die Primärquelle.\n'
+                                     '- Die Seiten-OCR ist NUR Kontext und darf keine fremden Nachbarzeilen in diese '
+                                     'Zielzeile hineinziehen.\n'
+                                     '- Kraken ist nur schwacher Fallback.\n'
+                                     '- Du darfst keine zusätzliche Zeile erfinden.\n'
+                                     '- Du darfst keinen Text aus benachbarten Formularzeilen übernehmen.\n'
+                                     '- Du darfst keine lange Mehrzeilen-Passage in diese eine Zielzeile packen.\n'
+                                     '- Wenn die Box-OCR plausibel ist, übernimm sie.\n'
+                                     '- Nur wenn die Box-OCR klar abgeschnitten, leer oder offensichtlich falsch ist, '
+                                     'darfst du mit Kraken korrigieren.\n'
+                                     '- Die Seiten-OCR darf nur helfen, ein einzelnes unsicheres Wort zu bestätigen, '
+                                     'nicht die ganze Zeile zu ersetzen.\n'
+                                     '- Bewahre historische Schreibweise.\n'
+                                     'Antworte ausschließlich mit gültigem JSON.\n'
+                                     'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_decision_user': 'Zielzeile idx={}\n'
+                                   '\n'
+                                   'Kraken-OCR:\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Seitenkontext-OCR (nur Kontext, nicht Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Overlay-Box-OCR (Primärquelle):\n'
+                                   '{}\n'
+                                   '\n'
+                                   'Wähle die beste finale Fassung für GENAU diese eine Zeile.\n'
+                                   'Bevorzuge die Overlay-Box-OCR.\n'
+                                   'Gib nur die finale Textzeile zurück.\n'
+                                   'Format exakt:\n'
+                                   '{{"text":"..."}}',
+        'ai_prompt_block_system': 'Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche '
+                                  'Handschriften.\n'
+                                  'Lies den Text frei direkt aus dem Bild.\n'
+                                  'Das Bild ist die einzige Wahrheitsquelle.\n'
+                                  'Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst '
+                                  'lesen.\n'
+                                  'Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen.\n'
+                                  'Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen '
+                                  'eintragen.\n'
+                                  'Antworte ausschließlich mit gültigem JSON.\n'
+                                  'Kein Markdown. Kein Zusatztext. Kein Kommentar.',
+        'ai_prompt_block_user': 'Lies die handschriftlichen Zeilen im Bildausschnitt.\n'
+                                'Gib ausschließlich genau EIN JSON-Objekt zurück.\n'
+                                'Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n'
+                                'Es müssen genau {} Einträge im Feld lines stehen.\n'
+                                'Wichtig:\n'
+                                '- doppelte Anführungszeichen innerhalb von text immer als " escapen\n'
+                                '- keine weiteren Felder außer idx und text\n'
+                                '- keine Ausgabe vor oder nach dem JSON\n'
+                                'Format:\n'
+                                '{{"lines":[{{"idx":0,"text":"..."}}]}}\n'
+                                '\n'
+                                'Die idx-Werte müssen lokal bei 0 beginnen.\n'
+                                'Aktueller OCR-Hinweis:\n'
+                                '{}',
+        'line_menu_ai_revise_single': 'Réviser uniquement cette ligne avec le LM',
+        'btn_ok': 'OK',
+        'act_image_edit': 'Édition d’image',
+        'canvas_menu_split_box': 'Scinder la boîte',
+        'queue_ctx_check_all': 'Tout cocher',
+        'queue_ctx_uncheck_all': 'Effacer toutes les coches',
+        'queue_check_header_tooltip': 'Cliquer pour cocher tous les fichiers ou retirer toutes les coches',
+        'line_menu_ai_revise_selected': 'Réviser les lignes sélectionnées avec le LM',
+        'menu_lm_options': 'Options LM',
+        'menu_whisper_options': 'Options Whisper',
+        'act_whisper_set_path': 'Définir le chemin du modèle Whisper...',
+        'act_whisper_set_mic': 'Choisir le microphone...',
+        'act_scan_local': 'Scanner localement',
+        'no_models_scan': '(aucun modèle – veuillez scanner)',
+        'act_unload_model': 'Décharger le modèle',
+        'msg_whisper_model_unloaded': 'Modèle Whisper déchargé.',
+        'msg_whisper_models_found': '{} modèle(s) Whisper trouvé(s).',
+        'msg_whisper_models_not_found': 'Aucun modèle Whisper trouvé.',
+        'warn_no_audio_devices': 'Aucun périphérique d’entrée audio n’a été trouvé.',
+        'dlg_choose_microphone': 'Choisir le microphone',
+        'dlg_audio_input_device': 'Périphérique d’entrée audio :',
+        'msg_microphone_set': 'Microphone défini : {}',
+        'export_choose_format_label': 'Choisir le format d’export :',
+        'msg_pdf_render_already_running': 'Un PDF est déjà en cours de rendu. Veuillez patienter un instant.',
+        'pdf_page_display': '{} – Page {:04d}',
+        'act_set_manual_lm_url': 'Définir l’URL du serveur LM...',
+        'act_clear_manual_lm_url': 'Effacer l’URL du serveur LM',
+        'msg_lm_found_url': 'LM trouvé : {} | URL : {}',
+        'msg_lm_no_models_url': 'Aucun modèle trouvé | URL : {}',
+        'msg_lm_found': 'LM trouvé : {}',
+        'msg_lm_server_not_found': 'Aucun serveur LM local accessible n’a été trouvé.',
+        'act_clear_ai_model': 'Retirer le modèle LM',
+        'msg_ai_model_choice_cleared': 'Sélection du modèle LM effacée.',
+        'msg_ai_model_removed': 'Modèle LM retiré.',
+        'header_rec_models': 'Modèles de reconnaissance',
+        'header_seg_models': 'Modèles de segmentation',
+        'status_rec_model': 'Modèle de reconnaissance : {}',
+        'status_seg_model': 'Modèle de segmentation : {}',
+        'msg_ai_model_id_cleared_auto': 'Identifiant du modèle IA effacé, auto-détection localhost active.',
+        'msg_ai_single_done': 'Révision LM terminée pour la ligne {}.',
+        'log_ai_single_done': 'Révision LM de ligne terminée : {} | ligne {}',
+        'msg_ai_single_cancelled': 'Révision de ligne annulée.',
+        'log_ai_single_cancelled': 'Révision LM de ligne annulée : {}',
+        'msg_ai_single_failed': 'Échec de la révision de ligne.',
+        'log_ai_single_failed': 'Erreur de révision LM de ligne : {} -> {}',
+        'msg_ai_cancelled_short': 'Révision annulée.',
+        'msg_ai_failed_short': 'Échec de la révision.',
+        'warn_blla_model_missing': 'Le modèle de segmentation blla est introuvable.',
+        'dlg_project_loading_title': 'Charger le projet',
+        'white_border_title': 'Ajouter une bordure blanche',
+        'white_border_pixels': 'Bordure en pixels :',
+        'image_edit_rotate_off': 'Rotation : NON',
+        'image_edit_rotate_on': 'Rotation : OUI',
+        'image_edit_grid': 'Grille',
+        'image_edit_grid_tooltip': 'Taille de la grille : fine à grossière',
+        'image_edit_grid_label': 'Taille de la grille',
+        'image_edit_crop': 'Zone de recadrage',
+        'image_edit_separator': 'Barre de séparation',
+        'image_edit_gray': 'Niveaux de gris',
+        'image_edit_contrast': 'Contraste',
+        'image_edit_rotation_reset': 'Réinitialiser la rotation',
+        'image_edit_smart_split': 'Découpage intelligent',
+        'image_edit_prev': 'Image précédente',
+        'image_edit_next': 'Image suivante',
+        'image_edit_white_border': 'Ajouter une bordure blanche',
+        'image_edit_white_border_with_px': 'Ajouter une bordure blanche ({} px)',
+        'image_edit_apply_selected': 'Appliquer à toutes les images marquées',
+        'image_edit_apply_all': 'Appliquer à toutes',
+        'image_edit_applied_single_status': 'Image editing applied. Edited images were saved in the source directory '
+                                            'and added to the queue as new entries.',
+        'log_image_edit_applied': 'Image editing applied: {} | {} output file(s) saved in the source directory',
+        'image_edit_no_image_loaded': 'Aucune image chargée',
+        'image_edit_batch_title': 'Traitement d’image en cours',
+        'image_edit_batch_label': 'Traitement de l’image {}/{} : {}',
+        'msg_image_edit_batch_cancelled': 'Traitement d’image annulé.',
+        'image_edit_notice_title': 'Remarque',
+        'image_edit_turn_off_rotation_first': 'La rotation est encore active.\n'
+                                              '\n'
+                                              "Veuillez d’abord passer à 'Rotation : NON' avant de modifier la zone de "
+                                              'recadrage ou la barre de séparation.',
+        'msg_not_available': 'Indisponible',
+        'help_nav_image_edit': 'Édition d’image',
+        'help_nav_lm_alternatives': 'Alternatives à LM Studio',
+        'dlg_lm_url_title': 'URL du serveur LM',
+        'dlg_lm_url_label': """<div class="card">
+        <div class="h2"><b>Serveurs locaux typiques</b></div>
+        <ul>
+            <li><code>http://127.0.0.1:1234/v1</code> - <b>LM Studio</b></li>
+            <li><code>http://localhost:11434/v1</code> - <b>Ollama</b></li>
+            <li><code>http://127.0.0.1:1337/v1</code> - <b>Jan</b></li>
+            <li><code>http://localhost:4891/v1</code> - <b>GPT4All</b></li>
+            <li><code>http://127.0.0.1:5000/v1</code> - <b>text-generation-webui</b></li>
+            <li><code>http://localhost:8080/v1</code> - <b>LocalAI</b></li>
+            <li><code>http://HOST:8000/v1</code> - <b>vLLM</b></li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <div class="h2"><b>Correction automatique</b></div>
+        <ul>
+            <li>Le préfixe <code>http://</code> manquant est ajouté automatiquement.</li>
+            <li><code>/models</code> ou <code>/chat/completions</code> est automatiquement réduit à l’URL de base.</li>
+            <li><code>/v1</code> est ajouté si nécessaire.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <div class="h2"><b>Important</b></div>
+        <ul>
+            <li>N’entrez pas de commandes SSH.</li>
+            <li>En cas de tunnel SSH, utilisez l’URL locale du tunnel.</li>
+            <li>Pour Ollama dans Bottled Kraken, utilisez normalement l’URL compatible OpenAI en <code>/v1</code>, et non l’URL native en <code>/api</code>.</li>
+        </ul>
+    </div>""",
+        'dlg_lm_url_placeholder': 'ex. http://127.0.0.1:1234/v1',
+        'help_html_image_edit': '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h1">Édition d’image</div><br>\n'
+                                '                L’édition d’image sert à <b>préparer les pages avant l’OCR</b>.\n'
+                                '                C’est particulièrement utile lorsqu’un scan est incliné, trop sombre, '
+                                'peu contrasté,\n'
+                                '                trop recadré ou enregistré comme double page.\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Outils disponibles</div>\n'
+                                '                <ul>\n'
+                                '                    <li><b>Rotation :</b> redresser une page</li>\n'
+                                '                    <li><b>Zone de recadrage :</b> supprimer les marges '
+                                'gênantes</li>\n'
+                                '                    <li><b>Barre de séparation :</b> séparer proprement les doubles '
+                                'pages ou les contenus côte à côte</li>\n'
+                                '                    <li><b>Niveaux de gris / Contraste :</b> améliorer la lisibilité '
+                                'de l’imprimé et de l’écriture manuscrite</li>\n'
+                                '                    <li><b>Ajouter une bordure blanche :</b> utile pour les pages '
+                                'trop serrées</li>\n'
+                                '                    <li><b>Découpage intelligent :</b> séparation semi-automatique '
+                                'pour les sources difficiles</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Déroulement typique</div>\n'
+                                '                <ol>\n'
+                                '                    <li>Charger une image ou une page PDF</li>\n'
+                                '                    <li>Ouvrir l’édition d’image</li>\n'
+                                '                    <li>Ajuster l’aperçu : rotation, recadrage, contraste, séparation '
+                                'si nécessaire</li>\n'
+                                '                    <li>Appliquer le résultat à l’image actuelle, aux images marquées '
+                                'ou à toutes</li>\n'
+                                '                    <li>Lancer ensuite Kraken OCR</li>\n'
+                                '                </ol>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card warn">\n'
+                                '                <div class="h2">Remarque</div>\n'
+                                '                <span class="badge">Important</span>\n'
+                                '                <ul>\n'
+                                '                    <li>Si la rotation est active, il est préférable d’ajuster '
+                                'finement la zone de recadrage et la barre de séparation uniquement après être revenu '
+                                'à <code>Rotation : NON</code>.</li>\n'
+                                '                    <li>Les images modifiées sont enregistrées comme nouveaux '
+                                'fichiers de sortie puis réajoutées dans la file d’attente.</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '\n'
+                                '            <div class="card">\n'
+                                '                <div class="h2">Quand est-ce utile ?</div>\n'
+                                '                <ul>\n'
+                                '                    <li>scans inclinés ou déformés</li>\n'
+                                '                    <li>doubles pages de livres ou d’archives</li>\n'
+                                '                    <li>formulaires avec trop de marges ou un fond parasite</li>\n'
+                                '                    <li>imprimés historiques pâles ou écritures peu contrastées</li>\n'
+                                '                </ul>\n'
+                                '            </div>\n'
+                                '        ',
+        'help_html_lm_alternatives': '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h1">Alternatives à LM Studio</div><br>\n'
+                                     '                Bottled Kraken n’est pas limité à LM Studio.\n'
+                                     '                L’essentiel est que le service en cours fournisse une <b>API '
+                                     'compatible OpenAI</b>.\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Ollama</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>pour beaucoup d’utilisateurs, c’est le remplaçant le '
+                                     'plus propre lorsqu’un service local est surtout recherché</li>\n'
+                                     '                    <li>API native à '
+                                     '<code>http://localhost:11434/api</code></li>\n'
+                                     '                    <li>pour Bottled Kraken, utiliser en général l’URL '
+                                     'compatible OpenAI <code>http://localhost:11434/v1</code></li>\n'
+                                     '                    <li>propose aussi une compatibilité Anthropic pour certains '
+                                     'flux de travail</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">Jan</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>souvent le plus proche de LM Studio dans l’idée '
+                                     'd’utilisation</li>\n'
+                                     '                    <li>application de bureau avec modèles locaux et serveur API '
+                                     'intégré</li>\n'
+                                     '                    <li>URL typique : '
+                                     '<code>http://127.0.0.1:1337/v1</code></li>\n'
+                                     '                    <li>selon la configuration, une clé API peut aussi être '
+                                     'requise</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">GPT4All</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>également très proche de « démarrer localement et '
+                                     'utiliser »</li>\n'
+                                     '                    <li>URL typique : '
+                                     '<code>http://localhost:4891/v1</code></li>\n'
+                                     '                    <li>compatible OpenAI</li>\n'
+                                     '                    <li>LocalDocs peut aussi être utile pour des flux simples de '
+                                     'documents / RAG locaux</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">text-generation-webui</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>particulièrement intéressant pour les utilisateurs qui '
+                                     'aiment configurer davantage</li>\n'
+                                     '                    <li>API compatible OpenAI et Anthropic</li>\n'
+                                     '                    <li>URL typique : '
+                                     '<code>http://127.0.0.1:5000/v1</code></li>\n'
+                                     '                    <li>selon le backend, peut aussi prendre en charge la vision '
+                                     'et le tool calling</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card">\n'
+                                     '                <div class="h2">LocalAI</div>\n'
+                                     '                <ul>\n'
+                                     '                    <li>bien adapté lorsqu’on cherche plutôt un serveur IA local '
+                                     'auto-hébergé qu’une application de bureau classique</li>\n'
+                                     '                    <li>URL typique : '
+                                     '<code>http://localhost:8080/v1</code></li>\n'
+                                     '                    <li>compatible OpenAI, avec en plus une interface web et des '
+                                     'fonctions serveur étendues</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '\n'
+                                     '            <div class="card warn">\n'
+                                     '                <div class="h2">Important</div>\n'
+                                     '                <span class="badge">Compatibilité</span>\n'
+                                     '                <ul>\n'
+                                     '                    <li>Pour Bottled Kraken, l’élément principal est l’URL de '
+                                     'base compatible OpenAI.</li>\n'
+                                     '                    <li>Tous les outils n’utilisent pas les mêmes ports par '
+                                     'défaut ni la même authentification.</li>\n'
+                                     '                    <li>Si l’authentification par clé API est activée, Bottled '
+                                     'Kraken doit aussi envoyer cet en-tête.</li>\n'
+                                     '                </ul>\n'
+                                     '            </div>\n'
+                                     '        '}}
+
+ADDITIONAL_TRANSLATIONS = {
+    "de": {},
+    "en": {},
+    "fr": {},
 }
+
+for _lang, _values in ADDITIONAL_TRANSLATIONS.items():
+    TRANSLATIONS.setdefault(_lang, {}).update(_values)
+
+# Sicherheitsnetz: fehlende Keys in EN/FR fallen auf DE zurück
+for _lang in ("en", "fr"):
+    for _k, _v in TRANSLATIONS.get("de", {}).items():
+        TRANSLATIONS[_lang].setdefault(_k, _v)
 
 BBox = Tuple[int, int, int, int]
 Point = Tuple[float, float]
 
-
 # -----------------------------
 # DATENKLASSEN
 # -----------------------------
+
+
 @dataclass
 class RecordView:
     idx: int
     text: str
     bbox: Optional[BBox]
 
-
 UndoSnapshot = Tuple[List[Tuple[str, Optional[BBox]]], int]
-
 
 @dataclass
 class TaskItem:
@@ -840,7 +5674,6 @@ class TaskItem:
     preset_bboxes: List[Optional[BBox]] = field(default_factory=list)
     lm_locked_bboxes: List[Optional[BBox]] = field(default_factory=list)
 
-
 @dataclass
 class OCRJob:
     input_paths: List[str]
@@ -850,9 +5683,7 @@ class OCRJob:
     reading_direction: int
     export_format: str
     export_dir: Optional[str]
-    segmenter_mode: str = "blla"
     preset_bboxes_by_path: Dict[str, List[Optional[BBox]]] = field(default_factory=dict)
-
 
 # -----------------------------
 # GEOMETRIE & SORTIERUNG
@@ -876,7 +5707,6 @@ def _coerce_points(obj: Any) -> List[Point]:
             return pts
     return []
 
-
 def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, int, int, int]]:
     if not points:
         return None
@@ -889,7 +5719,6 @@ def _bbox_from_points(points: List[Point], pad: int = 0) -> Optional[Tuple[int, 
     if x1 <= x0 or y1 <= y0:
         return None
     return x0, y0, x1, y1
-
 
 def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
     bbox = getattr(r, "bbox", None)
@@ -920,7 +5749,6 @@ def record_bbox(r: Any) -> Optional[Tuple[int, int, int, int]]:
             return x0, y0 - vpad, x1, y1 + vpad
     return None
 
-
 def baseline_length(bl) -> float:
     pts = _coerce_points(bl)
     if len(pts) < 2:
@@ -928,7 +5756,6 @@ def baseline_length(bl) -> float:
     x1, y1 = pts[0]
     x2, y2 = pts[-1]
     return math.hypot(x2 - x1, y2 - y1)
-
 
 # Vertikale Separator-Records (Spaltentrenner)
 VSEP_RE = re.compile(r'^[|│┃¦︱︳]+$')  # | │ ┃ ¦ ︱ ︳
@@ -955,14 +5782,12 @@ NOISE_REPEAT_RE = re.compile(
 
 DOTS_ONLY_RE = re.compile(r'^(?:\.\s*){3,}$')
 
-
 def _is_symbol_only_line(text: Any) -> bool:
     txt = _clean_ocr_text(text)
     if not txt:
         return False
 
     return bool(ONLY_SYMBOL_LINE_RE.fullmatch(txt))
-
 
 def _is_noise_line(text: Any) -> bool:
     txt = _clean_ocr_text(text)
@@ -976,7 +5801,6 @@ def _is_noise_line(text: Any) -> bool:
         return True
 
     return False
-
 
 def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["TB_LR"]):
     """
@@ -1035,7 +5859,6 @@ def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["
         ordered.extend([r for r, _ in row["items"]])
 
     return ordered
-
 
 def sort_records_reading_order(records, image_width: int, image_height: int,
                                reading_mode: int = READING_MODES["TB_LR"]):
@@ -1639,19 +6462,16 @@ def sort_records_reading_order(records, image_width: int, image_height: int,
 
     return [r for r, _, _ in header_sorted] + [r for r, _, _ in core] + [r for r, _, _ in footer_sorted]
 
-
 def clamp_bbox(bb: Tuple[int, int, int, int], w: int, h: int) -> Optional[Tuple[int, int, int, int]]:
     x0, y0, x1, y1 = bb
     return (max(0, min(w - 1, x0)), max(0, min(h - 1, y0)),
             max(0, min(w, x1)), max(0, min(h, y1)))
-
 
 def _safe_int(v, default=0):
     try:
         return int(v)
     except Exception:
         return default
-
 
 def _force_text(value):
     if value is None:
@@ -1660,16 +6480,43 @@ def _force_text(value):
         return value.decode("utf-8", errors="replace")
     return str(value)
 
+def _error_log_path() -> str:
+    return os.path.join(os.getcwd(), "bottled_kraken_error.log")
+
+def _cleanup_old_error_log(max_age_days: int = 20):
+    log_path = _error_log_path()
+
+    try:
+        if not os.path.exists(log_path):
+            return
+
+        max_age_seconds = int(max_age_days * 24 * 60 * 60)
+        file_age = time.time() - os.path.getmtime(log_path)
+
+        if file_age >= max_age_seconds:
+            os.remove(log_path)
+    except Exception:
+        pass
+
+def _append_error_log_entry(msg: str):
+    log_path = _error_log_path()
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write("\n\n" + "=" * 80 + "\n")
+            f.write(f"[{timestamp}] Unbehandelte Ausnahme\n")
+            f.write("-" * 80 + "\n")
+            f.write(msg.rstrip() + "\n")
+    except Exception:
+        pass
 
 def _install_exception_hook():
+    _cleanup_old_error_log(max_age_days=20)
+
     def handle_exception(exc_type, exc_value, exc_tb):
         msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        try:
-            with open("bottled_kraken_error.log", "a", encoding="utf-8") as f:
-                f.write("\n\n" + "=" * 80 + "\n")
-                f.write(msg)
-        except Exception:
-            pass
+        _append_error_log_entry(msg)
 
         try:
             QMessageBox.critical(None, "Fehler", msg)
@@ -1680,7 +6527,6 @@ def _install_exception_hook():
                 pass
 
     sys.excepthook = handle_exception
-
 
 def _clean_ocr_text(text: Any) -> str:
     if text is None:
@@ -1702,152 +6548,45 @@ def _clean_ocr_text(text: Any) -> str:
     txt = re.sub(r"[ \t\r\f\v]+", " ", txt)
     return txt.strip()
 
-
 def _is_effectively_empty_ocr_text(text: Any) -> bool:
     return _clean_ocr_text(text) == ""
 
+def _extract_json_payload(text: str):
+    if not text:
+        return None
+
+    raw = _force_text(text).strip()
+    raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```\s*$", "", raw)
+
+    candidates = [raw]
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        chunk = raw[start:end + 1]
+        candidates.append(chunk)
+        candidates.append(re.sub(r",(\s*[}\]])", r"\1", chunk))
+
+    normalized = raw.replace("’", "'").replace("‘", "'")
+    normalized = normalized.replace("„", "\"").replace("“", "\"").replace("”", "\"")
+    candidates.append(normalized)
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+    return None
 
 def _extract_json_string_lines_object(text: str):
-    if not text:
-        return None
-
-    raw = _force_text(text).strip()
-
-    # fences entfernen
-    raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\s*```\s*$", "", raw)
-
-    # 1) direktes JSON
-    try:
-        data = json.loads(raw)
-        if isinstance(data, dict) and isinstance(data.get("lines"), list):
-            lines = data["lines"]
-            if all(isinstance(x, str) for x in lines):
-                return lines
-    except Exception:
-        pass
-
-    # 2) erstes JSON-Objekt extrahieren
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        chunk = raw[start:end + 1]
-
-        try:
-            data = json.loads(chunk)
-            if isinstance(data, dict) and isinstance(data.get("lines"), list):
-                lines = data["lines"]
-                if all(isinstance(x, str) for x in lines):
-                    return lines
-        except Exception:
-            pass
-
-        repaired = re.sub(r",(\s*[}\]])", r"\1", chunk)
-        try:
-            data = json.loads(repaired)
-            if isinstance(data, dict) and isinstance(data.get("lines"), list):
-                lines = data["lines"]
-                if all(isinstance(x, str) for x in lines):
-                    return lines
-        except Exception:
-            pass
-
-    # 3) typografische Quotes als letzter Fallback
-    normalized = raw
-    normalized = normalized.replace("’", "'").replace("‘", "'")
-    normalized = normalized.replace("„", "\"").replace("“", "\"").replace("”", "\"")
-
-    try:
-        data = json.loads(normalized)
-        if isinstance(data, dict) and isinstance(data.get("lines"), list):
-            lines = data["lines"]
-            if all(isinstance(x, str) for x in lines):
-                return lines
-    except Exception:
-        pass
-
+    data = _extract_json_payload(text)
+    if isinstance(data, dict) and isinstance(data.get("lines"), list):
+        lines = data["lines"]
+        if all(isinstance(x, str) for x in lines):
+            return lines
     return None
-
-
-def _extract_json_lines_object(text: str):
-    if not text:
-        return None
-
-    raw = _force_text(text).strip()
-
-    # fences entfernen
-    raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\s*```\s*$", "", raw)
-
-    # 1) ZUERST IMMER das rohe JSON versuchen
-    try:
-        data = json.loads(raw)
-        if isinstance(data, dict) and isinstance(data.get("lines"), list):
-            return data["lines"]
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-
-    # 2) Erstes JSON-Objekt isolieren und roh parsen
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        chunk = raw[start:end + 1]
-
-        try:
-            data = json.loads(chunk)
-            if isinstance(data, dict) and isinstance(data.get("lines"), list):
-                return data["lines"]
-            if isinstance(data, list):
-                return data
-        except Exception:
-            pass
-
-        # 3) nur sehr konservative Reparatur: trailing commas
-        repaired = re.sub(r",(\s*[}\]])", r"\1", chunk)
-        try:
-            data = json.loads(repaired)
-            if isinstance(data, dict) and isinstance(data.get("lines"), list):
-                return data["lines"]
-            if isinstance(data, list):
-                return data
-        except Exception:
-            pass
-
-    # 4) LETZTER FALLBACK:
-    # nur wenn das Modell kein sauberes JSON geliefert hat, typografische Quotes glätten
-    normalized = raw
-    normalized = normalized.replace("’", "'").replace("‘", "'")
-
-    # WICHTIG:
-    # „ “ nur hier ganz am Ende als Notfall-Fallback,
-    # niemals vor dem ersten json.loads()
-    normalized = normalized.replace("„", "\"").replace("“", "\"").replace("”", "\"")
-
-    try:
-        data = json.loads(normalized)
-        if isinstance(data, dict) and isinstance(data.get("lines"), list):
-            return data["lines"]
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-
-    # 5) lines-array direkt extrahieren
-    m = re.search(r'"lines"\s*:\s*(\[[\s\S]*\])', raw)
-    if m:
-        arr_txt = m.group(1)
-        arr_txt = re.sub(r",(\s*[}\]])", r"\1", arr_txt)
-        try:
-            arr = json.loads(arr_txt)
-            if isinstance(arr, list):
-                return arr
-        except Exception:
-            pass
-
-    return None
-
 
 def _pil_to_data_url(
         im: Image.Image,
@@ -1875,11 +6614,9 @@ def _pil_to_data_url(
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
-
 def _image_to_data_url(path: str) -> str:
     im = _load_image_gray(path)
     return _pil_to_data_url(im)
-
 
 def _page_to_data_url(
         path: str,
@@ -1894,7 +6631,6 @@ def _page_to_data_url(
         image_format=image_format,
         jpeg_quality=jpeg_quality,
     )
-
 
 def _page_to_small_png_data_url(
         path: str,
@@ -1916,7 +6652,6 @@ def _page_to_small_png_data_url(
         max_side=max_side,
         image_format="PNG",
     )
-
 
 def _crop_block_to_data_url_context(
         path: str,
@@ -1940,7 +6675,6 @@ def _crop_block_to_data_url_context(
     crop = im.crop((x0, y0, x1, y1))
     return _pil_to_data_url(crop, max_side=1600)
 
-
 def _crop_single_line_to_data_url(
         path: str,
         rv: "RecordView",
@@ -1963,7 +6697,6 @@ def _crop_single_line_to_data_url(
     crop = im.crop((x0, y0, x1, y1))
     return _pil_to_data_url(crop, max_side=1600)
 
-
 # -----------------------------
 # HILFSFUNKTIONEN FÜR TABELLEN-EXPORT
 # -----------------------------
@@ -1984,7 +6717,6 @@ def cluster_columns(records: List[RecordView], x_threshold: int = 45):
             cols.append({"x": x0, "items": [r]})
     cols.sort(key=lambda c: c["x"])
     return [c["items"] for c in cols]
-
 
 def is_same_visual_row(a: RecordView, b: RecordView, page_width: int) -> bool:
     if not a.bbox or not b.bbox:
@@ -2017,7 +6749,6 @@ def is_same_visual_row(a: RecordView, b: RecordView, page_width: int) -> bool:
         return False
 
     return True
-
 
 def group_rows_by_y(records: List[RecordView], page_width: int):
     recs = [r for r in records if r.bbox]
@@ -2094,7 +6825,6 @@ def group_rows_by_y(records: List[RecordView], page_width: int):
         row.sort(key=lambda rv: rv.bbox[0])
     return rows
 
-
 def table_to_rows_two_columns(records: List[RecordView], page_width: int) -> List[List[str]]:
     #   Erzwingt exakt 2 Spalten anhand Seitenmitte.
     #   Verhindert "3. Spalte" durch Einrückungen/Ausreißer.
@@ -2126,7 +6856,6 @@ def table_to_rows_two_columns(records: List[RecordView], page_width: int) -> Lis
         merged.append(r)
 
     return merged
-
 
 def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]:
     # Wenn der Text explizite Trenner enthält, nutze die als "harte" Spalten,
@@ -2210,6 +6939,85 @@ def table_to_rows(records: List[RecordView], page_width: int) -> List[List[str]]
         grid.append(line)
     return grid
 
+# -----------------------------
+# Wartebereich
+# -----------------------------
+class QueueCheckDelegate(QStyledItemDelegate):
+    def _checkbox_rect(self, option, widget):
+        style = widget.style() if widget else QApplication.style()
+
+        box_opt = QStyleOptionButton()
+        indicator = style.subElementRect(QStyle.SE_CheckBoxIndicator, box_opt, widget)
+
+        return QStyle.alignedRect(
+            option.direction,
+            Qt.AlignCenter,
+            indicator.size(),
+            option.rect
+        )
+
+    def paint(self, painter, option, index):
+        value = index.data(Qt.CheckStateRole)
+        if value is None:
+            super().paint(painter, option, index)
+            return
+
+        # Zellenhintergrund / Selektion normal von Qt zeichnen lassen
+        view_opt = QStyleOptionViewItem(option)
+        self.initStyleOption(view_opt, index)
+        view_opt.text = ""
+        view_opt.icon = QIcon()
+        view_opt.features &= ~QStyleOptionViewItem.HasCheckIndicator
+        super().paint(painter, view_opt, index)
+
+        style = option.widget.style() if option.widget else QApplication.style()
+
+        box_opt = QStyleOptionButton()
+        box_opt.state |= QStyle.State_Enabled
+
+        if int(value) == str(Qt.Checked):
+            box_opt.state |= QStyle.State_On
+        else:
+            box_opt.state |= QStyle.State_Off
+
+        if option.state & QStyle.State_MouseOver:
+            box_opt.state |= QStyle.State_MouseOver
+
+        box_opt.rect = self._checkbox_rect(option, option.widget)
+
+        style.drawPrimitive(QStyle.PE_IndicatorCheckBox, box_opt, painter, option.widget)
+
+    def editorEvent(self, event, model, option, index):
+        flags = index.flags()
+        if not (flags & Qt.ItemIsUserCheckable) or not (flags & Qt.ItemIsEnabled):
+            return False
+
+        # Tastatur
+        if event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Space, Qt.Key_Select):
+                current = index.data(Qt.CheckStateRole)
+                new_state = Qt.Unchecked if int(current) == int(Qt.Checked) else Qt.Checked
+                return model.setData(index, new_state, Qt.CheckStateRole)
+            return False
+
+        # Doppelklick nicht separat toggeln
+        if event.type() == QEvent.MouseButtonDblClick:
+            return True
+
+        # Maus nur innerhalb der zentrierten Checkbox
+        if event.type() == QEvent.MouseButtonRelease:
+            if event.button() != Qt.LeftButton:
+                return False
+
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            if not self._checkbox_rect(option, option.widget).contains(pos):
+                return False
+
+            current = index.data(Qt.CheckStateRole)
+            new_state = Qt.Unchecked if int(current) == int(Qt.Checked) else Qt.Checked
+            return model.setData(index, new_state, Qt.CheckStateRole)
+
+        return False
 
 # -----------------------------
 # SKALIERBARES / VERSCHIEBBARES RECHTECK-ITEM
@@ -2349,10 +7157,6 @@ class ResizableRectItem(QGraphicsRectItem):
             return
         super().mouseDoubleClickEvent(event)
 
-    def _on_rect_item_clicked(self, idx: int):
-        self.rect_clicked.emit(idx)
-
-
 # -----------------------------
 # WARTEBEREICH-TABELLE MIT DRAG & DROP
 # -----------------------------
@@ -2418,7 +7222,6 @@ class DropQueueTable(QTableWidget):
         else:
             event.ignore()
 
-
 # -----------------------------
 # ZEILENLISTE (Entf + Drag&Drop zum Umordnen)
 # -----------------------------
@@ -2426,11 +7229,12 @@ class LinesTreeWidget(QTreeWidget):
     delete_pressed = Signal()
     reorder_committed = Signal(list, int)  # new_order (old indices), current_row after drop
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, tr_func=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._tr_func = tr_func
 
         self.setColumnCount(2)
-        self.setHeaderLabels(["#", "Erkannte Zeilen und Wörter"])
+        self.setHeaderLabels(["#", self._tr_func("lines_tree_header") if self._tr_func else ""])
         self.setRootIsDecorated(False)
         self.setUniformRowHeights(True)
 
@@ -2719,7 +7523,7 @@ class ImageCanvas(QGraphicsView):
             self._pen_normal.setColor(QColor("#ff3b30"))
             self._pen_selected.setColor(QColor("#0a84ff"))
         else:
-            self._bg_color = QColor("#ffffff")
+            self._bg_color = QColor("#f2f2f2")
             self._pen_normal.setColor(QColor("#d00000"))
             self._pen_selected.setColor(QColor("#0000ff"))
         self.setBackgroundBrush(QBrush(self._bg_color))
@@ -2936,7 +7740,7 @@ class ImageCanvas(QGraphicsView):
 
         if isinstance(item, ResizableRectItem):
             idx = item.idx
-            act_split = menu.addAction("Box aufteilen")
+            act_split = menu.addAction(tr("canvas_menu_split_box") if tr else "Split box")
             act_del = menu.addAction(tr("canvas_menu_delete_box") if tr else "Delete overlay box")
             menu.addSeparator()
             act_add_draw = menu.addAction(tr("canvas_menu_add_box_draw") if tr else "Add overlay box (draw)")
@@ -3193,7 +7997,7 @@ class ImageCanvas(QGraphicsView):
 
         font = QFont("Arial", 20)
         font.setItalic(True)
-        txt = self.tr_func("drop_hint") if self.tr_func else "Datei(en) hierher ziehen und ablegen"
+        txt = self.tr_func("drop_hint") if self.tr_func else ""
 
         c = QColor("#aaa") if self._bg_color.lightness() < 128 else QColor("#555")
 
@@ -3488,19 +8292,16 @@ class OCRWorker(QThread):
     def _ensure_models_loaded(self):
         if self._device is None:
             self._device = self._resolve_device()
-            # Gewähltes Backend-Label (cuda/rocm/mps/cpu) + tatsächliches torch-Device anzeigen
             self.device_resolved.emit(f"{self._device_label} -> {self._device}")
             self._emit_gpu_info(self._device)
+
         if self._rec_model is None:
             self._rec_model = self._load_rec_model(self.job.recognition_model_path, self._device)
-        mode = getattr(self.job, "segmenter_mode", "blla")
-        if mode == "blla":
-            if self._seg_model is None:
-                if not self.job.segmentation_model_path:
-                    raise ValueError("No baseline model selected.")
-                self._seg_model = self._load_seg_model(self.job.segmentation_model_path, self._device)
-        else:
-            self._seg_model = None
+
+        if self._seg_model is None:
+            if not self.job.segmentation_model_path:
+                raise ValueError("No blla segmentation model selected.")
+            self._seg_model = self._load_seg_model(self.job.segmentation_model_path, self._device)
 
     @staticmethod
     def _seg_expected_lines(seg: Any) -> Optional[int]:
@@ -3575,19 +8376,10 @@ class OCRWorker(QThread):
             x0, y0, x1, y1 = bb
             crop = im.crop((x0, y0, x1, y1))
 
-            # kleine Sicherheits-Pads sind okay, aber hier minimal halten
-            # damit Split-Boxen wirklich exakt benutzt werden
             crop_records = []
 
             try:
-                if getattr(self.job, "segmenter_mode", "blla") == "pageseg":
-                    bw = binarization.nlbin(crop)
-                    if getattr(bw, "mode", None) != "1":
-                        bw = bw.convert("1")
-                    seg = pageseg.segment(bw)
-                else:
-                    seg = blla.segment(crop, model=self._seg_model)
-
+                seg = blla.segment(crop, model=self._seg_model)
                 seg = self._filter_short_baselines_in_seg(seg)
 
                 for rec in rpred.rpred(self._rec_model, crop, seg):
@@ -3661,14 +8453,7 @@ class OCRWorker(QThread):
                 im = im.resize((im.size[0] * scale_factor, im.size[1] * scale_factor), Image.BICUBIC)
 
             # --- Segmentierung ---
-            if getattr(self.job, "segmenter_mode", "blla") == "pageseg":
-                # pageseg braucht ein bi-level Bild (Mode "1")
-                bw = binarization.nlbin(im)  # empfohlen für legacy pageseg
-                if getattr(bw, "mode", None) != "1":
-                    bw = bw.convert("1")
-                seg = pageseg.segment(bw)
-            else:
-                seg = blla.segment(im, model=self._seg_model)
+            seg = blla.segment(im, model=self._seg_model)
 
             # --- FIX B: winzige/kaputte Baselines entfernen (Baseline length below minimum 5px) ---
             try:
@@ -3835,10 +8620,9 @@ class OCRWorker(QThread):
         try:
             if not os.path.exists(self.job.recognition_model_path):
                 raise ValueError("Recognition model not found.")
-            mode = getattr(self.job, "segmenter_mode", "blla")
-            if mode == "blla":
-                if not os.path.exists(self.job.segmentation_model_path or ""):
-                    raise ValueError("Baseline model not found.")
+
+            if not os.path.exists(self.job.segmentation_model_path or ""):
+                raise ValueError("blla segmentation model not found.")
 
             self._ensure_models_loaded()
 
@@ -3878,9 +8662,11 @@ class AIBatchRevisionWorker(QThread):
             repetition_penalty: float = 1.0,
             min_p: float = 0.0,
             max_tokens: int = 1200,
+            tr_func=None,
             parent=None
     ):
         super().__init__(parent)
+        self._tr = tr_func or (lambda key, *args: (TRANSLATIONS["de"].get(key, key).format(*args) if args else TRANSLATIONS["de"].get(key, key)))
         self.items = items
         self.lm_model = lm_model
         self.endpoint = endpoint
@@ -3908,7 +8694,7 @@ class AIBatchRevisionWorker(QThread):
 
     def _revise_one_item(self, item: TaskItem) -> List[str]:
         if self.isInterruptionRequested():
-            raise RuntimeError("Überarbeitung abgebrochen.")
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
 
         if not item.results:
             return []
@@ -3943,6 +8729,7 @@ class AIBatchRevisionWorker(QThread):
             repetition_penalty=self.repetition_penalty,
             min_p=self.min_p,
             max_tokens=self.max_tokens,
+            tr_func=self._tr,
             parent=None
         )
 
@@ -3964,7 +8751,7 @@ class AIBatchRevisionWorker(QThread):
             self._current_worker = None
 
         if self.isInterruptionRequested():
-            raise RuntimeError("Überarbeitung abgebrochen.")
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
 
         if "msg" in error_holder:
             raise RuntimeError(str(error_holder["msg"]))
@@ -4046,9 +8833,11 @@ class AIRevisionWorker(QThread):
             repetition_penalty: float = 1.0,
             min_p: float = 0.0,
             max_tokens: int = 1200,
+            tr_func=None,
             parent=None
     ):
         super().__init__(parent)
+        self._tr = tr_func or (lambda key, *args: (TRANSLATIONS["de"].get(key, key).format(*args) if args else TRANSLATIONS["de"].get(key, key)))
         self.path = path
         self.recs = [
             RecordView(i, rv.text, tuple(rv.bbox) if rv.bbox else None)
@@ -4287,45 +9076,14 @@ class AIRevisionWorker(QThread):
                 "bbox": _normalize_bbox(rv.bbox, img_w, img_h)
             })
 
-        system_prompt = (
-            "Du bist ein hochpräziser OCR- und Transkriptionsassistent für historische deutsche Drucke, Handschriften und Formulare. "
-            "Du liest den Text direkt aus dem Bild. "
-            "Das Bild ist die einzige Wahrheitsquelle. "
-            "Du musst den gelesenen Text auf eine bereits vorgegebene Liste von Zielzeilen abbilden. "
-            "Jede Zielzeile entspricht genau einer visuellen Formular- oder Textzeile. "
-            "Du darfst keine zwei Zielzeilen zusammenziehen. "
-            "Du darfst keine zusätzliche Leerzeile halluzinieren. "
-            "Du darfst keinen langen Textblock in eine einzelne Zielzeile schreiben. "
-            "Wenn eine Zielzeile keinen sicher lesbaren Text enthält, gib für genau diese Zeile einen leeren String zurück. "
-            "Du musst die Anzahl der Zielzeilen exakt einhalten. "
-            "Antworte ausschließlich mit gültigem JSON. "
-            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
-        )
+        system_prompt = self._tr("ai_prompt_page_system")
 
-        user_prompt = (
-            "Lies den Text direkt aus dem Bild.\n\n"
-            "Du musst die vorgegebene Kraken-Zeilenstruktur EXAKT einhalten.\n"
-            f"Es gibt genau {len(recs)} Zielzeilen.\n"
-            "Jeder idx steht für genau eine visuelle Zielzeile.\n\n"
-            "HARTE REGELN:\n"
-            f"- Gib genau {len(recs)} Einträge im Feld lines zurück\n"
-            f"- Die idx-Werte müssen exakt 0 bis {len(recs) - 1} sein\n"
-            "- Kein idx darf fehlen\n"
-            "- Kein idx darf doppelt vorkommen\n"
-            "- Keine zwei Zielzeilen dürfen zu einer Zeile zusammengezogen werden\n"
-            "- Kein langer Satzblock darf in einer einzelnen Zielzeile landen\n"
-            "- Wenn eine Zielzeile unklar ist, gib den bestmöglichen kurzen Zeilentext zurück\n"
-            "- Wenn die Zielzeile wirklich leer ist, gib text als leeren String zurück\n"
-            "- Die bbox ist nur Orientierung für die visuelle Zuordnung\n"
-            "- Gib NUR das JSON-Objekt zurück\n"
-            "- Kein Markdown\n"
-            "- Keine Analyse\n"
-            "- Keine Kommentare\n"
-            "- Keine zusätzlichen Sätze\n\n"
-            "Kraken-Zielzeilenstruktur:\n"
-            f"{json.dumps(line_specs, ensure_ascii=False)}\n\n"
-            "Antwortformat exakt so:\n"
-            "{\"lines\":[{\"idx\":0,\"text\":\"...\"},{\"idx\":1,\"text\":\"...\"}]}"
+        user_prompt = self._tr(
+            "ai_prompt_page_user",
+            len(recs),
+            len(recs),
+            len(recs) - 1,
+            json.dumps(line_specs, ensure_ascii=False)
         )
 
         payload = {
@@ -4360,12 +9118,17 @@ class AIRevisionWorker(QThread):
         except Exception:
             pass
 
-        lines = _extract_json_lines_object(content)
+        obj = _extract_json_payload(content)
 
+        if not isinstance(obj, dict):
+            raise ValueError(
+                self._tr("ai_err_page_invalid_json", content[:3000] if content else "<leer>")
+            )
+
+        lines = obj.get("lines")
         if not isinstance(lines, list):
             raise ValueError(
-                "Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\n"
-                f"Extrahierter Content:\n{content[:3000] if content else '<leer>'}"
+                self._tr("ai_err_page_invalid_lines", content[:3000] if content else "<leer>")
             )
 
         out = [""] * len(recs)
@@ -4385,13 +9148,13 @@ class AIRevisionWorker(QThread):
 
         if too_long_blocks >= 1:
             raise ValueError(
-                "Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen."
+                self._tr("ai_err_page_long_blocks")
             )
 
         # Nur komplett unbrauchbare Antworten verwerfen
         if filled == 0:
             raise ValueError(
-                f"Seiten-OCR lieferte keine verwertbaren Zeilen: {filled}/{len(recs)}"
+                self._tr("ai_err_page_no_usable_lines", filled, len(recs))
             )
 
         for i in range(len(out)):
@@ -4406,37 +9169,9 @@ class AIRevisionWorker(QThread):
             idx: int,
             current_text: str = "",
     ) -> str:
-        system_prompt = (
-            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften und Formulare. "
-            "Du liest genau eine einzelne Zielzeile aus einem Bildausschnitt. "
-            "Das Bild ist die einzige Wahrheitsquelle. "
-            "Die Zielzeile befindet sich in der Mitte des Ausschnitts. "
-            "Oberhalb oder unterhalb sichtbare Linien, Leerzeilen, Formularlinien, Labels oder Nachbarzeilen sind nur Kontext. "
-            "Du darfst nur den Text der einen Zielzeile zurückgeben. "
-            "Du darfst keinen Text aus Nachbarzeilen übernehmen. "
-            "Du darfst keine zusätzliche Zeile erfinden. "
-            "Du darfst keine lange Passage bilden, wenn im Ausschnitt nur eine kurze Formularzeile steht. "
-            "Wenn die Zielzeile leer ist, gib einen leeren String zurück. "
-            "Antworte ausschließlich mit gültigem JSON. "
-            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
-        )
+        system_prompt = self._tr("ai_prompt_single_system")
 
-        user_prompt = (
-            "Lies genau die Zielzeile in der Mitte des Bildausschnitts.\n"
-            "WICHTIG:\n"
-            "- Gib nur den Text dieser EINEN Zeile zurück\n"
-            "- Benachbarte Zeilen dürfen nicht übernommen werden\n"
-            "- Formular-Labels, Linien und Leerbereiche dürfen nicht halluziniert ergänzt werden\n"
-            "- Wenn in dieser Zielzeile kein lesbarer Text steht, gib text als leeren String zurück\n"
-            "- Keine zweite Zeile\n"
-            "- Keine Zusammenfassung\n"
-            "- Keine Erklärung\n"
-            "- Kein Markdown\n"
-            "- Keine Ausgabe vor oder nach dem JSON\n\n"
-            "Format exakt:\n"
-            "{\"text\":\"...\"}\n\n"
-            f"Zeilenindex: {idx}"
-        )
+        user_prompt = self._tr("ai_prompt_single_user", idx)
 
         payload = {
             "model": self.lm_model,
@@ -4502,37 +9237,14 @@ class AIRevisionWorker(QThread):
             page_text: str,
             box_text: str,
     ) -> str:
-        system_prompt = (
-            "Du bist ein präziser OCR-Korrekturassistent für historische deutsche Handschriften und Formulare. "
-            "Du bekommst für genau eine Zielzeile drei Kandidaten:\n"
-            "1. Kraken-OCR\n"
-            "2. OCR aus dem Gesamtseiten-Kontext\n"
-            "3. OCR aus der Overlay-Box dieser Zeile\n\n"
-            "WICHTIG:\n"
-            "- Die Overlay-Box-OCR ist die Primärquelle.\n"
-            "- Die Seiten-OCR ist NUR Kontext und darf keine fremden Nachbarzeilen in diese Zielzeile hineinziehen.\n"
-            "- Kraken ist nur schwacher Fallback.\n"
-            "- Du darfst keine zusätzliche Zeile erfinden.\n"
-            "- Du darfst keinen Text aus benachbarten Formularzeilen übernehmen.\n"
-            "- Du darfst keine lange Mehrzeilen-Passage in diese eine Zielzeile packen.\n"
-            "- Wenn die Box-OCR plausibel ist, übernimm sie.\n"
-            "- Nur wenn die Box-OCR klar abgeschnitten, leer oder offensichtlich falsch ist, darfst du mit Kraken korrigieren.\n"
-            "- Die Seiten-OCR darf nur helfen, ein einzelnes unsicheres Wort zu bestätigen, nicht die ganze Zeile zu ersetzen.\n"
-            "- Bewahre historische Schreibweise.\n"
-            "Antworte ausschließlich mit gültigem JSON. "
-            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
-        )
+        system_prompt = self._tr("ai_prompt_decision_system")
 
-        user_prompt = (
-            f"Zielzeile idx={idx}\n\n"
-            f"Kraken-OCR:\n{kraken_text}\n\n"
-            f"Seitenkontext-OCR (nur Kontext, nicht Primärquelle):\n{page_text}\n\n"
-            f"Overlay-Box-OCR (Primärquelle):\n{box_text}\n\n"
-            "Wähle die beste finale Fassung für GENAU diese eine Zeile.\n"
-            "Bevorzuge die Overlay-Box-OCR.\n"
-            "Gib nur die finale Textzeile zurück.\n"
-            "Format exakt:\n"
-            "{\"text\":\"...\"}"
+        user_prompt = self._tr(
+            "ai_prompt_decision_user",
+            idx,
+            kraken_text,
+            page_text,
+            box_text
         )
 
         payload = {
@@ -4673,13 +9385,13 @@ class AIRevisionWorker(QThread):
 
     def _post_json(self, payload: dict) -> dict:
         if self._cancelled or self.isInterruptionRequested():
-            raise RuntimeError("Überarbeitung abgebrochen.")
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
 
         body = json.dumps(payload).encode("utf-8")
         parsed = urllib.parse.urlparse(self.endpoint)
 
         if parsed.scheme not in ("http", "https"):
-            raise RuntimeError(f"Nicht unterstütztes Schema: {parsed.scheme}")
+            raise RuntimeError(self._tr("ai_err_bad_scheme", parsed.scheme))
 
         host = parsed.hostname
         port = parsed.port
@@ -4688,7 +9400,7 @@ class AIRevisionWorker(QThread):
             path += "?" + parsed.query
 
         if not host:
-            raise RuntimeError("Ungültiger Endpoint.")
+            raise RuntimeError(self._tr("ai_err_invalid_endpoint"))
 
         conn = None
         try:
@@ -4710,13 +9422,13 @@ class AIRevisionWorker(QThread):
             )
 
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
 
             resp = conn.getresponse()
             raw = resp.read().decode("utf-8", errors="replace")
 
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
 
             if resp.status >= 400:
                 raise RuntimeError(f"HTTP {resp.status}: {raw}")
@@ -4725,15 +9437,15 @@ class AIRevisionWorker(QThread):
 
         except socket.timeout:
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
-            raise RuntimeError("Zeitüberschreitung bei LM Studio")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
+            raise RuntimeError(self._tr("ai_err_timeout"))
 
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Ungültige JSON-Antwort von LM Studio: {e}")
+            raise RuntimeError(self._tr("ai_err_invalid_json", e))
 
         except Exception as e:
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
             raise
 
         finally:
@@ -4832,16 +9544,14 @@ class AIRevisionWorker(QThread):
 
             if finish_reason == "length":
                 raise RuntimeError(
-                    "Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen JSON-Antwort abgeschnitten "
-                    "(finish_reason=length). Erhöhe max_tokens oder verwende ein nicht-thinkendes Modell."
+                    self._tr("ai_err_reasoning_truncated")
                 )
 
             raise RuntimeError(
-                "Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. "
-                "Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne reasoning."
+                self._tr("ai_err_reasoning_only")
             )
 
-        raise RuntimeError("LM Studio lieferte keinen verwertbaren Antwortinhalt.")
+        raise RuntimeError(self._tr("ai_err_no_content"))
 
     def _request_block_reread(
             self,
@@ -4852,35 +9562,16 @@ class AIRevisionWorker(QThread):
     ) -> List[str]:
         count = end_idx - start_idx
 
-        system_prompt = (
-            "Du bist ein präziser OCR- und Transkriptionsassistent für historische deutsche Handschriften. "
-            "Lies den Text frei direkt aus dem Bild. "
-            "Das Bild ist die einzige Wahrheitsquelle. "
-            "Du darfst nicht den OCR-Hinweis rekonstruieren, sondern musst das Bild selbst lesen. "
-            "Die von außen vorgegebene Zeilenanzahl ist nur ein Strukturrahmen. "
-            "Du musst den frei gelesenen Text passend in genau diese Anzahl von Zeilen eintragen. "
-            "Antworte ausschließlich mit gültigem JSON. "
-            "Kein Markdown. Kein Zusatztext. Kein Kommentar."
-        )
+        system_prompt = self._tr("ai_prompt_block_system")
 
         joined_hint = "\n".join(
             f"{i}: {txt}" for i, txt in enumerate(current_lines)
         )
 
-        user_prompt = (
-            "Lies die handschriftlichen Zeilen im Bildausschnitt.\n"
-            "Gib ausschließlich genau EIN JSON-Objekt zurück.\n"
-            "Kein Markdown. Kein ```json. Kein Kommentar. Kein Zusatztext.\n"
-            f"Es müssen genau {count} Einträge im Feld lines stehen.\n"
-            "Wichtig:\n"
-            "- doppelte Anführungszeichen innerhalb von text immer als \\\" escapen\n"
-            "- keine weiteren Felder außer idx und text\n"
-            "- keine Ausgabe vor oder nach dem JSON\n"
-            "Format:\n"
-            "{\"lines\":[{\"idx\":0,\"text\":\"...\"}]}\n\n"
-            "Die idx-Werte müssen lokal bei 0 beginnen.\n"
-            "Aktueller OCR-Hinweis:\n"
-            f"{joined_hint}"
+        user_prompt = self._tr(
+            "ai_prompt_block_user",
+            count,
+            joined_hint
         )
 
         payload = {
@@ -4909,9 +9600,17 @@ class AIRevisionWorker(QThread):
         except Exception:
             pass
 
-        lines = _extract_json_lines_object(content)
+        obj = _extract_json_payload(content)
+        if not isinstance(obj, dict):
+            raise ValueError(
+                self._tr("ai_err_block_invalid_json", content[:3000] if content else "<leer>")
+            )
+
+        lines = obj.get("lines")
         if not isinstance(lines, list):
-            return current_lines
+            raise ValueError(
+                self._tr("ai_err_block_invalid_lines", content[:3000] if content else "<leer>")
+            )
 
         out = [""] * count
         for item in lines:
@@ -4925,10 +9624,11 @@ class AIRevisionWorker(QThread):
         fixed = []
         for i in range(count):
             txt = out[i].strip()
+            fallback = current_lines[i] if i < len(current_lines) else ""
             if txt:
                 fixed.append(txt)
             else:
-                fixed.append(current_lines[i])
+                fixed.append(fallback)
 
         return fixed
 
@@ -4944,7 +9644,7 @@ class AIRevisionWorker(QThread):
 
     def run(self):
         if self._cancelled or self.isInterruptionRequested():
-            self.failed_revision.emit(self.path, "Überarbeitung abgebrochen.")
+            self.failed_revision.emit(self.path, self._tr("msg_ai_cancelled"))
             return
         try:
             original_lines = [rv.text for rv in self.recs]
@@ -4953,23 +9653,23 @@ class AIRevisionWorker(QThread):
                 self.finished_revision.emit(self.path, [])
                 return
 
-            self.status_changed.emit(f"Starte freie KI-OCR: {os.path.basename(self.path)}")
+            self.status_changed.emit(self._tr("ai_status_start_free_ocr", os.path.basename(self.path)))
             self.progress_changed.emit(0)
 
             # -------------------------------------------------
             # 1/3 BOX-OCR zuerst = Primärquelle
             # -------------------------------------------------
-            self.status_changed.emit(f"1/3 Zeilenweise Box-OCR: {os.path.basename(self.path)}")
+            self.status_changed.emit(self._tr("ai_status_step1_title", os.path.basename(self.path)))
 
             box_lines: List[str] = []
             total = max(1, len(self.recs))
 
             for i, rv in enumerate(self.recs):
                 if self._cancelled or self.isInterruptionRequested():
-                    raise RuntimeError("Überarbeitung abgebrochen.")
+                    raise RuntimeError(self._tr("msg_ai_cancelled"))
 
                 self.status_changed.emit(
-                    f"1/3 Box-OCR Zeile {i + 1}/{total}: {os.path.basename(self.path)}"
+                    self._tr("ai_status_step1_line", i + 1, total, os.path.basename(self.path))
                 )
 
                 try:
@@ -4997,7 +9697,7 @@ class AIRevisionWorker(QThread):
                 self.progress_changed.emit(int(((i + 1) / total) * 55))
 
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
 
             is_form_like = self._looks_like_form_layout()
 
@@ -5006,11 +9706,11 @@ class AIRevisionWorker(QThread):
             # -------------------------------------------------
             if is_form_like:
                 self.status_changed.emit(
-                    f"2/3 Block-Kontext-OCR (Formularmodus): {os.path.basename(self.path)}"
+                    self._tr("ai_status_step2_form", os.path.basename(self.path))
                 )
             else:
                 self.status_changed.emit(
-                    f"2/3 Block-Kontext-OCR: {os.path.basename(self.path)}"
+                    self._tr("ai_status_step2_plain", os.path.basename(self.path))
                 )
 
             # Startwert: Kraken-Zeilen als Fallback
@@ -5021,10 +9721,10 @@ class AIRevisionWorker(QThread):
 
             for chunk_idx, (start, end) in enumerate(chunks, start=1):
                 if self._cancelled or self.isInterruptionRequested():
-                    raise RuntimeError("Überarbeitung abgebrochen.")
+                    raise RuntimeError(self._tr("msg_ai_cancelled"))
 
                 self.status_changed.emit(
-                    f"2/3 Block-Kontext {chunk_idx}/{len(chunks)}: Zeilen {start + 1}-{end}"
+                    self._tr("ai_status_step2_chunk", chunk_idx, len(chunks), start + 1, end)
                 )
 
                 try:
@@ -5057,13 +9757,13 @@ class AIRevisionWorker(QThread):
                 self.progress_changed.emit(55 + int((chunk_idx / max(1, len(chunks))) * 15))
 
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
 
             # -------------------------------------------------
             # 3/3 Merge: BOX bleibt Primärquelle, PAGE nur schwacher Kontext
             # -------------------------------------------------
             self.status_changed.emit(
-                f"3/3 Merge: Box primär, Page nur wenn lokal konsistent: {os.path.basename(self.path)}"
+                self._tr("ai_status_step3_merge", os.path.basename(self.path))
             )
 
             final_lines: List[str] = []
@@ -5122,13 +9822,13 @@ class AIRevisionWorker(QThread):
 
             if len(final_lines) != len(self.recs):
                 raise ValueError(
-                    f"Finale Merge-Ausgabe gab {len(final_lines)} statt {len(self.recs)} Zeilen zurück."
+                    self._tr("ai_err_final_merge_count", len(final_lines), len(self.recs))
                 )
 
             if self._cancelled or self.isInterruptionRequested():
-                raise RuntimeError("Überarbeitung abgebrochen.")
+                raise RuntimeError(self._tr("msg_ai_cancelled"))
 
-            self.status_changed.emit(f"KI-Überarbeitung abgeschlossen: {os.path.basename(self.path)}")
+            self.status_changed.emit(self._tr("ai_status_done", os.path.basename(self.path)))
             self.progress_changed.emit(100)
             self.finished_revision.emit(self.path, final_lines)
 
@@ -5140,10 +9840,10 @@ class AIRevisionWorker(QThread):
             self.failed_revision.emit(self.path, f"HTTP-Fehler: {e}\n{body}")
 
         except urllib.error.URLError as e:
-            self.failed_revision.emit(self.path, f"LM Studio nicht erreichbar: {e}")
+            self.failed_revision.emit(self.path, self._tr("ai_err_server_unreachable", e))
 
         except socket.timeout:
-            self.failed_revision.emit(self.path, "Zeitüberschreitung beim Warten auf LM Studio.")
+            self.failed_revision.emit(self.path, self._tr("ai_err_timeout"))
 
         except Exception as e:
             msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
@@ -5163,9 +9863,11 @@ class HFDownloadWorker(QThread):
             prepare_cmds: List[List[str]],
             install_cmd: List[str],
             download_cmd: List[str],
+            tr_func=None,
             parent=None
     ):
         super().__init__(parent)
+        self._tr = tr_func or (lambda key, *args: (TRANSLATIONS["de"].get(key, key).format(*args) if args else TRANSLATIONS["de"].get(key, key)))
         self.repo_id = repo_id
         self.local_dir = local_dir
         self.prepare_cmds = prepare_cmds or []
@@ -5266,7 +9968,7 @@ class HFDownloadWorker(QThread):
                 self._proc.terminate()
             except Exception:
                 pass
-            raise RuntimeError("Download abgebrochen.")
+            raise RuntimeError(self._tr("hf_error_cancelled"))
 
         ret = self._proc.wait()
         if ret != 0:
@@ -5289,7 +9991,7 @@ class HFDownloadWorker(QThread):
         # und NICHT des gesamten Modell-Downloads.
 
         if "still waiting to acquire lock" in txt.lower():
-            self.status_changed.emit("Warte auf Dateisperre im Zielordner …")
+            self.status_changed.emit(self._tr("hf_status_waiting_for_lock"))
         else:
             self.status_changed.emit(txt)
 
@@ -5490,17 +10192,17 @@ class HFDownloadWorker(QThread):
                     self.progress_changed.emit(percent_tenths)
 
                     lines = [
-                        f"{percent_tenths / 10:.1f}%  |  2,9GB (total)  |  {elapsed:.0f}s  |  <2-5 Minuten"
+                        f"{percent_tenths / 10:.1f}%  |  2,9GB (total)  |  {elapsed:.0f}s (ca. 2-5min)"
                     ]
 
                     if total_files > 0:
-                        lines.append(f"Dateien fertig: {finished_files}/{total_files}")
+                        lines.append(self._tr("hf_status_files_done", finished_files, total_files))
 
                     if self._current_file:
-                        lines.append(f"Aktuell: {self._current_file}")
+                        lines.append(self._tr("hf_status_current_file", self._current_file))
 
                     if self._last_finished_file:
-                        lines.append(f"Zuletzt fertig: {self._last_finished_file}")
+                        lines.append(self._tr("hf_status_last_finished", self._last_finished_file))
 
                     self.status_changed.emit("\n".join(lines))
                 else:
@@ -5512,13 +10214,13 @@ class HFDownloadWorker(QThread):
                     ]
 
                     if total_files > 0:
-                        lines.append(f"Dateien fertig: {finished_files}/{total_files}")
+                        lines.append(self._tr("hf_status_files_done", finished_files, total_files))
 
                     if self._current_file:
-                        lines.append(f"Aktuell: {self._current_file}")
+                        lines.append(self._tr("hf_status_current_file", self._current_file))
 
                     if self._last_finished_file:
-                        lines.append(f"Zuletzt fertig: {self._last_finished_file}")
+                        lines.append(self._tr("hf_status_last_finished", self._last_finished_file))
 
                     self.status_changed.emit("\n".join(lines))
 
@@ -5532,22 +10234,19 @@ class HFDownloadWorker(QThread):
                     self._proc.terminate()
                 except Exception:
                     pass
-                raise RuntimeError("Download abgebrochen.")
+                raise RuntimeError(self._tr("hf_error_cancelled"))
 
             ret = self._proc.wait()
             if ret != 0:
-                raise RuntimeError(f"'hf download' wurde mit Exit-Code {ret} beendet.")
+                raise RuntimeError(self._tr("hf_error_hf_exit", ret))
 
             self.progress_changed.emit(1000)
-            self.status_changed.emit("Download abgeschlossen.")
+            self.status_changed.emit(self._tr("hf_status_download_done"))
             self.finished_download.emit(self.local_dir)
 
 
         except FileNotFoundError:
-            self.failed_download.emit(
-                "Python oder ein benötigtes Modul wurde nicht gefunden.\n\n"
-                "Bitte prüfen, ob die Anwendung mit einer funktionsfähigen Python-Umgebung läuft."
-            )
+            self.failed_download.emit(self._tr("hf_error_python_missing"))
 
 
         except Exception as e:
@@ -5557,26 +10256,11 @@ class HFDownloadWorker(QThread):
             low = msg.lower()
 
             if "externally-managed-environment" in low:
-                msg = (
-                    "Die Python-Installation des Systems darf nicht direkt verändert werden.\n\n"
-                    "Die App sollte dafür automatisch eine eigene Umgebung benutzen.\n"
-                    "Falls das trotzdem passiert ist, fehlt wahrscheinlich python3-venv.\n\n"
-                    "Bitte einmal ausführen:\n"
-                    "sudo apt update\n"
-                    "sudo apt install -y python3-venv python3-pip"
-                )
+                msg = self._tr("hf_error_externally_managed")
             elif "no module named venv" in low or "ensurepip" in low:
-                msg = (
-                    "Auf diesem System fehlt die Unterstützung für Python-venv.\n\n"
-                    "Bitte einmal ausführen:\n"
-                    "sudo apt update\n"
-                    "sudo apt install -y python3-venv python3-pip"
-                )
+                msg = self._tr("hf_error_no_venv")
             elif "no such file or directory" in low and "python3" in low:
-                msg = (
-                    "python3 wurde nicht gefunden.\n\n"
-                    "Bitte prüfen, ob Python 3 installiert ist."
-                )
+                msg = self._tr("hf_error_python3_missing")
 
             self.failed_download.emit(msg)
         finally:
@@ -5615,6 +10299,11 @@ class VoiceLineFillWorker(QThread):
         self._cancel_requested = False
         self._audio_chunks = []
         self._stream = None
+
+    def _tr(self, *args):
+        if len(args) == 1:
+            return QCoreApplication.translate("VoiceLineFillWorker", args[0])
+        return QCoreApplication.translate(*args)
 
     def stop(self):
         # normales Ende der Aufnahme -> Worker beendet den Stream selbst
@@ -5723,7 +10412,7 @@ class VoiceLineFillWorker(QThread):
 
     def _write_temp_wav(self) -> str:
         if not self._audio_chunks:
-            raise RuntimeError("Keine Audiodaten aufgenommen.")
+            raise RuntimeError(self._tr("warn_voice_no_audio_data"))
 
         audio = np.concatenate(self._audio_chunks, axis=0).flatten()
 
@@ -5863,19 +10552,19 @@ class VoiceLineFillWorker(QThread):
             self._record_until_stop()
 
             if self._cancel_requested or self.isInterruptionRequested():
-                raise RuntimeError("Aufnahme abgebrochen.")
+                raise RuntimeError(self._tr("warn_voice_cancelled"))
 
             if not self._finish_requested:
-                raise RuntimeError("Aufnahme wurde nicht regulär beendet.")
+                raise RuntimeError(self._tr("warn_voice_not_finished"))
 
             if not self._audio_chunks:
-                raise RuntimeError("Keine Audiodaten aufgenommen.")
+                raise RuntimeError(self._tr("warn_voice_no_audio_data"))
 
-            self.status_changed.emit("Audiodatei wird vorbereitet...")
+            self.status_changed.emit(self._tr("voice_status_prepare_wav"))
             self.progress_changed.emit(20)
             tmp_wav = self._write_temp_wav()
 
-            self.status_changed.emit("Lade faster-whisper...")
+            self.status_changed.emit(self._tr("voice_status_load_whisper"))
             self.progress_changed.emit(35)
 
             from faster_whisper import WhisperModel
@@ -5902,7 +10591,7 @@ class VoiceLineFillWorker(QThread):
                 )
 
                 self.status_changed.emit(
-                    f"Transkribiere ausgewählte Zeile lokal ({active_device}/{active_compute})..."
+                    self._tr("voice_status_transcribe_line", active_device, active_compute)
                 )
                 self.progress_changed.emit(60)
 
@@ -5966,8 +10655,9 @@ class VoiceLineFillWorker(QThread):
 class ProgressStatusDialog(QDialog):
     cancel_requested = Signal()
 
-    def __init__(self, title: str, parent=None):
+    def __init__(self, title: str, tr, parent=None):
         super().__init__(parent)
+        self._tr = tr
         self.setWindowTitle(title)
 
         self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
@@ -5980,7 +10670,7 @@ class ProgressStatusDialog(QDialog):
 
         lay = QVBoxLayout(self)
 
-        self.lbl_status = QLabel("Bereit")
+        self.lbl_status = QLabel(self._tr("progress_status_ready"))
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setMinimumWidth(320)
         self.lbl_status.setMaximumWidth(520)
@@ -5990,7 +10680,7 @@ class ProgressStatusDialog(QDialog):
         self.progress.setValue(0)
         self.progress.setFormat("%p%")
 
-        self.btn_cancel = QPushButton("Abbrechen")
+        self.btn_cancel = QPushButton(self._tr("btn_cancel"))
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
 
         lay.addWidget(self.lbl_status)
@@ -6004,21 +10694,20 @@ class ProgressStatusDialog(QDialog):
         self.adjustSize()
 
     def set_progress(self, value: int):
-        value = max(0, min(1000, int(value)))
-        percent_text = value / 10.0
+        raw = max(0, int(value))
 
-        if value < 10:  # unter 1.0 %
-            if self.progress.minimum() != 0 or self.progress.maximum() != 0:
-                self.progress.setRange(0, 0)  # Busy-Modus
-            self.progress.setFormat(f"{percent_text:.1f}%")
-            return
+        if raw <= 100:
+            percent = float(raw)
+        else:
+            percent = raw / 10.0
+
+        percent = max(0.0, min(100.0, percent))
 
         if self.progress.minimum() != 0 or self.progress.maximum() != 100:
             self.progress.setRange(0, 100)
 
-        bar_value = max(0, min(100, int(round(percent_text))))
-        self.progress.setValue(bar_value)
-        self.progress.setFormat(f"{percent_text:.1f}%")
+        self.progress.setValue(int(round(percent)))
+        self.progress.setFormat(f"{percent:.1f}%")
 
 class VoiceRecordDialog(QDialog):
     start_requested = Signal()
@@ -6031,18 +10720,18 @@ class VoiceRecordDialog(QDialog):
         self._recording = False
         self._processing = False
 
-        self.setWindowTitle("🎤 Zeile mit Audio verändern")
+        self.setWindowTitle(self._tr("voice_record_title"))
         self.setModal(True)
 
         lay = QVBoxLayout(self)
 
-        self.lbl_info = QLabel("Steuerung der Audioaufnahme:")
+        self.lbl_info = QLabel(self._tr("voice_record_info"))
         lay.addWidget(self.lbl_info)
 
         btn_row = QHBoxLayout()
 
-        self.btn_toggle = QPushButton("Aufnahme starten")
-        self.btn_cancel = QPushButton("Abbrechen")
+        self.btn_toggle = QPushButton(self._tr("voice_record_start"))
+        self.btn_cancel = QPushButton(self._tr("btn_cancel"))
 
         btn_row.addWidget(self.btn_toggle)
         btn_row.addWidget(self.btn_cancel)
@@ -6075,8 +10764,8 @@ class VoiceRecordDialog(QDialog):
         if not self._recording:
             self._recording = True
             self._processing = False
-            self.btn_toggle.setText("Aufnahme stoppen")
-            self.lbl_info.setText("Steuerung der Audioaufnahme:")
+            self.btn_toggle.setText(self._tr("voice_record_stop"))
+            self.lbl_info.setText(self._tr("voice_record_info"))
             self._keep_start_button_primary()
             self.start_requested.emit()
         else:
@@ -6086,8 +10775,8 @@ class VoiceRecordDialog(QDialog):
 
             # Button soll optisch wieder "Aufnahme starten" zeigen,
             # aber intern noch gesperrt bleiben
-            self.btn_toggle.setText("Aufnahme starten")
-            self.lbl_info.setText("Whisper verarbeitet Audio … bitte kurz warten.")
+            self.btn_toggle.setText(self._tr("voice_record_start"))
+            self.lbl_info.setText(self._tr("voice_record_processing"))
             self._keep_start_button_primary()
 
             self.stop_requested.emit()
@@ -6101,19 +10790,17 @@ class VoiceRecordDialog(QDialog):
         self._processing = False
 
         self.btn_toggle.setEnabled(True)
-        self.btn_toggle.setText("Aufnahme stoppen" if self._recording else "Aufnahme starten")
-        self.lbl_info.setText("Steuerung der Audioaufnahme:")
+        self.btn_toggle.setText(self._tr("voice_record_stop") if self._recording else self._tr("voice_record_start"))
+        self.lbl_info.setText(self._tr("voice_record_info"))
 
         self._keep_start_button_primary()
 
     def closeEvent(self, event):
         super().closeEvent(event)
 
-
 # -----------------------------
 # EXPORT-DIALOGE
 # -----------------------------
-
 class ExportWorker(QThread):
     file_started = Signal(str, int, int)  # display_name, current, total
     file_done = Signal(str, str, int, int)  # display_name, dest_path, current, total
@@ -6156,7 +10843,6 @@ class ExportWorker(QThread):
         self.status_changed.emit("Export abgeschlossen.")
         self.finished_batch.emit()
 
-
 # -----------------------------
 # EXPORT-DIALOGE
 # -----------------------------
@@ -6182,7 +10868,6 @@ class ExportModeDialog(QDialog):
     def accept(self):
         self.choice = "all" if self.rb_all.isChecked() else "selected"
         super().accept()
-
 
 class ExportSelectFilesDialog(QDialog):
     def __init__(self, tr, items: List[TaskItem], parent=None):
@@ -6213,6 +10898,1689 @@ class ExportSelectFilesDialog(QDialog):
         self.selected_paths = [p for p in paths if p]
         self.accept()
 
+def pil_to_qpixmap(img: Image.Image) -> QPixmap:
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGBA")
+    return QPixmap.fromImage(ImageQt(img))
+
+def render_pdf_page_to_pil(pdf_path: str, page_index: int, dpi: int = 300) -> Image.Image:
+    doc = fitz.open(pdf_path)
+    try:
+        page = doc.load_page(page_index)
+        zoom = dpi / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    finally:
+        doc.close()
+
+@dataclass
+class ImageEditSeparator:
+    cx: float
+    cy: float
+    angle: float = 0.0
+
+    HANDLE_R = 8
+    ROT_R = 12
+    ROT_OFFSET = 30
+
+    def direction_vector(self) -> Tuple[float, float]:
+        return math.sin(self.angle), -math.cos(self.angle)
+
+    def clipped_endpoints(self, w: float, h: float) -> Optional[Tuple[float, float, float, float]]:
+        if w <= 1 or h <= 1:
+            return None
+
+        vx, vy = self.direction_vector()
+        eps = 1e-9
+        candidates = []
+
+        if abs(vx) > eps:
+            for x in (0.0, float(w)):
+                t = (x - self.cx) / vx
+                y = self.cy + t * vy
+                if -1e-6 <= y <= h + 1e-6:
+                    candidates.append((t, x, max(0.0, min(float(h), y))))
+
+        if abs(vy) > eps:
+            for y in (0.0, float(h)):
+                t = (y - self.cy) / vy
+                x = self.cx + t * vx
+                if -1e-6 <= x <= w + 1e-6:
+                    candidates.append((t, max(0.0, min(float(w), x)), y))
+
+        if len(candidates) < 2:
+            return None
+
+        unique = []
+        for t, x, y in candidates:
+            if not any(abs(x - ux) < 1e-4 and abs(y - uy) < 1e-4 for _, ux, uy in unique):
+                unique.append((t, x, y))
+
+        if len(unique) < 2:
+            return None
+
+        unique.sort(key=lambda item: item[0])
+        _, x1, y1 = unique[0]
+        _, x2, y2 = unique[-1]
+        return x1, y1, x2, y2
+
+    def top_handle(self, w: float, h: float):
+        pts = self.clipped_endpoints(w, h)
+        if pts is None:
+            return self.cx, self.cy
+        x1, y1, x2, y2 = pts
+        return (x1, y1) if (y1 < y2 or (abs(y1 - y2) < 1e-6 and x1 <= x2)) else (x2, y2)
+
+    def bottom_handle(self, w: float, h: float):
+        pts = self.clipped_endpoints(w, h)
+        if pts is None:
+            return self.cx, self.cy
+        x1, y1, x2, y2 = pts
+        return (x2, y2) if (y1 < y2 or (abs(y1 - y2) < 1e-6 and x1 <= x2)) else (x1, y1)
+
+    def distance_to_line(self, px: float, py: float, w: float, h: float) -> float:
+        pts = self.clipped_endpoints(w, h)
+        if pts is None:
+            return 1e9
+
+        x1, y1, x2, y2 = pts
+        vx = x2 - x1
+        vy = y2 - y1
+        wx = px - x1
+        wy = py - y1
+        denom = math.hypot(vx, vy)
+
+        if denom == 0:
+            return math.hypot(px - x1, py - y1)
+
+        return abs(vx * wy - vy * wx) / denom
+
+    def set_from_points(self, p1: Tuple[float, float], p2: Tuple[float, float]):
+        x1, y1 = p1
+        x2, y2 = p2
+        self.cx = (x1 + x2) / 2.0
+        self.cy = (y1 + y2) / 2.0
+        dx = x2 - x1
+        dy = y2 - y1
+        if abs(dx) >= 1e-9 or abs(dy) >= 1e-9:
+            self.angle = math.atan2(dx, -dy)
+
+    def move_by(self, dx: float, dy: float, w: float, h: float):
+        self.cx = max(0.0, min(float(w), self.cx + dx))
+        self.cy = max(0.0, min(float(h), self.cy + dy))
+
+    def rotation_handle_pos(self):
+        px = math.cos(self.angle)
+        py = math.sin(self.angle)
+        return self.cx + px * self.ROT_OFFSET, self.cy + py * self.ROT_OFFSET
+
+@dataclass
+class ImageEditSettings:
+    rotation_angle: float = 0.0
+    color_mode: str = "RGB"
+    contrast_enabled: bool = False
+    crop_enabled: bool = False
+    crop_orig: Optional[Tuple[int, int, int, int]] = None
+    split_enabled: bool = False
+    separator_norm: Optional[Tuple[float, float, float]] = None  # cx/w, cy/h, angle
+    smart_split_enabled: bool = False
+    white_border_px: int = 0
+
+    erase_enabled: bool = False
+    erase_shape: str = ""   # "", "rect", "ellipse"
+    erase_orig: Optional[Tuple[int, int, int, int]] = None
+    erase_actions: List[Tuple[str, Tuple[int, int, int, int]]] = field(default_factory=list)
+
+class WhiteBorderDialog(QDialog):
+    def __init__(self, current_px: int = 0, parent=None):
+        super().__init__(parent)
+        tr = getattr(parent, "_tr", None)
+        self._tr = tr if callable(tr) else (lambda key, *args: (TRANSLATIONS["de"].get(key, key).format(*args) if args else TRANSLATIONS["de"].get(key, key)))
+        self.setWindowTitle(self._tr("white_border_title"))
+
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.sp_px = QSpinBox()
+        self.sp_px.setRange(0, 5000)
+        self.sp_px.setValue(int(current_px))
+
+        form.addRow(self._tr("white_border_pixels"), self.sp_px)
+        lay.addLayout(form)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText(self._tr("dlg_box_apply"))
+        bb.button(QDialogButtonBox.Cancel).setText(self._tr("btn_cancel"))
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def get_value(self) -> int:
+        return int(self.sp_px.value())
+
+class ImageEditCanvas(QWidget):
+    changed = Signal()
+    rotation_committed = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setMinimumSize(700, 520)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.base_image: Optional[Image.Image] = None
+        self.view_image: Optional[Image.Image] = None
+        self.view_pixmap: Optional[QPixmap] = None
+        self.zoom = 1.0
+        self.fit_scale = 1.0
+        self.show_crop = False
+        self.show_separator = False
+        self.show_grid = False
+        self.grid_spacing = 20
+        self.rotation_mode = False
+        self.crop_rect: Optional[QRectF] = None
+        self.separator: Optional[ImageEditSeparator] = None
+
+        self.show_erase = False
+        self.erase_shape = ""   # "", "rect", "ellipse"
+        self.erase_rect: Optional[QRectF] = None
+
+        self.drag_mode = None
+        self.drag_start = QPointF()
+        self.rect_before = None
+        self.sep_offset = QPointF()
+        self.rotation_angle = 0.0
+        self.preview_rotation_angle = 0.0
+        self.is_preview_rotating = False
+        self.rotation_start_angle = 0.0
+        self.rotation_start_mouse_angle = 0.0
+        self._img_offset_x = 0.0
+        self._img_offset_y = 0.0
+
+    def set_image(self, img: Optional[Image.Image], reset_zoom: bool = True):
+        self.base_image = img
+        if reset_zoom:
+            self.zoom = 1.0
+        self._update_view_image()
+        if self.view_image and self.show_crop and self.crop_rect is None:
+            self.create_default_crop()
+        self._ensure_separator_inside()
+        self.update()
+        self.changed.emit()
+
+    def _update_view_image(self):
+        if self.base_image is None:
+            self.view_image = None
+            self.view_pixmap = None
+            self._update_image_offset()
+            return
+
+        cw = max(10, self.width())
+        ch = max(10, self.height())
+        iw, ih = self.base_image.size
+
+        self.fit_scale = min(cw / iw, ch / ih)
+        scale = self.fit_scale * self.zoom
+
+        nw = max(1, int(iw * scale))
+        nh = max(1, int(ih * scale))
+
+        self.view_image = self.base_image.resize((nw, nh), Image.LANCZOS)
+        self.view_pixmap = pil_to_qpixmap(self.view_image)
+
+        bounds = QRectF(0, 0, nw, nh)
+
+        if self.crop_rect is not None:
+            self.crop_rect = self.crop_rect.intersected(bounds)
+
+        if getattr(self, "erase_rect", None) is not None:
+            self.erase_rect = self.erase_rect.intersected(bounds)
+
+        self._update_image_offset()
+
+    def create_default_crop(self):
+        if not self.view_image:
+            return
+        w, h = self.view_image.size
+        m = 0.05
+        self.crop_rect = QRectF(w * m, h * m, w * (1 - 2 * m), h * (1 - 2 * m))
+        self.changed.emit()
+
+    def _ensure_separator_inside(self):
+        if self.view_image is None or self.separator is None:
+            return
+        w, h = self.view_image.size
+        self.separator.cx = max(0.0, min(float(w), self.separator.cx))
+        self.separator.cy = max(0.0, min(float(h), self.separator.cy))
+
+    def get_crop_orig(self) -> Optional[Tuple[int, int, int, int]]:
+        if self.crop_rect is None or self.base_image is None or self.view_image is None:
+            return None
+        bw, bh = self.base_image.size
+        vw, vh = self.view_image.size
+        sx = bw / vw
+        sy = bh / vh
+        x1 = max(0, min(self.crop_rect.left(), vw - 2))
+        y1 = max(0, min(self.crop_rect.top(), vh - 2))
+        x2 = max(x1 + 2, min(self.crop_rect.right(), vw))
+        y2 = max(y1 + 2, min(self.crop_rect.bottom(), vh))
+        return (int(round(x1 * sx)), int(round(y1 * sy)), int(round(x2 * sx)), int(round(y2 * sy)))
+
+    def get_erase_orig(self) -> Optional[Tuple[int, int, int, int]]:
+        if self.erase_rect is None or self.base_image is None or self.view_image is None:
+            return None
+
+        bw, bh = self.base_image.size
+        vw, vh = self.view_image.size
+        sx = bw / vw
+        sy = bh / vh
+
+        x1 = max(0, min(self.erase_rect.left(), vw - 2))
+        y1 = max(0, min(self.erase_rect.top(), vh - 2))
+        x2 = max(x1 + 2, min(self.erase_rect.right(), vw))
+        y2 = max(y1 + 2, min(self.erase_rect.bottom(), vh))
+
+        return (
+            int(round(x1 * sx)),
+            int(round(y1 * sy)),
+            int(round(x2 * sx)),
+            int(round(y2 * sy)),
+        )
+
+    def set_erase_from_orig(self, erase_orig: Optional[Tuple[int, int, int, int]]):
+        if erase_orig is None or self.base_image is None or self.view_image is None:
+            self.erase_rect = None
+            self.update()
+            return
+
+        bw, bh = self.base_image.size
+        vw, vh = self.view_image.size
+        sx = vw / bw
+        sy = vh / bh
+
+        x1, y1, x2, y2 = erase_orig
+        self.erase_rect = QRectF(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
+        self.update()
+
+    def set_crop_from_orig(self, crop_orig: Optional[Tuple[int, int, int, int]]):
+        if crop_orig is None or self.base_image is None or self.view_image is None:
+            self.crop_rect = None
+            self.update()
+            return
+        bw, bh = self.base_image.size
+        vw, vh = self.view_image.size
+        sx = vw / bw
+        sy = vh / bh
+        x1, y1, x2, y2 = crop_orig
+        self.crop_rect = QRectF(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
+        self.update()
+
+    def _project_to_border(self, x: float, y: float) -> Tuple[float, float]:
+        if self.view_image is None:
+            return x, y
+        w, h = self.view_image.size
+        candidates = [
+            (0.0, max(0.0, min(float(h), y))),
+            (float(w), max(0.0, min(float(h), y))),
+            (max(0.0, min(float(w), x)), 0.0),
+            (max(0.0, min(float(w), x)), float(h)),
+        ]
+        return min(candidates, key=lambda c: (x - c[0]) ** 2 + (y - c[1]) ** 2)
+
+    def _mouse_angle_from_center(self, p: QPointF) -> float:
+        if self.view_image is None:
+            return 0.0
+        w, h = self.view_image.size
+        cx = w / 2.0
+        cy = h / 2.0
+        return math.degrees(math.atan2(p.y() - cy, p.x() - cx))
+
+    def _update_image_offset(self):
+        if self.view_pixmap is None:
+            self._img_offset_x = 0.0
+            self._img_offset_y = 0.0
+            return
+        self._img_offset_x = max(0.0, (self.width() - self.view_pixmap.width()) / 2.0)
+        self._img_offset_y = max(0.0, (self.height() - self.view_pixmap.height()) / 2.0)
+
+    def _widget_to_image(self, p: QPointF) -> QPointF:
+        return QPointF(p.x() - self._img_offset_x, p.y() - self._img_offset_y)
+
+    def _image_to_widget(self, p: QPointF) -> QPointF:
+        return QPointF(p.x() + self._img_offset_x, p.y() + self._img_offset_y)
+
+    def _image_rect_in_widget(self) -> QRectF:
+        if self.view_pixmap is None:
+            return QRectF()
+        return QRectF(
+            self._img_offset_x,
+            self._img_offset_y,
+            float(self.view_pixmap.width()),
+            float(self.view_pixmap.height())
+        )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#e9e9e9"))
+
+        if self.view_pixmap is None:
+            painter.setPen(QColor("#888"))
+            tr = getattr(self.parent(), "_tr", None)
+            painter.drawText(self.rect(), Qt.AlignCenter, tr("image_edit_no_image_loaded") if callable(tr) else "No image loaded")
+            return
+
+        self._update_image_offset()
+
+        draw_x = self._img_offset_x
+        draw_y = self._img_offset_y
+        w = self.view_pixmap.width()
+        h = self.view_pixmap.height()
+
+        angle = self.preview_rotation_angle if self.is_preview_rotating else 0.0
+
+        if abs(angle) > 0.01:
+            painter.save()
+            painter.translate(draw_x + w / 2.0, draw_y + h / 2.0)
+            painter.rotate(angle)
+            painter.translate(-w / 2.0, -h / 2.0)
+            painter.drawPixmap(0, 0, self.view_pixmap)
+            painter.restore()
+        else:
+            painter.drawPixmap(int(draw_x), int(draw_y), self.view_pixmap)
+
+        painter.save()
+        painter.translate(draw_x, draw_y)
+
+        # Raster JETZT über dem Bild zeichnen
+        if self.show_grid:
+            self._paint_grid(painter)
+
+        if getattr(self, "show_erase", False) and getattr(self, "erase_rect", None) is not None:
+            self._paint_erase(painter)
+
+        if self.show_crop and self.crop_rect is not None:
+            self._paint_crop(painter)
+        if self.show_separator and self.separator is not None:
+            self._paint_separator(painter)
+
+        painter.restore()
+
+    def _paint_crop(self, painter: QPainter):
+        rect = self.crop_rect
+        if rect is None:
+            return
+        painter.setPen(QPen(QColor("#ff4d4d"), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+        handle_size = 10
+        painter.setPen(QPen(QColor("black"), 1))
+        corners = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+        mids = [QPointF(rect.center().x(), rect.top()), QPointF(rect.right(), rect.center().y()), QPointF(rect.center().x(), rect.bottom()), QPointF(rect.left(), rect.center().y())]
+        painter.setBrush(QColor("#ff4d4d"))
+        for p in corners:
+            painter.drawRect(QRectF(p.x() - handle_size / 2, p.y() - handle_size / 2, handle_size, handle_size))
+        painter.setBrush(QColor("#ffb347"))
+        for p in mids:
+            painter.drawRect(QRectF(p.x() - handle_size / 2, p.y() - handle_size / 2, handle_size, handle_size))
+
+    def _paint_erase(self, painter: QPainter):
+        rect = getattr(self, "erase_rect", None)
+        if rect is None:
+            return
+
+        painter.setPen(QPen(QColor("#ff4d4d"), 2, Qt.DashLine))
+        painter.setBrush(QColor(255, 90, 90, 70))
+
+        shape = getattr(self, "erase_shape", "rect")
+        if shape == "ellipse":
+            painter.drawEllipse(rect)
+        else:
+            painter.drawRect(rect)
+
+    def _paint_separator(self, painter: QPainter):
+        if self.view_image is None or self.separator is None:
+            return
+        pts = self.separator.clipped_endpoints(*self.view_image.size)
+        if pts is None:
+            return
+        x1, y1, x2, y2 = pts
+        painter.setPen(QPen(QColor("#58d68d"), 3))
+        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        painter.setPen(QPen(QColor("black"), 1))
+        painter.setBrush(QColor("#ffc107"))
+        for hx, hy in (self.separator.top_handle(*self.view_image.size), self.separator.bottom_handle(*self.view_image.size)):
+            painter.drawEllipse(QPointF(hx, hy), self.separator.HANDLE_R, self.separator.HANDLE_R)
+        rx, ry = self.separator.rotation_handle_pos()
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.drawEllipse(QPointF(rx, ry), self.separator.ROT_R, self.separator.ROT_R)
+        painter.setPen(QColor("#222"))
+        painter.drawText(QRectF(rx - 12, ry - 12, 24, 24), Qt.AlignCenter, "↻")
+
+    def _paint_grid(self, painter: QPainter):
+        if self.view_image is None:
+            return
+
+        painter.save()
+
+        pen = QPen(QColor(0, 0, 0, 90), 1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+
+        step = max(6, int(self.grid_spacing))
+        w, h = self.view_image.size
+
+        x = 0
+        while x <= w:
+            painter.drawLine(x, 0, x, h)
+            x += step
+
+        y = 0
+        while y <= h:
+            painter.drawLine(0, y, w, y)
+            y += step
+
+        painter.restore()
+
+    def _point_in_crop(self, p: QPointF) -> bool:
+        return self.crop_rect is not None and self.crop_rect.contains(p)
+
+    def _crop_edge_at(self, p: QPointF):
+        if self.crop_rect is None:
+            return None
+        r = self.crop_rect
+        s = 8
+        edges = []
+        if abs(p.x() - r.left()) <= s and r.top() - s <= p.y() <= r.bottom() + s:
+            edges.append("left")
+        if abs(p.x() - r.right()) <= s and r.top() - s <= p.y() <= r.bottom() + s:
+            edges.append("right")
+        if abs(p.y() - r.top()) <= s and r.left() - s <= p.x() <= r.right() + s:
+            edges.append("top")
+        if abs(p.y() - r.bottom()) <= s and r.left() - s <= p.x() <= r.right() + s:
+            edges.append("bottom")
+        return "-".join(edges) if edges else None
+
+    def _separator_hit(self, p: QPointF):
+        if self.separator is None or self.view_image is None:
+            return None
+        w, h = self.view_image.size
+        rx, ry = self.separator.rotation_handle_pos()
+        if (p.x() - rx) ** 2 + (p.y() - ry) ** 2 <= (self.separator.ROT_R + 5) ** 2:
+            return "rotate"
+        tx, ty = self.separator.top_handle(w, h)
+        bx, by = self.separator.bottom_handle(w, h)
+        if (p.x() - tx) ** 2 + (p.y() - ty) ** 2 <= (self.separator.HANDLE_R + 4) ** 2:
+            return "top"
+        if (p.x() - bx) ** 2 + (p.y() - by) ** 2 <= (self.separator.HANDLE_R + 4) ** 2:
+            return "bottom"
+        if self.separator.distance_to_line(p.x(), p.y(), w, h) < 8:
+            return "line"
+        return None
+
+    def mousePressEvent(self, event):
+        if self.view_image is None:
+            return
+        wp = event.position()
+        p = self._widget_to_image(wp)
+
+        if not self._image_rect_in_widget().contains(wp) and not self.rotation_mode:
+            return
+
+        if self.rotation_mode:
+            sep_hit = None
+            if self.show_separator and self.separator is not None:
+                sep_hit = self._separator_hit(p)
+
+            crop_edge = None
+            crop_hit = False
+            if self.show_crop:
+                crop_edge = self._crop_edge_at(p)
+                crop_hit = bool(crop_edge) or self._point_in_crop(p)
+
+            # Wenn Crop oder Trennbalken aktiv sind, zuerst Hinweis statt Rotation
+            if sep_hit is not None or crop_hit or self.show_crop:
+                tr = getattr(self.parent(), "_tr", None)
+                QMessageBox.information(
+                    self,
+                    tr("image_edit_notice_title") if callable(tr) else "Notice",
+                    tr("image_edit_turn_off_rotation_first") if callable(tr) else "Rotation is still active."
+                )
+                return
+
+            self.drag_mode = "img_rotate"
+            self.rotation_start_angle = self.rotation_angle
+            self.rotation_start_mouse_angle = self._mouse_angle_from_center(p)
+            self.preview_rotation_angle = 0.0
+            self.is_preview_rotating = True
+            self.setCursor(Qt.ClosedHandCursor)
+            return
+        if self.show_separator and self.separator is not None:
+            hit = self._separator_hit(p)
+            if hit is not None:
+                self.drag_mode = {"top": "sep_top", "bottom": "sep_bottom", "line": "sep_line", "rotate": "sep_rotate"}[hit]
+                if hit == "line":
+                    self.sep_offset = QPointF(self.separator.cx - p.x(), self.separator.cy - p.y())
+                self.drag_start = p
+                self.update()
+                return
+        if self.show_erase:
+            edge = self._rect_edge_at(self.erase_rect, p)
+            if self.erase_rect is not None and edge:
+                self.drag_mode = f"erase_resize:{edge}"
+                self.drag_start = p
+                self.rect_before = QRectF(self.erase_rect)
+                return
+
+            if self.erase_rect is not None and self.erase_rect.contains(p):
+                self.drag_mode = "erase_move"
+                self.drag_start = p
+                self.rect_before = QRectF(self.erase_rect)
+                return
+
+            self.drag_mode = "erase_new"
+            self.drag_start = p
+            self.erase_rect = QRectF(p, p)
+            self.update()
+            self.changed.emit()
+            return
+
+        if self.show_crop:
+            edge = self._crop_edge_at(p)
+            if self.crop_rect is not None and edge:
+                self.drag_mode = f"crop_resize:{edge}"
+                self.drag_start = p
+                self.rect_before = QRectF(self.crop_rect)
+                return
+            if self._point_in_crop(p):
+                self.drag_mode = "crop_move"
+                self.drag_start = p
+                self.rect_before = QRectF(self.crop_rect)
+                return
+            self.drag_mode = "crop_new"
+            self.drag_start = p
+            self.crop_rect = QRectF(p, p)
+            self.update()
+            self.changed.emit()
+
+    def mouseMoveEvent(self, event):
+        wp = event.position()
+        p = self._widget_to_image(wp)
+        if self.drag_mode == "img_rotate":
+            delta = self._mouse_angle_from_center(p) - self.rotation_start_mouse_angle
+            new_angle = self.rotation_start_angle + delta
+            if event.modifiers() & Qt.ControlModifier:
+                new_angle = round(new_angle)
+            self.preview_rotation_angle = new_angle - self.rotation_angle
+            self.update()
+            return
+        if self.drag_mode == "sep_top" and self.separator and self.view_image is not None:
+            fixed = self.separator.bottom_handle(*self.view_image.size)
+            dragged = self._project_to_border(p.x(), p.y())
+            self.separator.set_from_points(dragged, fixed)
+            self.update(); self.changed.emit(); return
+        if self.drag_mode == "sep_bottom" and self.separator and self.view_image is not None:
+            fixed = self.separator.top_handle(*self.view_image.size)
+            dragged = self._project_to_border(p.x(), p.y())
+            self.separator.set_from_points(fixed, dragged)
+            self.update(); self.changed.emit(); return
+        if self.drag_mode == "sep_line" and self.separator and self.view_image is not None:
+            new_x = p.x() + self.sep_offset.x(); new_y = p.y() + self.sep_offset.y()
+            self.separator.move_by(new_x - self.separator.cx, new_y - self.separator.cy, *self.view_image.size)
+            self.update(); self.changed.emit(); return
+        if self.drag_mode == "sep_rotate" and self.separator:
+            dx = p.x() - self.separator.cx; dy = p.y() - self.separator.cy
+            if abs(dx) > 1e-6 or abs(dy) > 1e-6:
+                raw = math.atan2(dy, dx) - math.pi / 2
+                if event.modifiers() & Qt.ControlModifier:
+                    step = math.radians(5)
+                    raw = round(raw / step) * step
+                self.separator.angle = raw
+                self.update(); self.changed.emit(); return
+        if self.drag_mode == "erase_move" and self.erase_rect and self.rect_before:
+            r = QRectF(self.rect_before)
+            r.translate(p - self.drag_start)
+            self.erase_rect = self._clamp_rect(r)
+            self.update()
+            self.changed.emit()
+            return
+
+        if self.drag_mode and str(self.drag_mode).startswith("erase_resize:") and self.rect_before:
+            edge = self.drag_mode.split(":", 1)[1]
+            r = QRectF(self.rect_before)
+
+            if "left" in edge:
+                r.setLeft(min(p.x(), r.right() - 5))
+            if "right" in edge:
+                r.setRight(max(p.x(), r.left() + 5))
+            if "top" in edge:
+                r.setTop(min(p.y(), r.bottom() - 5))
+            if "bottom" in edge:
+                r.setBottom(max(p.y(), r.top() + 5))
+
+            self.erase_rect = self._clamp_rect(r)
+            self.update()
+            self.changed.emit()
+            return
+
+        if self.drag_mode == "erase_new":
+            x1 = min(self.drag_start.x(), p.x())
+            y1 = min(self.drag_start.y(), p.y())
+            x2 = max(self.drag_start.x(), p.x())
+            y2 = max(self.drag_start.y(), p.y())
+            self.erase_rect = self._clamp_rect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            self.update()
+            self.changed.emit()
+            return
+
+        if self.drag_mode == "crop_move" and self.crop_rect and self.rect_before:
+            r = QRectF(self.rect_before);
+            r.translate(p - self.drag_start)
+            self.crop_rect = self._clamp_rect(r)
+            self.update();
+            self.changed.emit();
+            return
+
+        if self.drag_mode and str(self.drag_mode).startswith("crop_resize:") and self.rect_before:
+            edge = self.drag_mode.split(":", 1)[1]
+            r = QRectF(self.rect_before)
+            if "left" in edge: r.setLeft(min(p.x(), r.right() - 5))
+            if "right" in edge: r.setRight(max(p.x(), r.left() + 5))
+            if "top" in edge: r.setTop(min(p.y(), r.bottom() - 5))
+            if "bottom" in edge: r.setBottom(max(p.y(), r.top() + 5))
+            self.crop_rect = self._clamp_rect(r)
+            self.update();
+            self.changed.emit();
+            return
+
+        if self.drag_mode == "crop_new":
+            x1 = min(self.drag_start.x(), p.x());
+            y1 = min(self.drag_start.y(), p.y())
+            x2 = max(self.drag_start.x(), p.x());
+            y2 = max(self.drag_start.y(), p.y())
+            self.crop_rect = self._clamp_rect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            self.update();
+            self.changed.emit();
+            return
+        self._update_cursor(p)
+
+    def mouseReleaseEvent(self, event):
+        if self.drag_mode == "img_rotate":
+            self.rotation_angle = (self.rotation_angle + self.preview_rotation_angle) % 360.0
+            self.preview_rotation_angle = 0.0
+            self.is_preview_rotating = False
+            self.rotation_committed.emit(float(self.rotation_angle))
+
+        self.drag_mode = None
+        self.rect_before = None
+        self.sep_offset = QPointF()
+
+        wp = event.position()
+        self._update_cursor(self._widget_to_image(wp))
+
+        self.update()
+        self.changed.emit()
+
+    def wheelEvent(self, event):
+        if self.base_image is None:
+            return
+
+        old_crop = self.get_crop_orig()
+        old_erase = self.get_erase_orig() if self.show_erase else None
+
+        self.zoom = max(0.2, min(6.0, self.zoom * (1.1 if event.angleDelta().y() > 0 else 0.9)))
+        self._update_view_image()
+        self.set_crop_from_orig(old_crop)
+
+        if old_erase:
+            self.set_erase_from_orig(old_erase)
+
+        self._ensure_separator_inside()
+        self.update()
+        self.changed.emit()
+
+    def resizeEvent(self, event):
+        old_crop = self.get_crop_orig()
+        old_erase = self.get_erase_orig() if self.show_erase else None
+
+        self._update_view_image()
+        self.set_crop_from_orig(old_crop)
+
+        if old_erase:
+            self.set_erase_from_orig(old_erase)
+
+        self._ensure_separator_inside()
+        self._update_image_offset()
+        self.update()
+        super().resizeEvent(event)
+
+    def _clamp_rect(self, rect: QRectF) -> QRectF:
+        if self.view_image is None:
+            return rect
+        w, h = self.view_image.size
+        x1 = max(0, min(rect.left(), w - 5)); y1 = max(0, min(rect.top(), h - 5))
+        x2 = max(x1 + 5, min(rect.right(), w)); y2 = max(y1 + 5, min(rect.bottom(), h))
+        return QRectF(x1, y1, x2 - x1, y2 - y1)
+
+    def _update_cursor(self, p: QPointF):
+        if self.rotation_mode:
+            self.setCursor(Qt.OpenHandCursor)
+            return
+
+        if self.show_separator and self.separator is not None:
+            hit = self._separator_hit(p)
+            if hit in ("rotate", "top", "bottom", "line"):
+                self.setCursor(Qt.SizeAllCursor)
+                return
+
+        if self.show_erase and self.erase_rect is not None:
+            edge = self._rect_edge_at(self.erase_rect, p)
+            if edge:
+                self.setCursor(
+                    Qt.SizeHorCursor if edge in ("left", "right")
+                    else Qt.SizeVerCursor if edge in ("top", "bottom")
+                    else Qt.SizeFDiagCursor
+                )
+                return
+            if self.erase_rect.contains(p):
+                self.setCursor(Qt.SizeAllCursor)
+                return
+
+        if self.show_crop:
+            edge = self._crop_edge_at(p)
+            if edge:
+                self.setCursor(
+                    Qt.SizeHorCursor if edge in ("left", "right")
+                    else Qt.SizeVerCursor if edge in ("top", "bottom")
+                    else Qt.SizeFDiagCursor
+                )
+                return
+            if self._point_in_crop(p):
+                self.setCursor(Qt.SizeAllCursor)
+                return
+
+        self.setCursor(Qt.CrossCursor)
+
+    def _rect_edge_at(self, rect: Optional[QRectF], p: QPointF) -> Optional[str]:
+        if rect is None:
+            return None
+
+        pad = 8.0
+        x = p.x()
+        y = p.y()
+
+        left = abs(x - rect.left()) <= pad
+        right = abs(x - rect.right()) <= pad
+        top = abs(y - rect.top()) <= pad
+        bottom = abs(y - rect.bottom()) <= pad
+
+        if left and top:
+            return "left_top"
+        if right and top:
+            return "right_top"
+        if left and bottom:
+            return "left_bottom"
+        if right and bottom:
+            return "right_bottom"
+        if left:
+            return "left"
+        if right:
+            return "right"
+        if top:
+            return "top"
+        if bottom:
+            return "bottom"
+
+        return None
+
+def polygon_area(poly: List[Tuple[float, float]]) -> float:
+    if not poly or len(poly) < 3:
+        return 0.0
+
+    area = 0.0
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        area += (x1 * y2) - (x2 * y1)
+
+    return abs(area) * 0.5
+
+def clip_polygon_halfplane(
+        poly: List[Tuple[float, float]],
+        a: float,
+        b: float,
+        c: float
+) -> List[Tuple[float, float]]:
+    """
+    Behält den Teil des Polygons, für den gilt:
+        a*x + b*y + c >= 0
+    """
+    if not poly:
+        return []
+
+    def inside(p: Tuple[float, float]) -> bool:
+        x, y = p
+        return (a * x + b * y + c) >= 0.0
+
+    def intersection(
+            p1: Tuple[float, float],
+            p2: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        x1, y1 = p1
+        x2, y2 = p2
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        denom = a * dx + b * dy
+        if abs(denom) < 1e-12:
+            return p2
+
+        t = -(a * x1 + b * y1 + c) / denom
+        return (x1 + t * dx, y1 + t * dy)
+
+    output = []
+    prev = poly[-1]
+    prev_inside = inside(prev)
+
+    for curr in poly:
+        curr_inside = inside(curr)
+
+        if curr_inside:
+            if not prev_inside:
+                output.append(intersection(prev, curr))
+            output.append(curr)
+        elif prev_inside:
+            output.append(intersection(prev, curr))
+
+        prev = curr
+        prev_inside = curr_inside
+
+    return output
+
+class ImageEditDialog(QDialog):
+    def __init__(
+            self,
+            image: Image.Image,
+            title: str,
+            parent=None,
+            on_prev=None,
+            on_next=None,
+            on_apply_current=None,
+            on_apply_selected=None,
+            on_apply_all=None,
+    ):
+        super().__init__(parent)
+        self.on_prev = on_prev
+        self.on_next = on_next
+        self.on_apply_current = on_apply_current
+        self.on_apply_selected = on_apply_selected
+        self.on_apply_all = on_apply_all
+        self.white_border_px = 0
+        tr = getattr(parent, "_tr", None)
+        self._tr = tr if callable(tr) else (lambda key, *args: (TRANSLATIONS["de"].get(key, key).format(*args) if args else TRANSLATIONS["de"].get(key, key)))
+
+        self.setWindowTitle(self._tr("image_edit_title", title))
+        self.resize(1360, 900)
+
+        theme = getattr(parent, "current_theme", "bright")
+        self.setStyleSheet(_image_edit_dialog_qss(theme))
+
+        self.original_image = image.convert("RGB")
+        self.color_mode = "RGB"
+        self.contrast_enabled = False
+        self.rotation_angle = 0.0
+        self.result_images: List[Image.Image] = []
+        self._batch_apply_used = False
+        self.erase_actions: List[Tuple[str, Tuple[int, int, int, int]]] = []
+
+        self.canvas = ImageEditCanvas(self)
+        self.canvas.setFocusPolicy(Qt.StrongFocus)
+        self.canvas.changed.connect(self._sync_from_canvas)
+        self.canvas.rotation_committed.connect(self._on_canvas_rotation_committed)
+
+        self.shortcut_prev_left = QShortcut(QKeySequence(Qt.Key_Left), self)
+        self.shortcut_prev_left.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_prev_left.activated.connect(self._go_prev)
+
+        self.shortcut_prev_up = QShortcut(QKeySequence(Qt.Key_Up), self)
+        self.shortcut_prev_up.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_prev_up.activated.connect(self._go_prev)
+
+        self.shortcut_next_right = QShortcut(QKeySequence(Qt.Key_Right), self)
+        self.shortcut_next_right.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_next_right.activated.connect(self._go_next)
+
+        self.shortcut_next_down = QShortcut(QKeySequence(Qt.Key_Down), self)
+        self.shortcut_next_down.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_next_down.activated.connect(self._go_next)
+
+        self.shortcut_erase_commit = QShortcut(QKeySequence(Qt.Key_Delete), self)
+        self.shortcut_erase_commit.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_erase_commit.activated.connect(self._commit_erase_selection)
+
+        self.shortcut_erase_undo = QShortcut(QKeySequence.Undo, self)
+        self.shortcut_erase_undo.setContext(Qt.WidgetWithChildrenShortcut)
+        self.shortcut_erase_undo.activated.connect(self._undo_erase_commit)
+
+        self.btn_rotate_mode = QPushButton(self._tr("image_edit_rotate_off"))
+        self.btn_rotate_mode.setCheckable(True)
+        self.btn_rotate_mode.toggled.connect(self._toggle_rotation_mode)
+
+        self.btn_grid = QPushButton(self._tr("image_edit_grid"))
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.toggled.connect(self._toggle_grid)
+
+        self.grid_slider = QSlider(Qt.Horizontal)
+        self.grid_slider.setRange(0, 100)
+        self.grid_slider.setValue(20)
+        self.grid_slider.setToolTip(self._tr("image_edit_grid_tooltip"))
+        self.grid_slider.valueChanged.connect(self._on_grid_slider_changed)
+        self.grid_slider.setMinimumWidth(260)
+        self.grid_slider.setMaximumWidth(420)
+        self.grid_slider.setFixedHeight(22)
+        self.grid_slider.setEnabled(False)
+
+        self.lbl_grid_size = QLabel(self._tr("image_edit_grid_label"))
+        self.lbl_grid_size.setMinimumWidth(120)
+        self.lbl_grid_size.setEnabled(False)
+
+        self.chk_crop = QCheckBox(self._tr("image_edit_crop"))
+        self.chk_crop.toggled.connect(self._toggle_crop)
+
+        self.chk_split = QCheckBox(self._tr("image_edit_separator"))
+        self.chk_split.toggled.connect(self._toggle_split)
+
+        self.chk_gray = QCheckBox(self._tr("image_edit_gray"))
+        self.chk_gray.toggled.connect(self._toggle_gray)
+
+        self.chk_contrast = QCheckBox(self._tr("image_edit_contrast"))
+        self.chk_contrast.toggled.connect(self._toggle_contrast)
+
+        self.btn_erase_rect = QPushButton(self._tr("image_edit_erase_rect"))
+        self.btn_erase_rect.setCheckable(True)
+        self.btn_erase_rect.toggled.connect(
+            lambda checked: self._toggle_erase_mode("rect", checked)
+        )
+
+        self.btn_erase_ellipse = QPushButton(self._tr("image_edit_erase_ellipse"))
+        self.btn_erase_ellipse.setCheckable(True)
+        self.btn_erase_ellipse.toggled.connect(
+            lambda checked: self._toggle_erase_mode("ellipse", checked)
+        )
+
+        self.btn_erase_clear = QPushButton(self._tr("image_edit_erase_clear"))
+        self.btn_erase_clear.clicked.connect(self._clear_erase_area)
+
+        btn_rot_left = QPushButton("↺ 90°")
+        btn_rot_left.clicked.connect(lambda: self._rotate_by(-90))
+
+        btn_rot_right = QPushButton("↻ 90°")
+        btn_rot_right.clicked.connect(lambda: self._rotate_by(90))
+
+        btn_rot_reset = QPushButton(self._tr("image_edit_rotation_reset"))
+        btn_rot_reset.clicked.connect(self._reset_rotation)
+
+        self.chk_smart_split = QCheckBox(self._tr("image_edit_smart_split"))
+        self.chk_smart_split.toggled.connect(self._toggle_smart_split)
+        self.chk_smart_split.setEnabled(False)
+
+        self.btn_prev = QPushButton(self._tr("image_edit_prev"))
+        self.btn_prev.clicked.connect(self._go_prev)
+
+        self.btn_next = QPushButton(self._tr("image_edit_next"))
+        self.btn_next.clicked.connect(self._go_next)
+
+        self.btn_border = QPushButton(self._tr("image_edit_white_border"))
+        self.btn_border.clicked.connect(self._open_border_dialog)
+
+        self.btn_apply_selected = QPushButton(self._tr("image_edit_apply_selected"))
+        self.btn_apply_selected.clicked.connect(self._apply_selected)
+
+        self.btn_apply_all = QPushButton(self._tr("image_edit_apply_all"))
+        self.btn_apply_all.clicked.connect(self._apply_all)
+
+        top = QHBoxLayout()
+        for widget in (self.btn_grid, self.btn_rotate_mode, btn_rot_left, btn_rot_right, btn_rot_reset):
+            top.addWidget(widget)
+
+        top.addSpacing(16)
+
+        for widget in (
+                self.chk_crop,
+                self.chk_split,
+                self.chk_smart_split,
+                self.chk_gray,
+                self.chk_contrast,
+        ):
+            top.addWidget(widget)
+
+        top.addStretch(1)
+        top.addWidget(self.btn_border, 0, Qt.AlignRight)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(top)
+
+        center = QVBoxLayout()
+        center.addWidget(self.canvas, 1)
+
+        grid_row = QHBoxLayout()
+        grid_row.addStretch(1)
+        grid_row.addWidget(self.lbl_grid_size)
+        grid_row.addWidget(self.grid_slider, 0)
+        grid_row.addStretch(1)
+
+        erase_row = QHBoxLayout()
+        erase_row.addStretch(1)
+        erase_row.addWidget(self.btn_erase_rect)
+        erase_row.addSpacing(8)
+        erase_row.addWidget(self.btn_erase_ellipse)
+        erase_row.addSpacing(8)
+        erase_row.addWidget(self.btn_erase_clear)
+        erase_row.addStretch(1)
+
+        center.addLayout(grid_row)
+        center.addLayout(erase_row)
+        lay.addLayout(center, 1)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.btn_prev)
+        bottom.addWidget(self.btn_next)
+        bottom.addStretch(1)
+        bottom.addWidget(self.btn_apply_selected)
+        bottom.addWidget(self.btn_apply_all)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText(self._tr("dlg_box_apply"))
+        bb.button(QDialogButtonBox.Cancel).setText(self._tr("btn_cancel"))
+        bb.accepted.connect(self._accept_dialog)
+        bb.rejected.connect(self.reject)
+
+        lay.addLayout(bottom)
+        lay.addWidget(bb)
+
+        self._refresh_preview(reset_zoom=True)
+        self.canvas.setFocus()
+
+    def _apply_options(self, img: Image.Image) -> Image.Image:
+        out = img.convert("RGB")
+
+        if self.color_mode == "GRAY":
+            out = ImageOps.grayscale(out).convert("RGB")
+
+        if self.contrast_enabled:
+            out = ImageOps.autocontrast(out, cutoff=1)
+            out = ImageEnhance.Contrast(out).enhance(2.2)
+            out = ImageEnhance.Sharpness(out).enhance(1.4)
+
+        if abs(self.rotation_angle) > 0.01:
+            out = out.rotate(
+                -self.rotation_angle,
+                expand=True,
+                resample=Image.BICUBIC,
+                fillcolor="white"
+            )
+
+        if self.white_border_px > 0:
+            out = ImageOps.expand(out, border=int(self.white_border_px), fill="white")
+
+        draw = ImageDraw.Draw(out)
+
+        for shape, bbox in self.erase_actions:
+            x1, y1, x2, y2 = bbox
+            if shape == "ellipse":
+                draw.ellipse((x1, y1, x2, y2), fill="white")
+            else:
+                draw.rectangle((x1, y1, x2, y2), fill="white")
+
+        live_action = self._current_erase_action()
+        if live_action:
+            shape, bbox = live_action
+            x1, y1, x2, y2 = bbox
+            if shape == "ellipse":
+                draw.ellipse((x1, y1, x2, y2), fill="white")
+            else:
+                draw.rectangle((x1, y1, x2, y2), fill="white")
+
+        return out
+
+    def _refresh_preview(self, reset_zoom: bool = False):
+        old_crop = self.canvas.get_crop_orig()
+        old_erase = self.canvas.get_erase_orig() if self.canvas.show_erase else None
+
+        preview = self._apply_options(self.original_image)
+        self.canvas.rotation_angle = self.rotation_angle
+        self.canvas.set_image(preview, reset_zoom=reset_zoom)
+
+        if self.chk_crop.isChecked() and old_crop:
+            self.canvas.set_crop_from_orig(old_crop)
+        elif self.chk_crop.isChecked() and self.canvas.crop_rect is None:
+            self.canvas.create_default_crop()
+
+        if self.canvas.show_erase and old_erase:
+            self.canvas.set_erase_from_orig(old_erase)
+        elif self.canvas.show_erase and self.canvas.erase_rect is None and self.canvas.view_image is not None:
+            w, h = self.canvas.view_image.size
+            self.canvas.erase_rect = QRectF(w * 0.35, h * 0.20, w * 0.25, h * 0.25)
+
+        if self.chk_split.isChecked() and self.canvas.separator is None and self.canvas.view_image is not None:
+            w, h = self.canvas.view_image.size
+            self.canvas.separator = ImageEditSeparator(cx=w / 2.0, cy=h / 2.0, angle=0.0)
+
+        self.canvas.update()
+        self._update_border_button_text()
+
+    def _sync_from_canvas(self):
+        self.rotation_angle = float(self.canvas.rotation_angle)
+
+    def _on_canvas_rotation_committed(self, angle: float):
+        self.rotation_angle = float(angle) % 360.0
+        self.canvas.rotation_angle = 0.0
+        self.canvas.preview_rotation_angle = 0.0
+        self.canvas.is_preview_rotating = False
+
+        self.canvas.crop_rect = None
+        self.canvas.separator = None
+
+        self._refresh_preview(reset_zoom=False)
+
+    def _toggle_smart_split(self, checked: bool):
+        # Smart-Splitting nur erlaubt, wenn Trennbalken aktiv ist
+        if checked and not self.chk_split.isChecked():
+            self.chk_smart_split.blockSignals(True)
+            self.chk_smart_split.setChecked(False)
+            self.chk_smart_split.blockSignals(False)
+            return
+
+        self.canvas.update()
+
+    def _go_prev(self):
+        if callable(self.on_prev):
+            self.on_prev(self)
+
+    def _go_next(self):
+        if callable(self.on_next):
+            self.on_next(self)
+
+    def _current_erase_action(self) -> Optional[Tuple[str, Tuple[int, int, int, int]]]:
+        if not self.canvas.show_erase:
+            return None
+
+        erase_orig = self.canvas.get_erase_orig()
+        if not erase_orig:
+            return None
+
+        shape = self.canvas.erase_shape or "rect"
+        return shape, erase_orig
+
+    def _commit_erase_selection(self):
+        action = self._current_erase_action()
+        if action is None:
+            return
+
+        shape, bbox = action
+        self.erase_actions.append((shape, tuple(bbox)))
+
+        self.canvas.erase_rect = None
+        self._refresh_preview(reset_zoom=False)
+        self.canvas.setFocus()
+
+    def _undo_erase_commit(self):
+        if not self.erase_actions:
+            return
+
+        self.erase_actions.pop()
+        self._refresh_preview(reset_zoom=False)
+        self.canvas.setFocus()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Left, Qt.Key_Up):
+            self._go_prev()
+            event.accept()
+            return
+
+        if event.key() in (Qt.Key_Right, Qt.Key_Down):
+            self._go_next()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    def _apply_selected(self):
+        if callable(self.on_apply_selected):
+            self._batch_apply_used = True
+            self.result_images = []
+            self.on_apply_selected(self)
+            self.accept()
+
+    def _apply_all(self):
+        if callable(self.on_apply_all):
+            self._batch_apply_used = True
+            self.result_images = []
+            self.on_apply_all(self)
+            self.accept()
+
+    def _update_border_button_text(self):
+        if self.white_border_px > 0:
+            self.btn_border.setText(self._tr("image_edit_white_border_with_px", self.white_border_px))
+        else:
+            self.btn_border.setText(self._tr("image_edit_white_border"))
+
+    def _open_border_dialog(self):
+        dlg = WhiteBorderDialog(self.white_border_px, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.white_border_px = dlg.get_value()
+            self._update_border_button_text()
+            self._refresh_preview(reset_zoom=False)
+
+    def _toggle_rotation_mode(self, checked: bool):
+        self.canvas.rotation_mode = checked
+        self.btn_rotate_mode.setText(self._tr("image_edit_rotate_on") if checked else self._tr("image_edit_rotate_off"))
+        self.canvas.update()
+
+    def _toggle_grid(self, checked: bool):
+        self.canvas.show_grid = checked
+        self.grid_slider.setEnabled(bool(checked))
+        self.lbl_grid_size.setEnabled(bool(checked))
+        self.canvas.update()
+
+    def _on_grid_slider_changed(self, value: int):
+        # oben fein = kleine Abstände
+        # unten grob = große Abstände
+        self.canvas.grid_spacing = int(round(6 + (value / 100.0) * 90))
+        self.canvas.update()
+
+    def _toggle_crop(self, checked: bool):
+        self.canvas.show_crop = checked
+        if checked and self.canvas.crop_rect is None and self.canvas.view_image is not None:
+            self.canvas.create_default_crop()
+        self.canvas.update()
+
+    def _toggle_split(self, checked: bool):
+        self.canvas.show_separator = checked
+        self.chk_smart_split.setEnabled(checked)
+
+        if checked and self.canvas.separator is None and self.canvas.view_image is not None:
+            w, h = self.canvas.view_image.size
+            self.canvas.separator = ImageEditSeparator(cx=w / 2.0, cy=h / 2.0, angle=0.0)
+
+        if not checked:
+            self.canvas.separator = None
+
+            # Wenn Trennbalken aus ist, muss Smart-Splitting auch aus sein
+            if self.chk_smart_split.isChecked():
+                self.chk_smart_split.blockSignals(True)
+                self.chk_smart_split.setChecked(False)
+                self.chk_smart_split.blockSignals(False)
+
+        self.canvas.update()
+
+    def _toggle_erase_mode(self, shape: str, checked: bool):
+        if checked:
+            if shape == "rect" and self.btn_erase_ellipse.isChecked():
+                self.btn_erase_ellipse.blockSignals(True)
+                self.btn_erase_ellipse.setChecked(False)
+                self.btn_erase_ellipse.blockSignals(False)
+
+            if shape == "ellipse" and self.btn_erase_rect.isChecked():
+                self.btn_erase_rect.blockSignals(True)
+                self.btn_erase_rect.setChecked(False)
+                self.btn_erase_rect.blockSignals(False)
+
+            self.canvas.show_erase = True
+            self.canvas.erase_shape = shape
+
+            if self.canvas.erase_rect is None and self.canvas.view_image is not None:
+                w, h = self.canvas.view_image.size
+                self.canvas.erase_rect = QRectF(w * 0.35, h * 0.20, w * 0.25, h * 0.25)
+        else:
+            if not self.btn_erase_rect.isChecked() and not self.btn_erase_ellipse.isChecked():
+                self.canvas.show_erase = False
+                self.canvas.erase_shape = ""
+
+        self.canvas.update()
+        self.canvas.changed.emit()
+
+    def _clear_erase_area(self):
+        self.canvas.erase_rect = None
+        self.canvas.show_erase = False
+        self.canvas.erase_shape = ""
+
+        self.btn_erase_rect.blockSignals(True)
+        self.btn_erase_rect.setChecked(False)
+        self.btn_erase_rect.blockSignals(False)
+
+        self.btn_erase_ellipse.blockSignals(True)
+        self.btn_erase_ellipse.setChecked(False)
+        self.btn_erase_ellipse.blockSignals(False)
+
+        self.canvas.update()
+        self.canvas.changed.emit()
+
+    def _toggle_gray(self, checked: bool):
+        self.color_mode = "GRAY" if checked else "RGB"
+        self._refresh_preview(reset_zoom=False)
+
+    def _toggle_contrast(self, checked: bool):
+        self.contrast_enabled = bool(checked)
+        self._refresh_preview(reset_zoom=False)
+
+    def _rotate_by(self, delta: float):
+        self.rotation_angle = (self.rotation_angle + delta) % 360.0
+        self.canvas.crop_rect = None
+        self.canvas.separator = None
+        self._refresh_preview(reset_zoom=False)
+
+    def _reset_rotation(self):
+        self.rotation_angle = 0.0
+        self.canvas.crop_rect = None
+        self.canvas.separator = None
+        self._refresh_preview(reset_zoom=False)
+
+    def _get_effective_crop_area(self, img: Image.Image) -> Tuple[int, int, int, int]:
+        if self.chk_crop.isChecked():
+            crop = self.canvas.get_crop_orig()
+            if crop is not None:
+                return crop
+        return (0, 0, img.size[0], img.size[1])
+
+    def _separator_lines_for_processing(self, img: Image.Image):
+        if not self.chk_split.isChecked() or self.canvas.separator is None or self.canvas.view_image is None:
+            return []
+        vw, vh = self.canvas.view_image.size
+        bw, bh = img.size
+        sx = bw / max(1, vw)
+        sy = bh / max(1, vh)
+        pts = self.canvas.separator.clipped_endpoints(vw, vh)
+        if pts is None:
+            return []
+        x1d, y1d, x2d, y2d = pts
+        return [(x1d * sx, y1d * sy, x2d * sx, y2d * sy)]
+
+    def _compute_segments_for_crop(self, crop_area, line_segments_orig):
+        ox1, oy1, ox2, oy2 = crop_area
+        rect_poly = [(ox1, oy1), (ox2, oy1), (ox2, oy2), (ox1, oy2)]
+        if not line_segments_orig:
+            return [rect_poly]
+        entries = []
+        for x1, y1, x2, y2 in line_segments_orig:
+            vx = x2 - x1; vy = y2 - y1
+            nx = -vy; ny = vx
+            norm = math.hypot(nx, ny)
+            if norm < 1e-12:
+                continue
+            nx /= norm; ny /= norm
+            c = -(nx * x1 + ny * y1); d = -c
+            entries.append((d, nx, ny, c))
+        entries.sort(key=lambda e: e[0])
+        if not entries:
+            return [rect_poly]
+        segments = []
+        for i in range(len(entries) + 1):
+            poly = rect_poly[:]
+            if i == 0:
+                a, b, c = entries[0][1], entries[0][2], entries[0][3]
+                poly = clip_polygon_halfplane(poly, -a, -b, -c)
+            elif i == len(entries):
+                a, b, c = entries[-1][1], entries[-1][2], entries[-1][3]
+                poly = clip_polygon_halfplane(poly, a, b, c)
+            else:
+                a1, b1, c1 = entries[i - 1][1], entries[i - 1][2], entries[i - 1][3]
+                a2, b2, c2 = entries[i][1], entries[i][2], entries[i][3]
+                poly = clip_polygon_halfplane(poly, a1, b1, c1)
+                poly = clip_polygon_halfplane(poly, -a2, -b2, -c2)
+            if polygon_area(poly) > 1.0:
+                segments.append(poly)
+        return segments
+
+    def _build_segment_images(self, img: Image.Image, crop_area, segments_polygons):
+        ox1, oy1, ox2, oy2 = crop_area
+        crop = img.crop((ox1, oy1, ox2, oy2))
+        if not segments_polygons:
+            return [crop]
+        ordered_polys = sorted(segments_polygons, key=lambda poly: sum(x for x, _ in poly) / len(poly))
+        out = []
+        for poly in ordered_polys:
+            if not poly or polygon_area(poly) < 1.0:
+                continue
+            local = [(x - ox1, y - oy1) for (x, y) in poly]
+            full_rgba = Image.new("RGBA", crop.size, (255, 255, 255, 0))
+            mask = Image.new("L", crop.size, 0)
+            ImageDraw.Draw(mask).polygon(local, fill=255)
+            full_rgba.paste(crop.convert("RGBA"), (0, 0), mask)
+            min_x = max(0, int(math.floor(min(x for x, _ in local))))
+            min_y = max(0, int(math.floor(min(y for _, y in local))))
+            max_x = min(crop.size[0], int(math.ceil(max(x for x, _ in local))))
+            max_y = min(crop.size[1], int(math.ceil(max(y for _, y in local))))
+            if max_x - min_x < 2 or max_y - min_y < 2:
+                continue
+            segment_img = full_rgba.crop((min_x, min_y, max_x, max_y))
+            bg = Image.new("RGB", segment_img.size, (255, 255, 255))
+            bg.paste(segment_img, (0, 0), segment_img.split()[-1])
+            out.append(bg)
+        return out or [crop]
+
+    def _auto_detect_smart_splits(self, img: Image.Image, crop_area, guide_line_orig=None):
+        # Smart-Splitting funktioniert nur mit aktivem Trennbalken
+        if not guide_line_orig:
+            return []
+
+        ox1, oy1, ox2, oy2 = crop_area
+        crop = img.crop((ox1, oy1, ox2, oy2)).convert("L")
+        w, h = crop.size
+
+        if w < 20 or h < 20:
+            return []
+
+        x1, y1, x2, y2 = guide_line_orig[0]
+        px = crop.load()
+
+        def expected_x(global_y):
+            if abs(y2 - y1) < 1e-6:
+                return (x1 + x2) * 0.5
+            t = (global_y - y1) / (y2 - y1)
+            return x1 + t * (x2 - x1)
+
+        band = max(2, min(6, w // 120))
+        search_radius = max(20, min(120, w // 8))
+        y_step = max(6, h // 80)
+
+        samples = []
+
+        for local_y in range(6, h - 6, y_step):
+            global_y = oy1 + local_y
+            ex = int(round(expected_x(global_y) - ox1))
+
+            xmin = max(6, ex - search_radius)
+            xmax = min(w - 7, ex + search_radius)
+            if xmin >= xmax:
+                continue
+
+            best_x = None
+            best_score = None
+
+            for x in range(xmin, xmax + 1):
+                center_vals = []
+                left_vals = []
+                right_vals = []
+
+                for yy in range(local_y - 2, local_y + 3):
+                    for xx in range(x - band, x + band + 1):
+                        center_vals.append(px[xx, yy])
+
+                    for xx in range(max(0, x - 14), max(0, x - 4)):
+                        left_vals.append(px[xx, yy])
+
+                    for xx in range(min(w - 1, x + 4), min(w, x + 15)):
+                        right_vals.append(px[xx, yy])
+
+                if not center_vals or not left_vals or not right_vals:
+                    continue
+
+                center_mean = sum(center_vals) / len(center_vals)
+                left_mean = sum(left_vals) / len(left_vals)
+                right_mean = sum(right_vals) / len(right_vals)
+
+                contrast = ((left_mean + right_mean) * 0.5) - center_mean
+                distance_penalty = abs(x - ex) * 0.15
+
+                score = center_mean - contrast * 1.8 + distance_penalty
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_x = x
+
+            if best_x is not None:
+                samples.append((local_y, best_x))
+
+        if len(samples) < 2:
+            return guide_line_orig
+
+        smoothed = []
+        for i in range(len(samples)):
+            xs = []
+            for j in range(max(0, i - 2), min(len(samples), i + 3)):
+                xs.append(samples[j][1])
+            smoothed.append((samples[i][0], sum(xs) / len(xs)))
+
+        n = len(smoothed)
+        sum_y = sum(y for y, _ in smoothed)
+        sum_x = sum(x for _, x in smoothed)
+        sum_yy = sum(y * y for y, _ in smoothed)
+        sum_yx = sum(y * x for y, x in smoothed)
+
+        denom = n * sum_yy - sum_y * sum_y
+        if abs(denom) < 1e-9:
+            return guide_line_orig
+
+        m = (n * sum_yx - sum_y * sum_x) / denom
+        b = (sum_x - m * sum_y) / n
+
+        x_top_local = b
+        x_bottom_local = m * (h - 1) + b
+
+        x_top = max(0, min(img.size[0], ox1 + x_top_local))
+        x_bottom = max(0, min(img.size[0], ox1 + x_bottom_local))
+
+        return [(
+            x_top,
+            oy1,
+            x_bottom,
+            oy2
+        )]
+
+    def _accept_dialog(self):
+        edited = self._apply_options(self.original_image)
+        crop_area = self._get_effective_crop_area(edited)
+
+        lines = self._separator_lines_for_processing(edited)
+
+        if self.chk_split.isChecked() and lines:
+            effective_lines = lines
+
+            if self.chk_smart_split.isChecked():
+                effective_lines = self._auto_detect_smart_splits(
+                    edited,
+                    crop_area,
+                    guide_line_orig=lines
+                ) or lines
+
+            polys = self._compute_segments_for_crop(crop_area, effective_lines)
+            self.result_images = self._build_segment_images(edited, crop_area, polys)
+
+        else:
+            ox1, oy1, ox2, oy2 = crop_area
+            self.result_images = [edited.crop((ox1, oy1, ox2, oy2))]
+
+        self.accept()
+
+    def get_settings(self) -> ImageEditSettings:
+        crop_orig = self.canvas.get_crop_orig() if self.chk_crop.isChecked() else None
+
+        separator_norm = None
+        if self.chk_split.isChecked() and self.canvas.separator and self.canvas.view_image is not None:
+            w, h = self.canvas.view_image.size
+            separator_norm = (
+                self.canvas.separator.cx / max(1.0, float(w)),
+                self.canvas.separator.cy / max(1.0, float(h)),
+                float(self.canvas.separator.angle),
+            )
+
+        erase_enabled = bool(self.canvas.show_erase and self.canvas.erase_rect is not None)
+        erase_shape = self.canvas.erase_shape if erase_enabled else ""
+        erase_orig = self.canvas.get_erase_orig() if erase_enabled else None
+
+        return ImageEditSettings(
+            rotation_angle=float(self.rotation_angle),
+            color_mode=str(self.color_mode),
+            contrast_enabled=bool(self.contrast_enabled),
+            crop_enabled=bool(self.chk_crop.isChecked()),
+            crop_orig=crop_orig,
+            split_enabled=bool(self.chk_split.isChecked()),
+            separator_norm=separator_norm,
+            smart_split_enabled=bool(self.chk_smart_split.isChecked()),
+            white_border_px=int(self.white_border_px),
+            erase_enabled=erase_enabled,
+            erase_shape=erase_shape,
+            erase_orig=erase_orig,
+            erase_actions=[(shape, tuple(bbox)) for shape, bbox in self.erase_actions],
+        )
+
+    def set_settings(self, settings: ImageEditSettings):
+        self.rotation_angle = float(settings.rotation_angle)
+        self.color_mode = settings.color_mode
+        self.contrast_enabled = bool(settings.contrast_enabled)
+        self.white_border_px = int(settings.white_border_px)
+        self.erase_actions = [(shape, tuple(bbox)) for shape, bbox in (settings.erase_actions or [])]
+
+        self.chk_gray.setChecked(self.color_mode == "GRAY")
+        self.chk_contrast.setChecked(self.contrast_enabled)
+        self.chk_crop.setChecked(bool(settings.crop_enabled))
+
+        self.chk_erase_rect.blockSignals(True)
+        self.chk_erase_ellipse.blockSignals(True)
+        self.chk_erase_rect.setChecked(
+            bool(settings.erase_enabled and settings.erase_shape == "rect")
+        )
+        self.chk_erase_ellipse.setChecked(
+            bool(settings.erase_enabled and settings.erase_shape == "ellipse")
+        )
+        self.chk_erase_rect.blockSignals(False)
+        self.chk_erase_ellipse.blockSignals(False)
+
+        self.canvas.show_erase = bool(settings.erase_enabled)
+        self.canvas.erase_shape = settings.erase_shape if settings.erase_enabled else ""
+        self.canvas.erase_rect = None
+
+        self.chk_split.setChecked(bool(settings.split_enabled))
+        self.chk_smart_split.setEnabled(bool(settings.split_enabled))
+
+        self.chk_smart_split.setChecked(
+            bool(settings.smart_split_enabled) and bool(settings.split_enabled)
+        )
+
+        self._refresh_preview(reset_zoom=False)
+
+        if settings.erase_enabled and settings.erase_orig:
+            self.canvas.set_erase_from_orig(settings.erase_orig)
+
+        if settings.crop_enabled and settings.crop_orig:
+            self.canvas.set_crop_from_orig(settings.crop_orig)
+
+        if (
+                settings.split_enabled
+                and settings.separator_norm
+                and self.canvas.view_image is not None
+        ):
+            w, h = self.canvas.view_image.size
+            cxn, cyn, ang = settings.separator_norm
+            self.canvas.separator = ImageEditSeparator(
+                cx=float(cxn) * w,
+                cy=float(cyn) * h,
+                angle=float(ang),
+            )
+            self.canvas.show_separator = True
+            self.canvas.update()
 
 # -----------------------------
 # HAUPTFENSTER
@@ -6237,7 +12605,11 @@ class MainWindow(QMainWindow):
             str
         )
 
-        self.current_lang = "de"
+        self.current_lang = self.settings.value(
+            "ui/language",
+            self._detect_system_lang(),
+            str
+        )
         self.log_lang = self._detect_system_lang()
 
         self.temp_dirs_created = set()
@@ -6295,8 +12667,7 @@ class MainWindow(QMainWindow):
         self.kraken_seg_models: List[str] = []
         self.kraken_unknown_models: List[str] = []
         self.current_export_dir = ""
-        self.current_theme = "bright"
-        self.current_segmenter_mode = "blla"
+        self.current_theme = self.settings.value("ui/theme", "bright", str)
 
         # Dynamisches Verhältnis der Queue-Spaltenbreiten
         self.queue_col_ratio = 0.75
@@ -6355,10 +12726,16 @@ class MainWindow(QMainWindow):
         header = self.queue_table.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignCenter)
         header.setSectionsMovable(False)
+        header.setSectionsClickable(True)
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.sectionResized.connect(self._on_queue_header_resized)
-        self.queue_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         header.sectionClicked.connect(self._on_queue_header_clicked)
+        self.queue_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Header-Schrift im Wartebereich nicht fett
+        header_font = header.font()
+        header_font.setBold(False)
+        header.setFont(header_font)
 
         # Hinweis-Overlay für den Wartebereich
         self.queue_hint = QLabel(self._tr("queue_drop_hint"), self.queue_table.viewport())
@@ -6368,7 +12745,7 @@ class MainWindow(QMainWindow):
         self.queue_hint.hide()
 
         # Zeilenliste
-        self.list_lines = LinesTreeWidget()
+        self.list_lines = LinesTreeWidget(tr_func=self._tr)
         self.list_lines.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_lines.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
 
@@ -6398,7 +12775,7 @@ class MainWindow(QMainWindow):
         self.act_add = QAction(QIcon.fromTheme("document-open"), self._tr("act_add_files"), self)
         self.act_add.triggered.connect(self.choose_files)
 
-        self.act_paste_files = QAction("Aus Zwischenablage einfügen", self)
+        self.act_paste_files = QAction(self._tr("act_paste_clipboard"), self)
         self.act_paste_files.setShortcut(QKeySequence.Paste)
         self.act_paste_files.triggered.connect(self.paste_files_from_clipboard)
         self.addAction(self.act_paste_files)
@@ -6417,6 +12794,9 @@ class MainWindow(QMainWindow):
         self.act_stop.setEnabled(False)
         self.act_stop.triggered.connect(self.stop_ocr)
 
+        self.act_image_edit = QAction(QIcon.fromTheme("document-edit"), self._tr("act_image_edit"), self)
+        self.act_image_edit.triggered.connect(self.open_image_edit_dialog)
+
         self.act_project_load_toolbar = QAction(QIcon.fromTheme("document-open"), self._tr("menu_project_load"), self)
         self.act_project_load_toolbar.triggered.connect(self.load_project)
 
@@ -6426,11 +12806,7 @@ class MainWindow(QMainWindow):
 
         self._ai_multi_line_context: Optional[dict] = None
 
-        self._ai_server_cache = {
-            "ts": 0.0,
-            "base_url": None,
-            "model_id": None,
-        }
+        self._reset_ai_server_cache()
         self._ai_server_cache_ttl = 2.0
 
         self._update_ai_model_ui()
@@ -6525,8 +12901,13 @@ class MainWindow(QMainWindow):
         self.act_scan_lm_sc.triggered.connect(self.scan_ai_models_now)
         self.addAction(self.act_scan_lm_sc)
 
+        self.act_scan_whisper_sc = QAction(self)
+        self.act_scan_whisper_sc.setShortcut(QKeySequence(Qt.Key_F6))
+        self.act_scan_whisper_sc.triggered.connect(self.scan_whisper_and_select_first_mic)
+        self.addAction(self.act_scan_whisper_sc)
+
         self.act_toggle_log_sc = QAction(self)
-        self.act_toggle_log_sc.setShortcut(QKeySequence(Qt.Key_F6))
+        self.act_toggle_log_sc.setShortcut(QKeySequence(Qt.Key_F7))
         self.act_toggle_log_sc.triggered.connect(lambda: self.act_toggle_log.toggle())
         self.addAction(self.act_toggle_log_sc)
 
@@ -6540,13 +12921,22 @@ class MainWindow(QMainWindow):
         self.act_delete_context_sc.triggered.connect(self.delete_current_context)
         self.addAction(self.act_delete_context_sc)
 
-        self.btn_rec_model = QPushButton("Rec-Modell: -")
+        self.btn_rec_model = QPushButton(self._tr("btn_rec_model_empty"))
         self.btn_rec_model.setIcon(QIcon.fromTheme("document-open"))
         self.btn_rec_model.clicked.connect(self.choose_rec_model)
 
-        self.btn_seg_model = QPushButton(self._tr("dlg_choose_seg") + " -")
+        self.btn_seg_model = QPushButton(self._tr("btn_seg_model_empty"))
         self.btn_seg_model.setIcon(QIcon.fromTheme("document-open"))
         self.btn_seg_model.clicked.connect(self.choose_seg_model)
+
+        self.btn_theme_toggle = QToolButton()
+        self.btn_theme_toggle.setCheckable(True)
+        self.btn_theme_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_theme_toggle.clicked.connect(self.toggle_theme)
+
+        self.btn_lang_menu = QToolButton()
+        self.btn_lang_menu.setPopupMode(QToolButton.InstantPopup)
+        self.btn_lang_menu.setCursor(Qt.PointingHandCursor)
 
         self._pending_box_for_row: Optional[int] = None
         self._pending_new_line_box: bool = False
@@ -6556,7 +12946,7 @@ class MainWindow(QMainWindow):
         self._load_default_segmentation_model()
         self._init_ui()
         self._init_menu()
-        self.apply_theme("bright")
+        self.apply_theme(self.current_theme)
         self.retranslate_ui()
 
         QTimer.singleShot(0, self._fit_queue_columns_exact)
@@ -6574,6 +12964,20 @@ class MainWindow(QMainWindow):
         self._shutdown_poll_timer = QTimer(self)
         self._shutdown_poll_timer.setInterval(100)
         self._shutdown_poll_timer.timeout.connect(self._check_shutdown_complete)
+
+        self._lm_help_dialog_open = False
+
+    def _reset_ai_server_cache(self):
+        self._ai_server_cache = {
+            "ts": 0.0,
+            "base_url": None,
+            "model_id": None,
+        }
+
+    def _close_ai_progress_dialog(self):
+        if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
+            self.ai_progress_dialog.close()
+            self.ai_progress_dialog = None
 
     def _scene_rect_to_bbox(self, scene_rect: QRectF, im: Optional[Image.Image]) -> Optional[BBox]:
         if im is None:
@@ -6803,6 +13207,48 @@ class MainWindow(QMainWindow):
         self.whisper_available_models = out
         return out
 
+    def _find_existing_whisper_large_v3_model(self) -> str:
+        candidates = []
+        seen = set()
+
+        for raw_base in [self.whisper_models_base_dir, self._default_whisper_base_dir()]:
+            base = self._normalize_whisper_base_dir(raw_base)
+            if not base or base in seen:
+                continue
+            seen.add(base)
+            candidates.append(base)
+
+        for base in candidates:
+            if not os.path.isdir(base):
+                continue
+
+            # Fall A: Basisordner ist selbst schon das Modell
+            if (
+                    os.path.basename(base).lower() == "faster-whisper-large-v3"
+                    and os.path.isfile(os.path.join(base, "model.bin"))
+            ):
+                return base
+
+            # Fall B: klassischer Unterordner
+            direct = os.path.join(base, "faster-whisper-large-v3")
+            if os.path.isdir(direct) and os.path.isfile(os.path.join(direct, "model.bin")):
+                return direct
+
+            # Fall C: allgemein Unterordner durchsuchen
+            try:
+                for name in os.listdir(base):
+                    full = os.path.join(base, name)
+                    if (
+                            os.path.isdir(full)
+                            and name.lower() == "faster-whisper-large-v3"
+                            and os.path.isfile(os.path.join(full, "model.bin"))
+                    ):
+                        return full
+            except Exception:
+                pass
+
+        return ""
+
     def _set_whisper_model(self, model_path: str):
         model_path = os.path.abspath(model_path) if model_path else ""
         self.whisper_model_path = model_path
@@ -6817,7 +13263,7 @@ class MainWindow(QMainWindow):
         self.whisper_model_loaded = False
         self._rebuild_whisper_model_submenu()
         self._update_whisper_menu_status()
-        self.status_bar.showMessage("Whisper-Modell entladen.")
+        self.status_bar.showMessage(self._tr("msg_whisper_model_unloaded"))
 
     def _rebuild_whisper_model_submenu(self):
         if not hasattr(self, "whisper_models_submenu"):
@@ -6833,7 +13279,7 @@ class MainWindow(QMainWindow):
             self.whisper_model_group.removeAction(act)
 
         if not self.whisper_available_models:
-            empty_act = QAction("(keine Modelle – bitte scannen)", self)
+            empty_act = QAction(self._tr("no_models_scan"), self)
             empty_act.setEnabled(False)
             self.whisper_models_submenu.addAction(empty_act)
         else:
@@ -6848,7 +13294,7 @@ class MainWindow(QMainWindow):
 
         self.whisper_models_submenu.addSeparator()
 
-        self.act_whisper_unload = QAction("Modell entladen", self)
+        self.act_whisper_unload = QAction(self._tr("act_unload_model"), self)
         self.act_whisper_unload.triggered.connect(self._clear_whisper_model)
         self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
         self.whisper_models_submenu.addAction(self.act_whisper_unload)
@@ -6859,18 +13305,18 @@ class MainWindow(QMainWindow):
         path_txt = self.whisper_models_base_dir if self.whisper_models_base_dir else "-"
 
         if hasattr(self, "act_whisper_status_model"):
-            self.act_whisper_status_model.setText(f"Modell: {model_txt}")
+            self.act_whisper_status_model.setText(self._tr("whisper_status_model", model_txt))
         if hasattr(self, "act_whisper_status_mic"):
-            self.act_whisper_status_mic.setText(f"Mikrofon: {mic_txt}")
+            self.act_whisper_status_mic.setText(self._tr("whisper_status_mic", mic_txt))
         if hasattr(self, "act_whisper_status_path"):
-            self.act_whisper_status_path.setText(f"Pfad: {path_txt}")
+            self.act_whisper_status_path.setText(self._tr("whisper_status_path", path_txt))
         if hasattr(self, "act_whisper_unload"):
             self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
 
     def set_whisper_base_dir_dialog(self):
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Whisper-Modellordner wählen",
+            self._tr("dlg_whisper_model_dir"),
             self.whisper_models_base_dir or os.getcwd()
         )
         if not folder:
@@ -6887,7 +13333,7 @@ class MainWindow(QMainWindow):
             self._rebuild_whisper_model_submenu()
             self._update_whisper_menu_status()
 
-        self.status_bar.showMessage(f"Whisper-Pfad gesetzt: {self.whisper_models_base_dir}")
+        self.status_bar.showMessage(self._tr("msg_whisper_path_set", self.whisper_models_base_dir))
 
     def scan_whisper_models_now(self):
         models = self._scan_whisper_models()
@@ -6898,15 +13344,33 @@ class MainWindow(QMainWindow):
             else:
                 self._rebuild_whisper_model_submenu()
                 self._update_whisper_menu_status()
-            self.status_bar.showMessage(f"{len(models)} Whisper-Modell(e) gefunden.")
+            self.status_bar.showMessage(self._tr("msg_whisper_models_found", len(models)))
         else:
             self._clear_whisper_model()
-            self.status_bar.showMessage("Keine Whisper-Modelle gefunden.")
+            self.status_bar.showMessage(self._tr("msg_whisper_models_not_found"))
+
+    def scan_whisper_and_select_first_mic(self):
+        # 1) Whisper-Modelle scannen
+        self.scan_whisper_models_now()
+
+        # 2) erstes verfügbares Mikro automatisch setzen
+        devices = self._get_input_audio_devices()
+        if not devices:
+            return
+
+        first = devices[0]
+        self.whisper_selected_input_device = first["index"]
+        self.whisper_selected_input_device_label = first["label"]
+
+        self._update_whisper_menu_status()
+        self.status_bar.showMessage(
+            self._tr("msg_microphone_set", self.whisper_selected_input_device_label)
+        )
 
     def choose_whisper_microphone_dialog(self):
         devices = self._get_input_audio_devices()
         if not devices:
-            QMessageBox.warning(self, self._tr("warn_title"), "Es wurden keine Audioaufnahmegeräte gefunden.")
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_no_audio_devices"))
             return
 
         labels = [d["label"] for d in devices]
@@ -6919,8 +13383,8 @@ class MainWindow(QMainWindow):
 
         selected, ok = QInputDialog.getItem(
             self,
-            "Mikrofon auswählen",
-            "Audioaufnahmegerät:",
+            self._tr("dlg_choose_microphone"),
+            self._tr("dlg_audio_input_device"),
             labels,
             current_idx,
             False
@@ -6935,7 +13399,7 @@ class MainWindow(QMainWindow):
                 break
 
         self._update_whisper_menu_status()
-        self.status_bar.showMessage(f"Mikrofon gesetzt: {self.whisper_selected_input_device_label}")
+        self.status_bar.showMessage(self._tr("msg_microphone_set", self.whisper_selected_input_device_label))
 
     def choose_rec_model_if_missing(self):
         if not self.model_path:
@@ -6959,7 +13423,7 @@ class MainWindow(QMainWindow):
         choice, ok = QInputDialog.getItem(
             self,
             "Export",
-            "Exportformat wählen:",
+            self._tr("export_choose_format_label"),
             names,
             0,
             False
@@ -7087,7 +13551,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Kein geladenes Whisper-Modell gefunden."
+                self._tr("warn_whisper_model_not_loaded")
             )
             return
 
@@ -7095,7 +13559,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Kein Mikrofon ausgewählt."
+                self._tr("warn_no_microphone_available")
             )
             return
 
@@ -7128,9 +13592,7 @@ class MainWindow(QMainWindow):
         self._update_queue_row(task.path)
         self.status_bar.showMessage(self._tr("msg_voice_started"))
         self._log(
-            f"Sprachimport gestartet: {os.path.basename(task.path)} | "
-            f"Zeile {current_row + 1} | Mikrofon: {self.whisper_selected_input_device_label} | "
-            f"Modell: {self.whisper_model_name}"
+            self._tr_log("log_voice_import_started", os.path.basename(task.path), current_row + 1, self.whisper_selected_input_device_label, self.whisper_model_name)
         )
 
         if self.voice_record_dialog:
@@ -7188,7 +13650,7 @@ class MainWindow(QMainWindow):
 
         # System-Default hübscher anzeigen
         if txt.lower() in ("microsoft soundmapper - input", "primärer soundaufnahmetreiber"):
-            return "Systemstandard-Mikrofon"
+            return self._tr("audio_device_default_mic")
 
         return txt
 
@@ -7216,7 +13678,7 @@ class MainWindow(QMainWindow):
             if max_in <= 0:
                 continue
 
-            raw_name = str(dev.get("name", f"Gerät {i}")).strip()
+            raw_name = str(dev.get("name", self._tr("audio_device_generic", i))).strip()
             hostapi_idx = dev.get("hostapi", None)
 
             hostapi_name = ""
@@ -7273,7 +13735,7 @@ class MainWindow(QMainWindow):
         rows = self._selected_line_rows()
 
         if not rows:
-            QMessageBox.warning(self, self._tr("warn_title"), "Bitte zuerst mehrere Zeilen auswählen.")
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_multiple_lines_first"))
             return
 
         if len(rows) == 1:
@@ -7305,15 +13767,14 @@ class MainWindow(QMainWindow):
         }
 
         self.act_ai_revise.setEnabled(False)
-        self.status_bar.showMessage(f"LM-Überarbeitung für {len(rows)} ausgewählte Zeilen gestartet...")
+        self.status_bar.showMessage(self._tr("msg_ai_selected_lines_started", len(rows)))
         self._log(
-            f"LM-Mehrfachzeilenüberarbeitung gestartet: {os.path.basename(task.path)} | "
-            f"Zeilen {', '.join(str(r + 1) for r in rows)}"
+            self._tr_log("log_ai_multi_started", os.path.basename(task.path), ", ".join(str(r + 1) for r in rows))
         )
 
-        self.ai_progress_dialog = ProgressStatusDialog("KI-Mehrfachzeilenüberarbeitung", self)
+        self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_multi_title"), self._tr, self)
         self.ai_progress_dialog.set_status(
-            f"Überarbeite {len(rows)} ausgewählte Zeilen …"
+            self._tr("dlg_ai_multi_status", len(rows))
         )
         self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
         self.ai_progress_dialog.show()
@@ -7332,6 +13793,7 @@ class MainWindow(QMainWindow):
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
             max_tokens=self.ai_max_tokens,
+            tr_func=self._tr,
             parent=self
         )
 
@@ -7379,13 +13841,6 @@ class MainWindow(QMainWindow):
             for i in range(len(recs))
         ]
 
-        self._push_undo(task)
-
-        new_recs = [
-            RecordView(i, recs[i].text, recs[i].bbox)
-            for i in range(len(recs))
-        ]
-
         for local_idx, row in enumerate(rows):
             if 0 <= row < len(new_recs):
                 new_text = revised_lines[local_idx].strip()
@@ -7418,31 +13873,26 @@ class MainWindow(QMainWindow):
             self._update_queue_row(path)
 
         self.act_ai_revise.setEnabled(True)
-        self.status_bar.showMessage(f"LM-Überarbeitung für {len(rows)} ausgewählte Zeilen abgeschlossen.")
+        self.status_bar.showMessage(self._tr("msg_ai_multi_done", len(rows)))
         self._log(
-            f"LM-Mehrfachzeilenüberarbeitung abgeschlossen: {os.path.basename(path)} | "
-            f"Zeilen {', '.join(str(r + 1) for r in rows)}"
+            self._tr_log("log_ai_multi_done", os.path.basename(path), ", ".join(str(r + 1) for r in rows))
         )
 
-        if self.ai_progress_dialog:
-            self.ai_progress_dialog.close()
-            self.ai_progress_dialog = None
+        self._close_ai_progress_dialog()
 
     def on_ai_selected_lines_revision_failed(self, path: str, msg: str):
         self._ai_multi_line_context = None
         self.act_ai_revise.setEnabled(True)
 
         if "abgebrochen" in str(msg).lower():
-            self.status_bar.showMessage("Mehrfachzeilenüberarbeitung abgebrochen.")
-            self._log(f"LM-Mehrfachzeilenüberarbeitung abgebrochen: {os.path.basename(path)}")
+            self.status_bar.showMessage(self._tr("msg_ai_multi_cancelled"))
+            self._log(self._tr_log("log_ai_multi_cancelled", os.path.basename(path)))
         else:
-            self.status_bar.showMessage("Mehrfachzeilenüberarbeitung fehlgeschlagen.")
-            self._log(f"LM-Mehrfachzeilenüberarbeitung Fehler: {os.path.basename(path)} -> {msg}")
+            self.status_bar.showMessage(self._tr("msg_ai_multi_failed"))
+            self._log(self._tr_log("log_ai_multi_failed", os.path.basename(path), msg))
             QMessageBox.warning(self, self._tr("warn_title"), msg)
 
-        if self.ai_progress_dialog:
-            self.ai_progress_dialog.close()
-            self.ai_progress_dialog = None
+        self._close_ai_progress_dialog()
 
     def _cleanup_temp_dirs(self):
         for d in list(self.temp_dirs_created):
@@ -7526,19 +13976,19 @@ class MainWindow(QMainWindow):
         base_url = self.ai_base_url or "-"
 
         if hasattr(self, "btn_ai_model"):
-            self.btn_ai_model.setText(f"KI: {display}")
+            self.btn_ai_model.setText(self._tr("btn_ai_model_value", display))
 
         if hasattr(self, "act_llm_status"):
-            self.act_llm_status.setText(f"LLM: {display}")
+            self.act_llm_status.setText(self._tr("llm_status_value", display))
 
         if hasattr(self, "act_lm_status"):
-            self.act_lm_status.setText(f"Modell: {display}")
+            self.act_lm_status.setText(self._tr("lm_status_model_value", display))
 
         if hasattr(self, "act_lm_mode"):
-            self.act_lm_mode.setText(f"Modus: {mode_label}")
+            self.act_lm_mode.setText(self._tr("lm_mode_value", mode_label))
 
         if hasattr(self, "act_lm_base_url"):
-            self.act_lm_base_url.setText(f"Server: {base_url}")
+            self.act_lm_base_url.setText(self._tr("lm_server_value", base_url))
 
     def _process_ui(self):
         QCoreApplication.processEvents()
@@ -7669,39 +14119,29 @@ class MainWindow(QMainWindow):
         return normalized
 
     def set_manual_ai_base_url_dialog(self):
-        text, ok = QInputDialog.getText(
-            self,
-            "LM-Server-URL",
-            "OpenAI-kompatible Base-URL eingeben:\n\n"
-            "Beispiele:\n"
-            "127.0.0.1:1234\n"
-            "localhost:8000\n"
-            "192.168.1.50:8000\n"
-            "93.184.216.34:8000\n"
-            "http://127.0.0.1:1234/v1\n"
-            "http://server.example.org:8000/v1\n\n"
-            "Auto-Korrektur:\n"
-            "- fehlendes http:// wird ergänzt\n"
-            "- /models oder /chat/completions wird automatisch auf die Base-URL gekürzt\n"
-            "- /v1 wird bei Bedarf ergänzt\n\n"
-            "Wichtig:\n"
-            "Keine SSH-Kommandos eintragen. Bei SSH-Tunnel bitte die lokale Tunnel-URL verwenden,\n"
-            "z. B. http://127.0.0.1:1234/v1",
-            text=self.ai_manual_base_url or ""
-        )
-        if not ok:
+        dlg = QInputDialog(self)
+        dlg.setInputMode(QInputDialog.TextInput)
+        dlg.setWindowTitle(self._tr("dlg_lm_url_title"))
+        dlg.setLabelText(self._tr("dlg_lm_url_label"))
+        dlg.setTextValue(self.ai_manual_base_url or "")
+        dlg.setOkButtonText(self._tr("btn_ok"))
+        dlg.setCancelButtonText(self._tr("btn_cancel"))
+        dlg.resize(560, 420)
+
+        line_edit = dlg.findChild(QLineEdit)
+        if line_edit is not None:
+            line_edit.setPlaceholderText(self._tr("dlg_lm_url_placeholder"))
+
+        if dlg.exec() != QDialog.Accepted:
             return
 
-        raw = (text or "").strip()
+        raw = (dlg.textValue() or "").strip()
 
         if self._looks_like_ssh_input(raw):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Bitte keine SSH-Kommandos oder SSH-Ziele eintragen.\n\n"
-                "Trage stattdessen die HTTP(S)-Adresse des erreichbaren API-Endpunkts ein.\n"
-                "Bei SSH-Tunnel also z. B.:\n\n"
-                "http://127.0.0.1:1234/v1"
+                self._tr("warn_lm_url_no_ssh")
             )
             return
 
@@ -7710,12 +14150,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Die LM-Server-URL konnte nicht erkannt werden.\n\n"
-                "Gültige Beispiele:\n"
-                "http://127.0.0.1:1234/v1\n"
-                "http://localhost:8000/v1\n"
-                "http://192.168.1.50:8000/v1\n"
-                "http://93.184.216.34:8000/v1"
+                self._tr("warn_lm_url_invalid")
             )
             return
 
@@ -7724,21 +14159,17 @@ class MainWindow(QMainWindow):
         self.ai_base_url = normalized
         self.ai_endpoint = normalized + "/chat/completions"
 
-        self._ai_server_cache = {
-            "ts": 0.0,
-            "base_url": None,
-            "model_id": None,
-        }
+        self._reset_ai_server_cache()
 
         models, detected_model_id = self._fetch_models_from_base_url(self.ai_base_url, timeout=0.6)
         self.ai_available_models = models
 
         if models:
             self.ai_model_id = detected_model_id if detected_model_id in models else models[0]
-            self.status_bar.showMessage(f"LM gefunden: {self.ai_model_id} | URL: {normalized}")
+            self.status_bar.showMessage(self._tr("msg_lm_found_url", self.ai_model_id, normalized))
         else:
             self.ai_model_id = ""
-            self.status_bar.showMessage(f"Keine Modelle gefunden | URL: {normalized}")
+            self.status_bar.showMessage(self._tr("msg_lm_no_models_url", normalized))
 
         self._rebuild_ai_model_submenu()
         self.refresh_models_menu_status()
@@ -7753,13 +14184,7 @@ class MainWindow(QMainWindow):
         self.ai_base_url = None
         self.ai_available_models = []
         self.ai_model_id = ""
-        self.refresh_models_menu_status()
-
-        self._ai_server_cache = {
-            "ts": 0.0,
-            "base_url": None,
-            "model_id": None,
-        }
+        self._reset_ai_server_cache()
 
         self._rebuild_ai_model_submenu()
         self._update_ai_model_ui()
@@ -7797,12 +14222,12 @@ class MainWindow(QMainWindow):
                 self.ai_model_id = detected_model_id
             else:
                 self.ai_model_id = models[0]
-            self.status_bar.showMessage(f"LM gefunden: {self.ai_model_id}")
+            self.status_bar.showMessage(self._tr("msg_lm_found", self.ai_model_id))
         else:
             self.ai_model_id = ""
             if self.ai_mode == "auto":
                 self.ai_base_url = None
-            self.status_bar.showMessage("Kein erreichbarer LM-Server gefunden.")
+            self.status_bar.showMessage(self._tr("msg_lm_server_not_found"))
 
         self._rebuild_ai_model_submenu()
         self.refresh_models_menu_status()
@@ -7822,7 +14247,7 @@ class MainWindow(QMainWindow):
             self.ai_model_group.removeAction(act)
 
         if not self.ai_available_models:
-            empty_act = QAction("(keine Modelle – bitte Scannen)", self)
+            empty_act = QAction(self._tr("no_models_scan"), self)
             empty_act.setEnabled(False)
             self.ai_models_submenu.addAction(empty_act)
         else:
@@ -7836,7 +14261,7 @@ class MainWindow(QMainWindow):
                 self.ai_model_actions[model_id] = act
 
         self.ai_models_submenu.addSeparator()
-        self.act_clear_ai_model = QAction("LM-Modell entfernen", self)
+        self.act_clear_ai_model = QAction(self._tr("act_clear_ai_model"), self)
         self.act_clear_ai_model.triggered.connect(self.clear_ai_model)
         self.act_clear_ai_model.setEnabled(bool(self.ai_model_id or self.ai_available_models))
         self.ai_models_submenu.addAction(self.act_clear_ai_model)
@@ -7881,7 +14306,7 @@ class MainWindow(QMainWindow):
         if self.ai_model_id:
             self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
         else:
-            self.status_bar.showMessage("LM-Modellwahl gelöscht.")
+            self.status_bar.showMessage(self._tr("msg_ai_model_choice_cleared"))
 
     def clear_ai_model(self):
         self.ai_model_id = ""
@@ -7903,7 +14328,7 @@ class MainWindow(QMainWindow):
         self._update_ai_model_ui()
         self.refresh_models_menu_status()
 
-        self.status_bar.showMessage("LM-Model entfernt.")
+        self.status_bar.showMessage(self._tr("msg_ai_model_removed"))
 
     def _swap_lines(self, task: TaskItem, row_a: int, row_b: int):
         if not task or not task.results:
@@ -8048,7 +14473,7 @@ class MainWindow(QMainWindow):
             path=resolved_path,
             display_name=str(data.get("display_name", display_name_default)),
             status=int(data.get("status", STATUS_WAITING)),
-            edited=bool(data.get("edited", False)),
+            edited=False,
             source_kind=str(data.get("source_kind", "image")),
             relative_path=rel_default,
         )
@@ -8167,7 +14592,7 @@ class MainWindow(QMainWindow):
 
     def _load_project_dict(self, data: dict):
         progress = QProgressDialog("Projekt wird geladen...", None, 0, 100, self)
-        progress.setWindowTitle("Projekt laden")
+        progress.setWindowTitle(self._tr("dlg_project_loading_title"))
         progress.setWindowModality(Qt.ApplicationModal)
         progress.setCancelButton(None)
         progress.setMinimumDuration(0)
@@ -8246,11 +14671,6 @@ class MainWindow(QMainWindow):
                 num_item.setTextAlignment(Qt.AlignCenter)
                 num_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-                check_item = QTableWidgetItem()
-                check_item.setTextAlignment(Qt.AlignCenter)
-                check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
-                check_item.setCheckState(Qt.Unchecked)
-
                 name_item = QTableWidgetItem(task.display_name)
                 name_item.setData(Qt.UserRole, task.path)
                 name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
@@ -8259,7 +14679,7 @@ class MainWindow(QMainWindow):
                 status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
                 self.queue_table.setItem(row, QUEUE_COL_NUM, num_item)
-                self.queue_table.setItem(row, QUEUE_COL_CHECK, check_item)
+                self.queue_table.setCellWidget(row, QUEUE_COL_CHECK, self._make_queue_checkbox_widget(False))
                 self.queue_table.setItem(row, QUEUE_COL_FILE, name_item)
                 self.queue_table.setItem(row, QUEUE_COL_STATUS, status_item)
 
@@ -8375,9 +14795,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_project_load_failed", str(e)))
 
     def _queue_check_col_width(self) -> int:
-        style = self.queue_table.style()
-        indicator_w = style.pixelMetric(style.PixelMetric.PM_IndicatorWidth)
-        return max(18, indicator_w + 6)  # 3 px links + 3 px rechts
+        return 34
+
+    def _make_queue_checkbox_widget(self, checked: bool = False) -> QWidget:
+        wrap = QWidget()
+        lay = QHBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.setAlignment(Qt.AlignCenter)
+
+        cb = QCheckBox(wrap)
+        cb.setChecked(bool(checked))
+        cb.stateChanged.connect(lambda _state: self._update_queue_check_header())
+
+        lay.addWidget(cb)
+        wrap.setStyleSheet("background: transparent;")
+        return wrap
+
+    def _queue_checkbox_at_row(self, row: int) -> Optional[QCheckBox]:
+        wrap = self.queue_table.cellWidget(row, QUEUE_COL_CHECK)
+        if wrap is None:
+            return None
+
+        cb = wrap.findChild(QCheckBox)
+        return cb
 
     def _refresh_queue_numbers(self):
         for row in range(self.queue_table.rowCount()):
@@ -8399,18 +14840,46 @@ class MainWindow(QMainWindow):
         if path:
             self.preview_image(path)
 
+    def _checked_queue_rows(self) -> List[int]:
+        rows = []
+        for row in range(self.queue_table.rowCount()):
+            cb = self._queue_checkbox_at_row(row)
+            if cb is not None and cb.isChecked():
+                rows.append(row)
+        return rows
+
+    def _set_all_queue_checkmarks(self, checked: bool):
+        for row in range(self.queue_table.rowCount()):
+            cb = self._queue_checkbox_at_row(row)
+            if cb is not None:
+                cb.blockSignals(True)
+                cb.setChecked(bool(checked))
+                cb.blockSignals(False)
+
+        self._update_queue_check_header()
+
+    def _toggle_all_queue_checkmarks(self):
+        total_rows = self.queue_table.rowCount()
+        if total_rows == 0:
+            self._update_queue_check_header()
+            return
+
+        checked_rows = len(self._checked_queue_rows())
+        should_check_all = checked_rows != total_rows
+        self._set_all_queue_checkmarks(should_check_all)
+
     def _checked_queue_tasks(self) -> List[TaskItem]:
         out = []
-        for row in range(self.queue_table.rowCount()):
-            check_item = self.queue_table.item(row, QUEUE_COL_CHECK)
+        for row in self._checked_queue_rows():
             file_item = self.queue_table.item(row, QUEUE_COL_FILE)
-            if not check_item or not file_item:
+            if not file_item:
                 continue
-            if check_item.checkState() == Qt.Checked:
-                path = file_item.data(Qt.UserRole)
-                task = next((t for t in self.queue_items if t.path == path), None)
-                if task:
-                    out.append(task)
+
+            path = file_item.data(Qt.UserRole)
+            task = next((t for t in self.queue_items if t.path == path), None)
+            if task:
+                out.append(task)
+
         return out
 
     def _selected_queue_tasks(self) -> List[TaskItem]:
@@ -8445,13 +14914,55 @@ class MainWindow(QMainWindow):
             b.setMaximumWidth(16777215)
 
         # Hauptbuttons angleichen
-        for btn_name in ("btn_rec_model", "btn_seg_model", "btn_ai_model"):
+        for btn_name in (
+                "btn_rec_model",
+                "btn_seg_model",
+                "btn_ai_model",
+                "btn_theme_toggle",
+                "btn_lang_menu",
+        ):
             btn = getattr(self, btn_name, None)
             if btn is not None:
                 btn.setMinimumHeight(target_height)
                 btn.setMaximumHeight(target_height)
                 btn.setMinimumWidth(0)
                 btn.setMaximumWidth(16777215)
+
+        if hasattr(self, "btn_theme_toggle"):
+            self.btn_theme_toggle.setFixedWidth(target_height + 8)
+
+    def _set_secondary_button_icons(self):
+        def themed_or_standard(theme_name: str, std_icon):
+            icon = QIcon.fromTheme(theme_name)
+            if icon.isNull():
+                icon = self.style().standardIcon(std_icon)
+            return icon
+
+        if hasattr(self, "btn_import_lines"):
+            self.btn_import_lines.setIcon(
+                themed_or_standard("document-import", QStyle.SP_DialogOpenButton)
+            )
+
+        if hasattr(self, "btn_voice_fill"):
+            mic_icon = QIcon.fromTheme("audio-input-microphone")
+            if mic_icon.isNull():
+                mic_icon = self.style().standardIcon(QStyle.SP_MediaVolume)
+            self.btn_voice_fill.setIcon(mic_icon)
+
+        if hasattr(self, "btn_ai_revise_bottom"):
+            self.btn_ai_revise_bottom.setIcon(
+                themed_or_standard("system-run", QStyle.SP_ArrowForward)
+            )
+
+        if hasattr(self, "btn_clear_queue"):
+            self.btn_clear_queue.setIcon(
+                themed_or_standard("edit-clear", QStyle.SP_DialogResetButton)
+            )
+
+        if hasattr(self, "btn_toggle_log"):
+            self.btn_toggle_log.setIcon(
+                themed_or_standard("text-x-log", QStyle.SP_FileDialogDetailedView)
+            )
 
     def _scan_kraken_models(self):
         self.kraken_rec_models = []
@@ -8506,7 +15017,6 @@ class MainWindow(QMainWindow):
         )
 
         self.seg_model_path = preferred
-        self.current_segmenter_mode = "blla"
 
     def _model_type_to_text(self, model_type) -> str:
         if isinstance(model_type, (list, tuple, set)):
@@ -8552,7 +15062,7 @@ class MainWindow(QMainWindow):
         self.last_rec_model_dir = os.path.dirname(model_path)
         self.settings.setValue("paths/last_rec_model_dir", self.last_rec_model_dir)
 
-        self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(model_path)}")
+        self.btn_rec_model.setText(self._tr("btn_rec_model_value", os.path.basename(model_path)))
         self.status_bar.showMessage(self._tr("msg_loaded_rec", os.path.basename(model_path)))
 
         self._update_models_menu_labels()
@@ -8566,7 +15076,7 @@ class MainWindow(QMainWindow):
         self.last_seg_model_dir = os.path.dirname(model_path)
         self.settings.setValue("paths/last_seg_model_dir", self.last_seg_model_dir)
 
-        self.btn_seg_model.setText(f"Seg-Modell: {os.path.basename(model_path)}")
+        self.btn_seg_model.setText(self._tr("btn_seg_model_value", os.path.basename(model_path)))
         self.status_bar.showMessage(self._tr("msg_loaded_seg", os.path.basename(model_path)))
 
         self._update_models_menu_labels()
@@ -8581,7 +15091,7 @@ class MainWindow(QMainWindow):
         has_any = False
 
         if self.kraken_rec_models:
-            header_rec = QAction("Recognition-Modelle", self)
+            header_rec = QAction(self._tr("header_rec_models"), self)
             header_rec.setEnabled(False)
             self.kraken_models_submenu.addAction(header_rec)
 
@@ -8599,7 +15109,7 @@ class MainWindow(QMainWindow):
             if has_any:
                 self.kraken_models_submenu.addSeparator()
 
-            header_seg = QAction("Segmentierungs-Modelle", self)
+            header_seg = QAction(self._tr("header_seg_models"), self)
             header_seg.setEnabled(False)
             self.kraken_models_submenu.addAction(header_seg)
 
@@ -8614,7 +15124,7 @@ class MainWindow(QMainWindow):
             has_any = True
 
         if not has_any:
-            empty_act = QAction("(keine Modelle – bitte scannen)", self)
+            empty_act = QAction(self._tr("no_models_scan"), self)
             empty_act.setEnabled(False)
             self.kraken_models_submenu.addAction(empty_act)
 
@@ -8627,10 +15137,10 @@ class MainWindow(QMainWindow):
         seg_name = os.path.basename(self.seg_model_path) if self.seg_model_path else "-"
 
         if hasattr(self, "act_rec_status"):
-            self.act_rec_status.setText(f"Recognition-Modell: {rec_name}")
+            self.act_rec_status.setText(self._tr("status_rec_model", rec_name))
 
         if hasattr(self, "act_seg_status"):
-            self.act_seg_status.setText(f"Segmentierungs-Modell: {seg_name}")
+            self.act_seg_status.setText(self._tr("status_seg_model", seg_name))
 
     def choose_rec_model_from_scanned(self):
         if not getattr(self, "kraken_rec_models", None):
@@ -8656,7 +15166,7 @@ class MainWindow(QMainWindow):
                 self.model_path = p
                 break
 
-        self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(self.model_path)}")
+        self.btn_rec_model.setText(self._tr("btn_rec_model_value", os.path.basename(self.model_path)))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
 
@@ -8738,13 +15248,13 @@ class MainWindow(QMainWindow):
         base_url = self.ai_base_url if (self.ai_base_url and self.ai_model_id) else "-"
 
         if hasattr(self, "act_lm_status"):
-            self.act_lm_status.setText(f"Model: {model_name}")
+            self.act_lm_status.setText(self._tr("lm_status_model_value", model_name))
 
         if hasattr(self, "act_lm_mode"):
-            self.act_lm_mode.setText(f"Modus: {mode_label}")
+            self.act_lm_mode.setText(self._tr("lm_mode_value", mode_label))
 
         if hasattr(self, "act_lm_base_url"):
-            self.act_lm_base_url.setText(f"Server: {base_url}")
+            self.act_lm_base_url.setText(self._tr("lm_server_value", base_url))
 
         if hasattr(self, "act_clear_manual_lm_url"):
             self.act_clear_manual_lm_url.setEnabled(self.ai_mode == "manual" and bool(self.ai_manual_base_url))
@@ -8834,44 +15344,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
 
-        model_id = self._resolve_ai_model_id()
-        if not model_id:
-            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
-            return
-
-        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
-            return
-
-        self.act_ai_revise.setEnabled(True)
-
-        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
-        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
-        self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
-        self.ai_batch_dialog.show()
-
-        self.ai_batch_worker = AIBatchRevisionWorker(
-            items=items,
-            lm_model=model_id,
-            endpoint=self.ai_endpoint,
-            enable_thinking=self.ai_enable_thinking,
-            temperature=self.ai_temperature,
-            top_p=self.ai_top_p,
-            top_k=self.ai_top_k,
-            presence_penalty=self.ai_presence_penalty,
-            repetition_penalty=self.ai_repetition_penalty,
-            min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
-            parent=self
-        )
-
-        self.ai_batch_worker.file_started.connect(self.on_ai_batch_file_started)
-        self.ai_batch_worker.status_changed.connect(self.ai_batch_dialog.set_status)
-        self.ai_batch_worker.status_changed.connect(self._log)
-        self.ai_batch_worker.progress_changed.connect(self.ai_batch_dialog.set_progress)
-        self.ai_batch_worker.file_finished.connect(self.on_ai_batch_file_done)
-        self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
-        self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
-        self.ai_batch_worker.start()
+        self._run_ai_revision_batch(items)
 
     def run_ai_revision_for_all(self):
         items = [it for it in self.queue_items if it.status == STATUS_DONE and it.results]
@@ -8879,44 +15352,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
 
-        model_id = self._resolve_ai_model_id()
-        if not model_id:
-            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
-            return
-
-        if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
-            return
-
-        self.act_ai_revise.setEnabled(True)
-
-        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
-        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
-        self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
-        self.ai_batch_dialog.show()
-
-        self.ai_batch_worker = AIBatchRevisionWorker(
-            items=items,
-            lm_model=model_id,
-            endpoint=self.ai_endpoint,
-            enable_thinking=self.ai_enable_thinking,
-            temperature=self.ai_temperature,
-            top_p=self.ai_top_p,
-            top_k=self.ai_top_k,
-            presence_penalty=self.ai_presence_penalty,
-            repetition_penalty=self.ai_repetition_penalty,
-            min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
-            parent=self
-        )
-
-        self.ai_batch_worker.file_started.connect(self.on_ai_batch_file_started)
-        self.ai_batch_worker.status_changed.connect(self.ai_batch_dialog.set_status)
-        self.ai_batch_worker.status_changed.connect(self._log)
-        self.ai_batch_worker.progress_changed.connect(self.ai_batch_dialog.set_progress)
-        self.ai_batch_worker.file_finished.connect(self.on_ai_batch_file_done)
-        self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
-        self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
-        self.ai_batch_worker.start()
+        self._run_ai_revision_batch(items)
 
     def on_ai_batch_file_started(self, path: str, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
@@ -9018,7 +15454,7 @@ class MainWindow(QMainWindow):
         if self.ai_model_id:
             self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
         else:
-            self.status_bar.showMessage("KI-Modell-ID geleert, localhost-Autoerkennung aktiv.")
+            self.status_bar.showMessage(self._tr("msg_ai_model_id_cleared_auto"))
 
     def _resolve_faster_whisper_device(self) -> Tuple[str, str]:
         # Wichtig:
@@ -9035,12 +15471,12 @@ class MainWindow(QMainWindow):
 
         current_row = self.list_lines.currentRow()
         if current_row < 0:
-            QMessageBox.warning(self, self._tr("warn_title"), "Bitte zuerst eine Zeile auswählen.")
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_line_first"))
             return
 
         _, _, _, recs = task.results
         if not (0 <= current_row < len(recs)):
-            QMessageBox.warning(self, self._tr("warn_title"), "Die ausgewählte Zeile ist ungültig.")
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_selected_line_invalid"))
             return
 
         if self.voice_worker and self.voice_worker.isRunning():
@@ -9050,7 +15486,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Es ist kein geladenes Whisper-Modell aktiv. Bitte unter 'Whisper-Optionen' ein Modell wählen."
+                self._tr("warn_whisper_model_not_loaded")
             )
             return
 
@@ -9064,7 +15500,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     self._tr("warn_title"),
-                    "Es ist kein Mikrofon verfügbar."
+                    self._tr("warn_no_microphone_available")
                 )
                 return
 
@@ -9092,13 +15528,13 @@ class MainWindow(QMainWindow):
     def stop_voice_line_fill(self):
         if self.voice_worker and self.voice_worker.isRunning():
             self.status_bar.showMessage(self._tr("msg_voice_stopped"))
-            self._log("Sprachaufnahme wird gestoppt...")
+            self._log(self._tr_log("log_voice_stopping"))
 
             if self.voice_record_dialog:
                 self.voice_record_dialog._recording = False
                 self.voice_record_dialog._processing = True
-                self.voice_record_dialog.btn_toggle.setText("Aufnahme starten")
-                self.voice_record_dialog.lbl_info.setText("Whisper verarbeitet Audio … bitte kurz warten.")
+                self.voice_record_dialog.btn_toggle.setText(self._tr("voice_record_start"))
+                self.voice_record_dialog.lbl_info.setText(self._tr("voice_record_processing"))
                 self.voice_record_dialog._keep_start_button_primary()
 
             self._set_progress_idle(0)
@@ -9240,10 +15676,6 @@ class MainWindow(QMainWindow):
 
         task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs]
 
-        self.act_ai_revise.setEnabled(True)
-        self.status_bar.showMessage(self._tr("msg_ai_started"))
-        self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
-
         recs_for_ai = self._current_recs_for_ai(task)
         if not recs_for_ai:
             return
@@ -9252,8 +15684,8 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(self._tr("msg_ai_started"))
         self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
 
-        self.ai_progress_dialog = ProgressStatusDialog("KI-Überarbeitung", self)
-        self.ai_progress_dialog.set_status("Verbinde mit LM Studio…")
+        self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_title"), self._tr, self)
+        self.ai_progress_dialog.set_status(self._tr("dlg_ai_connecting"))
         self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
         self.ai_progress_dialog.show()
 
@@ -9271,6 +15703,7 @@ class MainWindow(QMainWindow):
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
             max_tokens=self.ai_max_tokens,
+            tr_func=self._tr,
             parent=self
         )
 
@@ -9291,7 +15724,7 @@ class MainWindow(QMainWindow):
         text, kr_records, im, recs = task.results
 
         if not (0 <= row < len(recs)):
-            QMessageBox.warning(self, self._tr("warn_title"), "Ungültige Zeile.")
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_invalid_line"))
             return
 
         model_id = self._resolve_ai_model_id()
@@ -9316,11 +15749,11 @@ class MainWindow(QMainWindow):
         }
 
         self.act_ai_revise.setEnabled(False)
-        self.status_bar.showMessage(f"LM-Überarbeitung für Zeile {row + 1} gestartet...")
-        self._log(f"LM-Zeilenüberarbeitung gestartet: {os.path.basename(task.path)} | Zeile {row + 1}")
+        self.status_bar.showMessage(self._tr("msg_ai_single_started", row + 1))
+        self._log(self._tr_log("log_ai_single_started", os.path.basename(task.path), row + 1))
 
-        self.ai_progress_dialog = ProgressStatusDialog("KI-Zeilenüberarbeitung", self)
-        self.ai_progress_dialog.set_status(f"Überarbeite nur Zeile {row + 1} …")
+        self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_single_title"), self._tr, self)
+        self.ai_progress_dialog.set_status(self._tr("dlg_ai_single_status", row + 1))
         self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
         self.ai_progress_dialog.show()
 
@@ -9338,6 +15771,7 @@ class MainWindow(QMainWindow):
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
             max_tokens=self.ai_max_tokens,
+            tr_func=self._tr,
             parent=self
         )
 
@@ -9359,8 +15793,8 @@ class MainWindow(QMainWindow):
 
         self.act_ai_revise.setEnabled(True)
 
-        self.ai_batch_dialog = ProgressStatusDialog("KI-Batch-Überarbeitung", self)
-        self.ai_batch_dialog.set_status("Initialisiere KI-Batch…")
+        self.ai_batch_dialog = ProgressStatusDialog(self._tr("act_ai_revise_all"), self._tr, self)
+        self.ai_batch_dialog.set_status(self._tr("dlg_ai_connecting"))
         self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
         self.ai_batch_dialog.show()
 
@@ -9376,6 +15810,7 @@ class MainWindow(QMainWindow):
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
             max_tokens=self.ai_max_tokens,
+            tr_func=self._tr,
             parent=self
         )
 
@@ -9413,9 +15848,9 @@ class MainWindow(QMainWindow):
         elif len(revised_lines) > len(recs):
             revised_lines = revised_lines[:len(recs)]
 
-        self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
-        self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
-        self._log(f"NEU alle Zeilen: {revised_lines}")
+        self._log(self._tr_log("log_ai_batch_debug_old_first", recs[0].text if recs else "<leer>"))
+        self._log(self._tr_log("log_ai_batch_debug_new_first", revised_lines[0] if revised_lines else "<leer>"))
+        self._log(self._tr_log("log_ai_batch_debug_all", revised_lines))
 
         self._push_undo(task)
 
@@ -9503,37 +15938,33 @@ class MainWindow(QMainWindow):
             self._update_queue_row(path)
 
         self.act_ai_revise.setEnabled(True)
-        self.status_bar.showMessage(f"LM-Überarbeitung für Zeile {row + 1} abgeschlossen.")
-        self._log(f"LM-Zeilenüberarbeitung abgeschlossen: {os.path.basename(path)} | Zeile {row + 1}")
+        self.status_bar.showMessage(self._tr("msg_ai_single_done", row + 1))
+        self._log(self._tr_log("log_ai_single_done", os.path.basename(path), row + 1))
 
-        if self.ai_progress_dialog:
-            self.ai_progress_dialog.close()
-            self.ai_progress_dialog = None
+        self._close_ai_progress_dialog()
 
     def on_ai_single_line_revision_failed(self, path: str, msg: str):
         self._ai_single_line_context = None
         self.act_ai_revise.setEnabled(True)
 
         if "abgebrochen" in str(msg).lower():
-            self.status_bar.showMessage("Zeilenüberarbeitung abgebrochen.")
-            self._log(f"LM-Zeilenüberarbeitung abgebrochen: {os.path.basename(path)}")
+            self.status_bar.showMessage(self._tr("msg_ai_single_cancelled"))
+            self._log(self._tr_log("log_ai_single_cancelled", os.path.basename(path)))
         else:
-            self.status_bar.showMessage("Zeilenüberarbeitung fehlgeschlagen.")
-            self._log(f"LM-Zeilenüberarbeitung Fehler: {os.path.basename(path)} -> {msg}")
+            self.status_bar.showMessage(self._tr("msg_ai_single_failed"))
+            self._log(self._tr_log("log_ai_single_failed", os.path.basename(path), msg))
             QMessageBox.warning(self, self._tr("warn_title"), msg)
 
-        if self.ai_progress_dialog:
-            self.ai_progress_dialog.close()
-            self.ai_progress_dialog = None
+        self._close_ai_progress_dialog()
 
     def on_ai_revision_failed(self, path: str, msg: str):
         self.act_ai_revise.setEnabled(True)
 
         if "abgebrochen" in str(msg).lower():
-            self.status_bar.showMessage("Überarbeitung abgebrochen.")
+            self.status_bar.showMessage(self._tr("msg_ai_cancelled_short"))
             self._log(f"Überarbeitung abgebrochen: {os.path.basename(path)}")
         else:
-            self.status_bar.showMessage("Überarbeitung fehlgeschlagen.")
+            self.status_bar.showMessage(self._tr("msg_ai_failed_short"))
             self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
             QMessageBox.warning(self, self._tr("warn_title"), msg)
 
@@ -9565,12 +15996,10 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(self.act_add)
         self.toolbar.addAction(self.act_project_load_toolbar)
         self.toolbar.addSeparator()
+        self.toolbar.addAction(self.act_image_edit)
         self.toolbar.addAction(self.act_play)
         self.toolbar.addAction(self.act_stop)
-        self.toolbar.addAction(self.act_ai_revise)
-        self.toolbar.addAction(self.act_toggle_log)
 
-        # Nur Recognition-Modell in der Toolbar
         self.toolbar.addSeparator()
 
         rec_wrap = QWidget()
@@ -9603,8 +16032,12 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addWidget(seg_wrap)
 
-        self._make_toolbar_buttons_pushy()
-        self._update_model_clear_buttons()
+        toolbar_spacer = QWidget()
+        toolbar_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(toolbar_spacer)
+
+        self.toolbar.addWidget(self.btn_theme_toggle)
+        self.toolbar.addWidget(self.btn_lang_menu)
 
         right = QVBoxLayout()
 
@@ -9619,6 +16052,12 @@ class MainWindow(QMainWindow):
         self.btn_clear_queue.clicked.connect(self.clear_queue)
         queue_head.addWidget(self.btn_clear_queue, 0, Qt.AlignRight)
 
+        self.btn_toggle_log = QPushButton(self._tr("log_toggle_show"))
+        self.btn_toggle_log.setCheckable(True)
+        self.btn_toggle_log.setChecked(False)
+        self.btn_toggle_log.toggled.connect(self.toggle_log_area)
+        queue_head.addWidget(self.btn_toggle_log, 0, Qt.AlignRight)
+
         right.addLayout(queue_head)
         right.addWidget(self.queue_table, 2)
 
@@ -9628,24 +16067,32 @@ class MainWindow(QMainWindow):
         right.addWidget(self.progress_bar)
 
         lines_head = QHBoxLayout()
-        lines_head.addWidget(self.lbl_lines)
-        lines_head.addStretch(1)  # sorgt dafür, dass die Buttons rechts sitzen
+        lines_head.setContentsMargins(0, 0, 0, 0)
+        lines_head.setSpacing(6)
 
         self.btn_import_lines = QToolButton()
-        self.btn_import_lines.setText("Zu Zeilen importieren")
-        self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
+        self.btn_import_lines.setText(self._tr("btn_import_lines"))
+        self.btn_import_lines.setToolTip(self._tr("btn_import_lines_tip"))
         self.btn_import_lines.setPopupMode(QToolButton.InstantPopup)
+        self.btn_import_lines.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         self.btn_voice_fill = QToolButton()
-        self.btn_voice_fill.setText("🎤 Zeile mit Audio verändern")
+        self.btn_voice_fill.setText(self._tr("act_voice_fill"))
         self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
+        self.btn_voice_fill.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.btn_voice_fill.clicked.connect(self.run_voice_line_fill)
+
+        self.btn_ai_revise_bottom = QToolButton()
+        self.btn_ai_revise_bottom.setText(self._tr("act_ai_revise"))
+        self.btn_ai_revise_bottom.setToolTip(self._tr("act_ai_revise_tip"))
+        self.btn_ai_revise_bottom.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_ai_revise_bottom.clicked.connect(self.run_ai_revision)
 
         import_menu = QMenu(self)
 
-        self.act_import_lines_current = QAction("Für aktuelles Bild", self)
-        self.act_import_lines_selected = QAction("Für ausgewählte Bilder", self)
-        self.act_import_lines_all = QAction("Für alle Bilder", self)
+        self.act_import_lines_current = QAction(self._tr("act_import_lines_current"), self)
+        self.act_import_lines_selected = QAction(self._tr("act_import_lines_selected"), self)
+        self.act_import_lines_all = QAction(self._tr("act_import_lines_all"), self)
 
         self.act_import_lines_current.triggered.connect(self.import_lines_for_current_image)
         self.act_import_lines_selected.triggered.connect(self.import_lines_for_selected_images)
@@ -9659,6 +16106,8 @@ class MainWindow(QMainWindow):
 
         lines_head.addWidget(self.btn_import_lines)
         lines_head.addWidget(self.btn_voice_fill)
+        lines_head.addWidget(self.btn_ai_revise_bottom)
+        lines_head.addStretch(1)
 
         right.addLayout(lines_head)
         right.addWidget(self.list_lines, 3)
@@ -9681,6 +16130,15 @@ class MainWindow(QMainWindow):
 
         self._make_toolbar_buttons_pushy()
         self._update_model_clear_buttons()
+        self._set_secondary_button_icons()
+
+        header = self.queue_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QUEUE_COL_NUM, QHeaderView.Fixed)
+        header.setSectionResizeMode(QUEUE_COL_CHECK, QHeaderView.Fixed)
+        header.setSectionResizeMode(QUEUE_COL_FILE, QHeaderView.Stretch)
+        header.setSectionResizeMode(QUEUE_COL_STATUS, QHeaderView.Interactive)
+
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
 
     def on_ai_batch_file_done(self, path: str, revised_lines: list, current: int, total: int):
@@ -9695,16 +16153,16 @@ class MainWindow(QMainWindow):
 
         revised_lines = [str(x).strip() for x in revised_lines]
         self._log(
-            f"KI Batch Rückgabe für {os.path.basename(path)}: {len(revised_lines)} Zeilen, OCR hatte {len(recs)} Zeilen")
+            self._tr_log("log_ai_batch_debug_return", os.path.basename(path), len(revised_lines), len(recs)))
 
         if len(revised_lines) < len(recs):
             revised_lines.extend([recs[i].text for i in range(len(revised_lines), len(recs))])
         elif len(revised_lines) > len(recs):
             revised_lines = revised_lines[:len(recs)]
 
-        self._log(f"ALT erste Zeile: {recs[0].text if recs else '<leer>'}")
-        self._log(f"NEU erste Zeile: {revised_lines[0] if revised_lines else '<leer>'}")
-        self._log(f"NEU alle Zeilen: {revised_lines}")
+        self._log(self._tr_log("log_ai_batch_debug_old_first", recs[0].text if recs else "<leer>"))
+        self._log(self._tr_log("log_ai_batch_debug_new_first", revised_lines[0] if revised_lines else "<leer>"))
+        self._log(self._tr_log("log_ai_batch_debug_all", revised_lines))
 
         self._push_undo(task)
 
@@ -9749,7 +16207,7 @@ class MainWindow(QMainWindow):
             self.ai_batch_dialog.close()
             self.ai_batch_dialog = None
 
-        self.status_bar.showMessage("KI-Batch abgeschlossen.")
+        self.status_bar.showMessage(self._tr("msg_ai_batch_finished"))
 
     def _make_toolbar_buttons_pushy(self):
         # Alle QToolButtons, die QToolBar für QAction erstellt
@@ -9765,15 +16223,6 @@ class MainWindow(QMainWindow):
             self.btn_import_lines.setCursor(Qt.PointingHandCursor)
 
     def _init_menu(self):
-        lang_group = QActionGroup(self)
-        lang_group.setExclusive(True)
-
-        hw_group = QActionGroup(self)
-        hw_group.setExclusive(True)
-
-        read_group = QActionGroup(self)
-        read_group.setExclusive(True)
-
         menubar = self.menuBar()
 
         self.file_menu = menubar.addMenu(self._tr("menu_file"))
@@ -9835,30 +16284,30 @@ class MainWindow(QMainWindow):
 
         self.models_menu = menubar.addMenu(self._tr("menu_models"))
 
-        self.act_rec = QAction("Recognition-Modell laden...", self)
+        self.act_rec = QAction(self._tr("act_load_rec_model"), self)
         self.act_rec.triggered.connect(self.choose_rec_model)
         self.models_menu.addAction(self.act_rec)
 
-        self.act_seg = QAction("Segmentierungs-Modell laden...", self)
+        self.act_seg = QAction(self._tr("act_load_seg_model"), self)
         self.act_seg.triggered.connect(self.choose_seg_model)
         self.models_menu.addAction(self.act_seg)
 
         self.models_menu.addSeparator()
 
-        self.kraken_models_submenu = self.models_menu.addMenu("Verfügbare Kraken-Modelle")
+        self.kraken_models_submenu = self.models_menu.addMenu(self._tr("submenu_available_kraken_models"))
 
         # Diese Aktionen werden nicht mehr direkt ins Hauptmenü gesetzt,
         # sondern im Untermenü eingebaut.
-        self.act_clear_rec = QAction("Recognition-Modell entfernen", self)
+        self.act_clear_rec = QAction(self._tr("act_clear_rec"), self)
         self.act_clear_rec.triggered.connect(self.clear_rec_model)
 
-        self.act_clear_seg = QAction("Segmentierungs-Modell entfernen", self)
+        self.act_clear_seg = QAction(self._tr("act_clear_seg"), self)
         self.act_clear_seg.triggered.connect(self.clear_seg_model)
 
-        self.act_rec_status = QAction("Recognition-Modell: -", self)
+        self.act_rec_status = QAction(self._tr("status_rec_model", "-"), self)
         self.act_rec_status.setEnabled(False)
 
-        self.act_seg_status = QAction("Segmentierungs-Modell: -", self)
+        self.act_seg_status = QAction(self._tr("status_seg_model", "-"), self)
         self.act_seg_status.setEnabled(False)
 
         self._rebuild_kraken_models_submenu()
@@ -9869,48 +16318,46 @@ class MainWindow(QMainWindow):
         self.models_menu.addAction(self.act_seg_status)
         self.models_menu.addSeparator()
 
-        self.act_download = QAction("Modell herunterladen (Zenodo)", self)
+        self.act_download = QAction(self._tr("act_download_model"), self)
         self.act_download.triggered.connect(self.open_download_link)
         self.models_menu.addAction(self.act_download)
 
-        self._update_kraken_menu_status()
-
-        self.revision_models_menu = menubar.addMenu("LM-Optionen")
+        self.revision_models_menu = menubar.addMenu(self._tr("menu_lm_options"))
 
         # -----------------------------
         # Whisper-Optionen
         # -----------------------------
-        self.whisper_menu = menubar.addMenu("Whisper-Optionen")
+        self.whisper_menu = menubar.addMenu(self._tr("menu_whisper_options"))
 
-        self.act_whisper_set_path = QAction("Whisper-Modellpfad festlegen...", self)
+        self.act_whisper_set_path = QAction(self._tr("act_whisper_set_path"), self)
         self.act_whisper_set_path.triggered.connect(self.set_whisper_base_dir_dialog)
         self.whisper_menu.addAction(self.act_whisper_set_path)
 
-        self.act_whisper_set_mic = QAction("Mikrofon auswählen...", self)
+        self.act_whisper_set_mic = QAction(self._tr("act_whisper_set_mic"), self)
         self.act_whisper_set_mic.triggered.connect(self.choose_whisper_microphone_dialog)
         self.whisper_menu.addAction(self.act_whisper_set_mic)
 
         self.whisper_menu.addSeparator()
 
-        self.act_whisper_scan = QAction("Lokal Scannen", self)
+        self.act_whisper_scan = QAction(self._tr("act_scan_local"), self)
         self.act_whisper_scan.triggered.connect(self.scan_whisper_models_now)
         self.whisper_menu.addAction(self.act_whisper_scan)
 
-        self.whisper_models_submenu = self.whisper_menu.addMenu("Verfügbare Whisper-Modelle")
+        self.whisper_models_submenu = self.whisper_menu.addMenu(self._tr("submenu_available_whisper_models"))
         self.whisper_model_group = QActionGroup(self)
         self.whisper_model_group.setExclusive(True)
 
         self.whisper_menu.addSeparator()
 
-        self.act_whisper_status_model = QAction("Modell: -", self)
+        self.act_whisper_status_model = QAction(self._tr("whisper_status_model", "-"), self)
         self.act_whisper_status_model.setEnabled(False)
         self.whisper_menu.addAction(self.act_whisper_status_model)
 
-        self.act_whisper_status_mic = QAction("Mikrofon: -", self)
+        self.act_whisper_status_mic = QAction(self._tr("whisper_status_mic", "-"), self)
         self.act_whisper_status_mic.setEnabled(False)
         self.whisper_menu.addAction(self.act_whisper_status_mic)
 
-        self.act_whisper_status_path = QAction("Pfad: -", self)
+        self.act_whisper_status_path = QAction(self._tr("whisper_status_path", "-"), self)
         self.act_whisper_status_path.setEnabled(False)
         self.whisper_menu.addAction(self.act_whisper_status_path)
 
@@ -9918,53 +16365,44 @@ class MainWindow(QMainWindow):
         self._rebuild_whisper_model_submenu()
         self._update_whisper_menu_status()
 
-        self.act_lm_help = menubar.addAction("Hinweise")
+        self.act_lm_help = menubar.addAction(self._tr("act_help"))
         self.act_lm_help.triggered.connect(self.show_lm_help_dialog)
 
-        self.act_set_manual_lm_url = QAction("LM-Server-URL eintragen...", self)
+        self.act_set_manual_lm_url = QAction(self._tr("act_set_manual_lm_url"), self)
         self.act_set_manual_lm_url.triggered.connect(self.set_manual_ai_base_url_dialog)
         self.revision_models_menu.addAction(self.act_set_manual_lm_url)
 
-        self.act_clear_manual_lm_url = QAction("LM-Server-URL löschen", self)
+        self.act_clear_manual_lm_url = QAction(self._tr("act_clear_manual_lm_url"), self)
         self.act_clear_manual_lm_url.triggered.connect(self.clear_manual_ai_base_url)
         self.revision_models_menu.addAction(self.act_clear_manual_lm_url)
 
         self.revision_models_menu.addSeparator()
 
-        self.act_scan_lm = QAction("Lokal Scannen", self)
+        self.act_scan_lm = QAction(self._tr("act_scan_local"), self)
         self.act_scan_lm.triggered.connect(self.scan_ai_models_now)
         self.revision_models_menu.addAction(self.act_scan_lm)
 
-        self.ai_models_submenu = self.revision_models_menu.addMenu("Verfügbare LM-Modelle")
+        self.ai_models_submenu = self.revision_models_menu.addMenu(self._tr("submenu_available_ai_models"))
         self.ai_model_group = QActionGroup(self)
         self.ai_model_group.setExclusive(True)
         self._rebuild_ai_model_submenu()
 
         self.revision_models_menu.addSeparator()
 
-        self.act_lm_status = QAction("Modell: -", self)
+        self.act_lm_status = QAction(self._tr("lm_status_model_value", "-"), self)
         self.act_lm_status.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_status)
 
-        self.act_lm_mode = QAction("Modus: -", self)
+        self.act_lm_mode = QAction(self._tr("lm_mode_value", "-"), self)
         self.act_lm_mode.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_mode)
 
-        self.act_lm_base_url = QAction("Server: -", self)
+        self.act_lm_base_url = QAction(self._tr("lm_server_value", "-"), self)
         self.act_lm_base_url.setEnabled(False)
         self.revision_models_menu.addAction(self.act_lm_base_url)
 
         # Sprachen
-        self.lang_menu = self.options_menu.addMenu(self._tr("menu_languages"))
-        lang_group = QActionGroup(self)
-        for key, code in [("lang_de", "de"), ("lang_en", "en"), ("lang_fr", "fr")]:
-            act = QAction(self._tr(key), self)
-            act.setCheckable(True)
-            if code == self.current_lang:
-                act.setChecked(True)
-            act.triggered.connect(lambda checked, c=code: self.set_language(c))
-            lang_group.addAction(act)
-            self.lang_menu.addAction(act)
+        self._build_toolbar_language_theme_menus()
 
         # Hardware-Menü
         self.options_menu.addSeparator()
@@ -10009,42 +16447,35 @@ class MainWindow(QMainWindow):
         self.act_overlay.toggled.connect(self._on_overlay_toggled)
         self.options_menu.addAction(self.act_overlay)
 
-        # Theme / Erscheinungsbild
-        self.options_menu.addSeparator()
-        self.theme_menu = self.options_menu.addMenu(self._tr("menu_appearance"))
-        self.act_theme_bright = QAction(self._tr("theme_bright"), self)
-        self.act_theme_bright.triggered.connect(lambda: self.apply_theme("bright"))
-        self.theme_menu.addAction(self.act_theme_bright)
-        self.act_theme_dark = QAction(self._tr("theme_dark"), self)
-        self.act_theme_dark.triggered.connect(lambda: self.apply_theme("dark"))
-        self.theme_menu.addAction(self.act_theme_dark)
-
         if self.device_str in self.hw_actions:
             self.hw_actions[self.device_str].setChecked(True)
 
     # -----------------------------
     # Queue columns
     # -----------------------------
+    def _update_queue_check_header(self):
+        header_item = self.queue_table.horizontalHeaderItem(QUEUE_COL_CHECK)
+        if header_item is None:
+            return
+
+        total_rows = self.queue_table.rowCount()
+        checked_rows = len(self._checked_queue_rows())
+
+        if total_rows == 0 or checked_rows == 0:
+            symbol = "☐"
+        elif checked_rows == total_rows:
+            symbol = "☑"
+        else:
+            symbol = "☒"
+
+        header_item.setText(symbol)
+        header_item.setTextAlignment(Qt.AlignCenter)
+        header_item.setToolTip(self._tr("queue_check_header_tooltip"))
 
     def _on_queue_header_clicked(self, logical_index: int):
         if logical_index != QUEUE_COL_CHECK:
             return
-
-        states = []
-        for row in range(self.queue_table.rowCount()):
-            item = self.queue_table.item(row, QUEUE_COL_CHECK)
-            if item:
-                states.append(item.checkState() == Qt.Checked)
-
-        if not states:
-            return
-
-        set_checked = not all(states)
-
-        for row in range(self.queue_table.rowCount()):
-            item = self.queue_table.item(row, QUEUE_COL_CHECK)
-            if item:
-                item.setCheckState(Qt.Checked if set_checked else Qt.Unchecked)
+        self._toggle_all_queue_checkmarks()
 
     def _queue_num_col_width(self) -> int:
         count = max(1, self.queue_table.rowCount())
@@ -10060,6 +16491,7 @@ class MainWindow(QMainWindow):
     def _fit_queue_columns_exact(self):
         if self._resizing_cols:
             return
+
         self._resizing_cols = True
         try:
             vw = max(1, self.queue_table.viewport().width())
@@ -10067,15 +16499,25 @@ class MainWindow(QMainWindow):
             num_w = self._queue_num_col_width()
             check_w = self._queue_check_col_width()
 
-            # vorher: status_w = 120
-            status_w = 200
+            remaining = max(0, vw - num_w - check_w)
 
-            # Datei-Spalte bewusst kleiner
-            file_w = max(160, vw - num_w - check_w - status_w)
+            current_status_w = self.queue_table.columnWidth(QUEUE_COL_STATUS)
+            preferred_status_w = current_status_w if current_status_w > 0 else 120
+
+            min_status_w = 90
+            min_file_w = 180
+
+            max_status_w = max(min_status_w, remaining - min_file_w)
+
+            # Wenn sehr wenig Platz da ist, Status zusammendrücken,
+            # damit die Tabelle nie breiter als der Viewport wird.
+            if remaining <= (min_status_w + min_file_w):
+                status_w = max(0, min(preferred_status_w, max(0, remaining // 3)))
+            else:
+                status_w = max(min_status_w, min(preferred_status_w, max_status_w))
 
             self.queue_table.setColumnWidth(QUEUE_COL_NUM, num_w)
             self.queue_table.setColumnWidth(QUEUE_COL_CHECK, check_w)
-            self.queue_table.setColumnWidth(QUEUE_COL_FILE, file_w)
             self.queue_table.setColumnWidth(QUEUE_COL_STATUS, status_w)
 
             self._update_queue_hint()
@@ -10085,11 +16527,12 @@ class MainWindow(QMainWindow):
     def _on_queue_header_resized(self, logicalIndex: int, oldSize: int, newSize: int):
         if self._resizing_cols:
             return
-        self._fit_queue_columns_exact()
+
+        if logicalIndex in (QUEUE_COL_NUM, QUEUE_COL_CHECK, QUEUE_COL_STATUS):
+            self._fit_queue_columns_exact()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._fit_queue_columns_exact()
 
     def _update_queue_hint(self):
         empty = (self.queue_table.rowCount() == 0)
@@ -10123,125 +16566,140 @@ class MainWindow(QMainWindow):
 
     # -----------------------------
     # Theme
-    # -----------------------------
     def apply_theme(self, theme: str):
         self.current_theme = theme
+        self.settings.setValue("ui/theme", self.current_theme)
+
         pal = QPalette()
         conf = THEMES[theme]
 
-        pal.setColor(QPalette.Window, QColor(conf["bg"]))
-        pal.setColor(QPalette.WindowText, QColor(conf["fg"]))
-        pal.setColor(QPalette.Base, conf["table_base"])
-        pal.setColor(QPalette.AlternateBase, conf["table_base"].lighter(110))
-        pal.setColor(QPalette.ToolTipBase, Qt.white)
-        pal.setColor(QPalette.ToolTipText, Qt.white)
-        pal.setColor(QPalette.Text, QColor(conf["fg"]))
-        pal.setColor(QPalette.Button, conf["table_base"].lighter(110))
-        pal.setColor(QPalette.ButtonText, QColor(conf["fg"]))
+        fg = QColor(conf["fg"])
+        bg = QColor(conf["bg"])
+        base = conf["table_base"]
+        button = conf["table_base"].lighter(110)
+
+        pal.setColor(QPalette.Window, bg)
+        pal.setColor(QPalette.WindowText, fg)
+        pal.setColor(QPalette.Base, base)
+        pal.setColor(QPalette.AlternateBase, base.lighter(110))
+        pal.setColor(QPalette.ToolTipBase, QColor("#ffffff" if theme == "bright" else "#2b3038"))
+        pal.setColor(QPalette.ToolTipText, QColor("#000000" if theme == "bright" else "#f3f4f6"))
+        pal.setColor(QPalette.Text, fg)
+        pal.setColor(QPalette.Button, button)
+        pal.setColor(QPalette.ButtonText, fg)
         pal.setColor(QPalette.BrightText, Qt.red)
         pal.setColor(QPalette.Link, QColor(42, 130, 218))
         pal.setColor(QPalette.Highlight, QColor(42, 130, 218))
-        pal.setColor(QPalette.HighlightedText, Qt.black)
-        QApplication.instance().setPalette(pal)
+        pal.setColor(QPalette.HighlightedText, QColor("#ffffff" if theme == "dark" else "#000000"))
+
+        app = QApplication.instance()
+        app.setPalette(pal)
 
         self.canvas.set_theme(theme)
+        app.setStyleSheet(_theme_app_qss(theme))
 
-        txt = conf["toolbar_text"]
-        border = conf["toolbar_border"]
-        if theme == "dark":
-            self.toolbar.setStyleSheet(
-                f"""
-                QToolBar {{
-                    background: {conf["bg"]};
-                    spacing: 6px;
-                }}
+        self._update_toolbar_language_theme_ui()
 
-                QToolButton {{
-                    color: #000;
-                    border: 1px solid rgba(255,255,255,0.85);
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    background: rgba(255,255,255,0.92);
-                }}
-                QToolButton:hover {{
-                    background: rgba(255,255,255,0.98);
-                    border-color: rgba(255,255,255,0.98);
-                }}
-                QToolButton:pressed {{
-                    background: rgba(235,235,235,1.0);
-                }}
-
-                QToolButton:checked {{
-                    background: rgba(200,230,255,1.0);
-                    border-color: rgba(120,190,255,1.0);
-                }}
-
-                QPushButton {{
-                    color: #000;
-                    border: 1px solid rgba(255,255,255,0.85);
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    background: rgba(255,255,255,0.92);
-                }}
-                QPushButton:hover {{
-                    background: rgba(255,255,255,0.98);
-                    border-color: rgba(255,255,255,0.98);
-                }}
-                QPushButton:pressed {{
-                    background: rgba(235,235,235,1.0);
-                }}
-                """
-            )
-        else:
-            self.toolbar.setStyleSheet(
-                """
-                QToolBar {
-                    spacing: 6px;
-                }
-
-                QToolButton, QPushButton {
-                    border: 1px solid rgba(0,0,0,0.25);
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    background: rgba(255,255,255,0.90);
-                }
-
-                QToolButton:hover, QPushButton:hover {
-                    background: rgba(255,255,255,1.0);
-                    border-color: rgba(0,0,0,0.35);
-                }
-
-                /* Push/Release Feedback */
-                QToolButton:pressed, QPushButton:pressed {
-                    background: rgba(230,230,230,1.0);
-                    border-color: rgba(0,0,0,0.45);
-                    padding-left: 9px;   /* “depressed” effect */
-                    padding-top: 5px;
-                }
-
-                QToolButton:checked {
-                    background: rgba(42,130,218,0.20);
-                    border-color: rgba(42,130,218,0.45);
-                }
-                """
-            )
+    def toggle_theme(self):
+        new_theme = "dark" if self.current_theme == "bright" else "bright"
+        self.apply_theme(new_theme)
 
     # -----------------------------
     # Language / reading
     # -----------------------------
     def set_language(self, lang):
         self.current_lang = lang
+        self.settings.setValue("ui/language", self.current_lang)
         self.retranslate_ui()
         self._refresh_hw_menu_availability()
+        self._update_toolbar_language_theme_ui()
+
+    def _build_toolbar_language_theme_menus(self):
+        # Nur Sprach-Menü
+        self.lang_toolbar_menu = QMenu(self)
+        self.lang_group = QActionGroup(self)
+
+        self.act_lang_de = QAction(self._tr("lang_de"), self)
+        self.act_lang_de.setCheckable(True)
+        self.act_lang_de.triggered.connect(lambda: self.set_language("de"))
+        self.lang_group.addAction(self.act_lang_de)
+        self.lang_toolbar_menu.addAction(self.act_lang_de)
+
+        self.act_lang_en = QAction(self._tr("lang_en"), self)
+        self.act_lang_en.setCheckable(True)
+        self.act_lang_en.triggered.connect(lambda: self.set_language("en"))
+        self.lang_group.addAction(self.act_lang_en)
+        self.lang_toolbar_menu.addAction(self.act_lang_en)
+
+        self.act_lang_fr = QAction(self._tr("lang_fr"), self)
+        self.act_lang_fr.setCheckable(True)
+        self.act_lang_fr.triggered.connect(lambda: self.set_language("fr"))
+        self.lang_group.addAction(self.act_lang_fr)
+        self.lang_toolbar_menu.addAction(self.act_lang_fr)
+
+        self.btn_lang_menu.setMenu(self.lang_toolbar_menu)
+
+        self._update_toolbar_language_theme_ui()
+
+    def _update_toolbar_language_theme_ui(self):
+        if hasattr(self, "btn_theme_toggle"):
+            is_dark = self.current_theme == "dark"
+            self.btn_theme_toggle.setChecked(is_dark)
+            self.btn_theme_toggle.setText("")
+
+            theme_icon = (
+                QIcon.fromTheme("weather-clear-night")
+                if is_dark
+                else QIcon.fromTheme("weather-clear")
+            )
+            if theme_icon.isNull():
+                theme_icon = self.style().standardIcon(QStyle.SP_DesktopIcon)
+
+            self.btn_theme_toggle.setIcon(theme_icon)
+            self.btn_theme_toggle.setToolTip(self._tr("toolbar_theme_tooltip"))
+
+        if hasattr(self, "btn_lang_menu"):
+            self.btn_lang_menu.setText(self._tr("toolbar_language"))
+            lang_icon = QIcon.fromTheme("preferences-desktop-locale")
+            if lang_icon.isNull():
+                lang_icon = QIcon.fromTheme("accessories-dictionary")
+            if lang_icon.isNull():
+                lang_icon = self.style().standardIcon(QStyle.SP_FileDialogContentsView)
+
+            self.btn_lang_menu.setIcon(lang_icon)
+            self.btn_lang_menu.setToolTip(self._tr("toolbar_language_tooltip"))
+
+        if hasattr(self, "act_lang_de"):
+            self.act_lang_de.setText(self._tr("lang_de"))
+            self.act_lang_de.setChecked(self.current_lang == "de")
+
+        if hasattr(self, "act_lang_en"):
+            self.act_lang_en.setText(self._tr("lang_en"))
+            self.act_lang_en.setChecked(self.current_lang == "en")
+
+        if hasattr(self, "act_lang_fr"):
+            self.act_lang_fr.setText(self._tr("lang_fr"))
+            self.act_lang_fr.setChecked(self.current_lang == "fr")
 
     def _update_models_menu_labels(self):
         if hasattr(self, "act_rec"):
-            self.act_rec.setText("Recognition-Modell laden...")
+            self.act_rec.setText(self._tr("act_load_rec_model"))
         if hasattr(self, "act_seg"):
-            self.act_seg.setText("Segmentierungs-Modell laden...")
+            self.act_seg.setText(self._tr("act_load_seg_model"))
+        if hasattr(self, "act_whisper_set_path"):
+            self.act_whisper_set_path.setText(self._tr("act_whisper_set_path"))
+        if hasattr(self, "act_whisper_set_mic"):
+            self.act_whisper_set_mic.setText(self._tr("act_whisper_set_mic"))
+        if hasattr(self, "act_whisper_scan"):
+            self.act_whisper_scan.setText(self._tr("act_scan_local"))
+        if hasattr(self, "act_set_manual_lm_url"):
+            self.act_set_manual_lm_url.setText(self._tr("act_set_manual_lm_url"))
+        if hasattr(self, "act_clear_manual_lm_url"):
+            self.act_clear_manual_lm_url.setText(self._tr("act_clear_manual_lm_url"))
+        if hasattr(self, "act_scan_lm"):
+            self.act_scan_lm.setText(self._tr("act_scan_local"))
 
         self._update_kraken_menu_status()
-        self._rebuild_kraken_models_submenu()
 
         if hasattr(self, "kraken_models_submenu"):
             self._rebuild_kraken_models_submenu()
@@ -10255,33 +16713,35 @@ class MainWindow(QMainWindow):
         self.edit_menu.setTitle(self._tr("menu_edit"))
         self.models_menu.setTitle(self._tr("menu_models"))
         self.options_menu.setTitle(self._tr("menu_options"))
-        self.lang_menu.setTitle(self._tr("menu_languages"))
         self.hw_menu.setTitle(self._tr("menu_hw"))
-        self.theme_menu.setTitle(self._tr("menu_appearance"))
         self.export_menu.setTitle(self._tr("menu_export"))
         self.reading_menu.setTitle(self._tr("menu_reading"))
+        if hasattr(self, "revision_models_menu"):
+            self.revision_models_menu.setTitle(self._tr("menu_lm_options"))
+        if hasattr(self, "whisper_menu"):
+            self.whisper_menu.setTitle(self._tr("menu_whisper_options"))
 
         self.act_export_log.setText(self._tr("menu_export_log"))
 
         if hasattr(self, "act_lm_help"):
-            self.act_lm_help.setText("Hinweise")
+            self.act_lm_help.setText(self._tr("act_help"))
         if hasattr(self, "act_ai_revise"):
             self.act_ai_revise.setText(self._tr("act_ai_revise"))
             self.act_ai_revise.setToolTip(self._tr("act_ai_revise_tip"))
         if hasattr(self, "btn_ai_model"):
             self._update_ai_model_ui()
         if hasattr(self, "act_ai_revise_all"):
-            self.act_ai_revise_all.setText("Alle Überarbeiten")
-            self.act_ai_revise_all.setToolTip("Alle fertig erkannten Dateien überarbeiten")
+            self.act_ai_revise_all.setText(self._tr("act_ai_revise_all"))
+            self.act_ai_revise_all.setToolTip(self._tr("act_ai_revise_all_tip"))
         if hasattr(self, "btn_import_lines"):
-            self.btn_import_lines.setText("Zeilen importieren")
-            self.btn_import_lines.setToolTip("Erkannte Zeilen aus TXT/JSON laden")
+            self.btn_import_lines.setText(self._tr("btn_import_lines"))
+            self.btn_import_lines.setToolTip(self._tr("btn_import_lines_tip"))
         if hasattr(self, "act_import_lines_current"):
-            self.act_import_lines_current.setText("Für aktuelles Bild")
+            self.act_import_lines_current.setText(self._tr("act_import_lines_current"))
         if hasattr(self, "act_import_lines_selected"):
-            self.act_import_lines_selected.setText("Für ausgewählte Bilder")
+            self.act_import_lines_selected.setText(self._tr("act_import_lines_selected"))
         if hasattr(self, "act_import_lines_all"):
-            self.act_import_lines_all.setText("Für alle Bilder")
+            self.act_import_lines_all.setText(self._tr("act_import_lines_all"))
         if hasattr(self, "act_project_save"):
             self.act_project_save.setText(self._tr("menu_project_save"))
         if hasattr(self, "act_project_save_as"):
@@ -10290,13 +16750,21 @@ class MainWindow(QMainWindow):
             self.act_project_load.setText(self._tr("menu_project_load"))
         if hasattr(self, "act_paste_files_menu"):
             self.act_paste_files_menu.setText(self._tr("act_paste_clipboard"))
+        if hasattr(self, "act_paste_files"):
+            self.act_paste_files.setText(self._tr("act_paste_clipboard"))
         if hasattr(self, "btn_voice_fill"):
+            self.btn_voice_fill.setText(self._tr("act_voice_fill"))
             self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
+        if hasattr(self, "btn_ai_revise_bottom"):
+            self.btn_ai_revise_bottom.setText(self._tr("act_ai_revise"))
+            self.btn_ai_revise_bottom.setToolTip(self._tr("act_ai_revise_tip"))
         if hasattr(self, "btn_clear_queue"):
             self.btn_clear_queue.setText(self._tr("act_clear_queue"))
-        if hasattr(self, "btn_voice_fill"):
-            self.btn_voice_fill.setText("🎤 Zeile mit Audio verändern")
-            self.btn_voice_fill.setToolTip(self._tr("act_voice_fill_tip"))
+        if hasattr(self, "btn_toggle_log"):
+            if self.btn_toggle_log.isChecked():
+                self.btn_toggle_log.setText(self._tr("log_toggle_hide"))
+            else:
+                self.btn_toggle_log.setText(self._tr("log_toggle_show"))
 
         self.act_undo.setText(self._tr("act_undo"))
         self.act_redo.setText(self._tr("act_redo"))
@@ -10305,33 +16773,34 @@ class MainWindow(QMainWindow):
         self.act_exit.setText(self._tr("menu_exit"))
         self.act_download.setText(self._tr("act_download_model"))
         self.act_overlay.setText(self._tr("act_overlay_show"))
-        self.act_theme_bright.setText(self._tr("theme_bright"))
-        self.act_theme_dark.setText(self._tr("theme_dark"))
 
         self.act_add.setText(self._tr("act_add_files"))
         self.act_clear.setText(self._tr("act_clear_queue"))
         self.act_play.setText(self._tr("act_start_ocr"))
         self.act_stop.setText(self._tr("act_stop_ocr"))
+        if hasattr(self, "act_image_edit"):
+            self.act_image_edit.setText(self._tr("act_image_edit"))
         self.act_project_load_toolbar.setText(self._tr("menu_project_load"))
         self.act_project_load_toolbar.setToolTip(self._tr("menu_project_load"))
 
         self.lbl_queue.setText(self._tr("lbl_queue"))
         self.lbl_lines.setText(self._tr("lbl_lines"))
-        self.queue_table.setHorizontalHeaderLabels(["#", "☐", "Geladene Datein", self._tr("col_status")])
+        self.queue_table.setHorizontalHeaderLabels(["#", "☐", self._tr("col_loaded_files"), self._tr("col_status")])
+        self._update_queue_check_header()
 
         if hasattr(self.list_lines, "setHeaderLabels"):
-            self.list_lines.setHeaderLabels(["#", "Erkannte Zeilen und Wörter"])
+            self.list_lines.setHeaderLabels(["#", self._tr("lines_tree_header")])
             self.list_lines.header().setDefaultAlignment(Qt.AlignCenter)
 
         if self.model_path:
-            self.btn_rec_model.setText(f"Rec-Modell: {os.path.basename(self.model_path)}")
+            self.btn_rec_model.setText(self._tr("btn_rec_model_value", os.path.basename(self.model_path)))
         else:
-            self.btn_rec_model.setText("Rec-Modell: -")
+            self.btn_rec_model.setText(self._tr("btn_rec_model_empty"))
 
         if self.seg_model_path:
-            self.btn_seg_model.setText(f"Seg-Modell: {os.path.basename(self.seg_model_path)}")
+            self.btn_seg_model.setText(self._tr("btn_seg_model_value", os.path.basename(self.seg_model_path)))
         else:
-            self.btn_seg_model.setText("Seg-Modell: -")
+            self.btn_seg_model.setText(self._tr("btn_seg_model_empty"))
 
         mapping = {"cpu": "hw_cpu", "cuda": "hw_cuda", "rocm": "hw_rocm", "mps": "hw_mps"}
         for dev, key in mapping.items():
@@ -10347,27 +16816,41 @@ class MainWindow(QMainWindow):
         self.canvas._show_drop_hint()
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
+        self._update_toolbar_language_theme_ui()
+        self._set_secondary_button_icons()
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
 
         # Models menu actions
         if hasattr(self, "act_rec"):
-            self.act_rec.setText("Recognition-Modell laden...")
+            self.act_rec.setText(self._tr("act_load_rec_model"))
         if hasattr(self, "act_seg"):
-            self.act_seg.setText("Segmentierungs-Modell laden...")
+            self.act_seg.setText(self._tr("act_load_seg_model"))
+        if hasattr(self, "act_whisper_set_path"):
+            self.act_whisper_set_path.setText(self._tr("act_whisper_set_path"))
+        if hasattr(self, "act_whisper_set_mic"):
+            self.act_whisper_set_mic.setText(self._tr("act_whisper_set_mic"))
+        if hasattr(self, "act_whisper_scan"):
+            self.act_whisper_scan.setText(self._tr("act_scan_local"))
+        if hasattr(self, "act_set_manual_lm_url"):
+            self.act_set_manual_lm_url.setText(self._tr("act_set_manual_lm_url"))
+        if hasattr(self, "act_clear_manual_lm_url"):
+            self.act_clear_manual_lm_url.setText(self._tr("act_clear_manual_lm_url"))
+        if hasattr(self, "act_scan_lm"):
+            self.act_scan_lm.setText(self._tr("act_scan_local"))
 
         if hasattr(self, "act_clear_rec"):
-            self.act_clear_rec.setText("Recognition-Modell entfernen")
+            self.act_clear_rec.setText(self._tr("act_clear_rec"))
         if hasattr(self, "act_clear_seg"):
-            self.act_clear_seg.setText("Segmentierungs-Modell entfernen")
+            self.act_clear_seg.setText(self._tr("act_clear_seg"))
 
         if hasattr(self, "kraken_models_submenu"):
-            self.kraken_models_submenu.setTitle("Verfügbare Kraken-Modelle")
+            self.kraken_models_submenu.setTitle(self._tr("submenu_available_kraken_models"))
 
         if hasattr(self, "ai_models_submenu"):
-            self.ai_models_submenu.setTitle("Verfügbare LM-Modelle")
+            self.ai_models_submenu.setTitle(self._tr("submenu_available_ai_models"))
 
         if hasattr(self, "whisper_models_submenu"):
-            self.whisper_models_submenu.setTitle("Verfügbare Whisper-Modelle")
+            self.whisper_models_submenu.setTitle(self._tr("submenu_available_whisper_models"))
 
         self._update_kraken_menu_status()
         self._rebuild_kraken_models_submenu()
@@ -10379,6 +16862,18 @@ class MainWindow(QMainWindow):
             self.btn_rec_clear.setToolTip(self._tr("act_clear_rec"))
         if hasattr(self, "btn_seg_clear"):
             self.btn_seg_clear.setToolTip(self._tr("act_clear_seg"))
+
+        header = self.queue_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QUEUE_COL_NUM, QHeaderView.Fixed)
+        header.setSectionResizeMode(QUEUE_COL_CHECK, QHeaderView.Fixed)
+        header.setSectionResizeMode(QUEUE_COL_FILE, QHeaderView.Stretch)
+        header.setSectionResizeMode(QUEUE_COL_STATUS, QHeaderView.Interactive)
+
+        # Header-Schrift im Wartebereich normal halten
+        header_font = header.font()
+        header_font.setBold(False)
+        header.setFont(header_font)
 
     def _retranslate_queue_rows(self):
         for it in self.queue_items:
@@ -10427,10 +16922,10 @@ class MainWindow(QMainWindow):
             ok, detail = caps.get(dev, (False, ""))
             if dev == "cpu":
                 act.setEnabled(True)
-                act.setToolTip("CPU")
+                act.setToolTip(self._tr("msg_device_cpu"))
                 continue
             act.setEnabled(ok)
-            act.setToolTip(detail if detail else ("Not available" if self.current_lang == "en" else "Nicht verfügbar"))
+            act.setToolTip(detail if detail else self._tr("msg_not_available"))
 
         if self.device_str != "cpu":
             ok, _ = caps.get(self.device_str, (False, ""))
@@ -10575,17 +17070,16 @@ class MainWindow(QMainWindow):
         # falls schon ein PDF gerendert wird: optional blockieren oder queue’n
         if self.pdf_worker and self.pdf_worker.isRunning():
             QMessageBox.information(self, self._tr("info_title"),
-                                    "Es wird gerade bereits ein PDF gerendert. Bitte warte kurz.")
+                                    self._tr("msg_pdf_render_already_running"))
             return
 
         self._pending_pdf_path = pdf_path
+        self._set_progress_busy()
 
         # Dialog
         dlg = QProgressDialog(self)
         dlg.setWindowTitle(self._tr("pdf_render_title"))
-        dlg.setCancelButtonText(
-            "Abbrechen" if self.current_lang == "de" else ("Cancel" if self.current_lang == "en" else "Annuler")
-        )
+        dlg.setCancelButtonText(self._tr("btn_cancel"))
         dlg.setMinimum(0)
         dlg.setMaximum(0)  # wird gesetzt, sobald wir total kennen
         dlg.setValue(0)
@@ -10621,12 +17115,18 @@ class MainWindow(QMainWindow):
                 dlg.setLabelText(f"Rendering pages… ({cur}/{total}): {os.path.basename(pdf_path)}")
             dlg.setValue(cur)
 
+        self.progress_bar.setRange(0, max(1, total))
+        self.progress_bar.setValue(cur)
+        self.status_bar.showMessage(self._tr("pdf_render_label", cur, total, os.path.basename(pdf_path)))
+
     def _on_pdf_render_finished(self, pdf_path: str, out_paths: list):
         # Dialog schließen
         if self.pdf_progress_dlg:
             self.pdf_progress_dlg.setValue(self.pdf_progress_dlg.maximum())
             self.pdf_progress_dlg.close()
             self.pdf_progress_dlg = None
+
+        self._set_progress_idle(100)
 
         # Worker cleanup
         self.pdf_worker = None
@@ -10642,7 +17142,7 @@ class MainWindow(QMainWindow):
         for i, img_path in enumerate(out_paths, start=1):
             if any(it.path == img_path for it in self.queue_items):
                 continue
-            disp = f"{base_name} – Seite {i:04d}"
+            disp = self._tr("pdf_page_display", base_name, i)
             self._add_file_to_queue_single(img_path, display_name=disp, source_kind="pdf_page")
             added_any = True
             last_added = img_path
@@ -10667,6 +17167,7 @@ class MainWindow(QMainWindow):
             self.pdf_progress_dlg = None
 
         self.pdf_worker = None
+        self._set_progress_idle(0)
 
         QMessageBox.warning(self, self._tr("warn_title"), f"PDF konnte nicht gerendert werden:\n{msg}")
 
@@ -10692,21 +17193,66 @@ class MainWindow(QMainWindow):
             self.load_project_from_path(project_files[0])
             return
 
-        for p in normal_files:
-            ext = os.path.splitext(p)[1].lower()
+        total = len(normal_files)
+        progress = None
 
-            if ext == ".pdf":
-                self._start_pdf_render_async(p, dpi=300)
-                added_any = True
-                continue
+        if total > 0:
+            progress = QProgressDialog(
+                self._tr("queue_load_label", 0, total, ""),
+                self._tr("btn_cancel"),
+                0,
+                total,
+                self
+            )
+            progress.setWindowTitle(self._tr("queue_load_title"))
+            progress.setWindowModality(Qt.ApplicationModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(True)
+            progress.setAutoReset(True)
+            progress.setValue(0)
 
-            if any(it.path == p for it in self.queue_items):
-                continue
+        try:
+            for idx, p in enumerate(normal_files, start=1):
+                base_name = os.path.basename(p)
 
-            self._add_file_to_queue_single(p)
-            added_any = True
-            last_added = p
-            added_count += 1
+                if progress is not None:
+                    progress.setLabelText(self._tr("queue_load_label", idx, total, base_name))
+                    progress.setValue(idx - 1)
+                    QCoreApplication.processEvents()
+
+                    if progress.wasCanceled():
+                        self.status_bar.showMessage(self._tr("queue_load_cancelled"))
+                        break
+
+                ext = os.path.splitext(p)[1].lower()
+
+                if ext == ".pdf":
+                    self.status_bar.showMessage(self._tr("queue_load_pdf_started", base_name))
+                    self._start_pdf_render_async(p, dpi=300)
+                    added_any = True
+                    added_count += 1
+                else:
+                    if any(it.path == p for it in self.queue_items):
+                        if progress is not None:
+                            progress.setValue(idx)
+                        continue
+
+                    self._add_file_to_queue_single(p)
+                    added_any = True
+                    last_added = p
+                    added_count += 1
+
+                if progress is not None:
+                    progress.setValue(idx)
+                    QCoreApplication.processEvents()
+
+                    if progress.wasCanceled():
+                        self.status_bar.showMessage(self._tr("queue_load_cancelled"))
+                        break
+
+        finally:
+            if progress is not None:
+                progress.close()
 
         if added_any and last_added:
             self.preview_image(last_added)
@@ -10737,11 +17283,6 @@ class MainWindow(QMainWindow):
         num_item.setTextAlignment(Qt.AlignCenter)
         num_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-        check_item = QTableWidgetItem()
-        check_item.setTextAlignment(Qt.AlignCenter)
-        check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
-        check_item.setCheckState(Qt.Unchecked)
-
         name_item = QTableWidgetItem(item.display_name)
         name_item.setData(Qt.UserRole, path)
         name_item.setFlags(
@@ -10754,14 +17295,19 @@ class MainWindow(QMainWindow):
         status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
         self.queue_table.setItem(row, QUEUE_COL_NUM, num_item)
-        self.queue_table.setItem(row, QUEUE_COL_CHECK, check_item)
+        self.queue_table.setCellWidget(row, QUEUE_COL_CHECK, self._make_queue_checkbox_widget(False))
         self.queue_table.setItem(row, QUEUE_COL_FILE, name_item)
         self.queue_table.setItem(row, QUEUE_COL_STATUS, status_item)
 
         self.queue_table.selectRow(row)
         self._refresh_queue_numbers()
+        self._update_queue_check_header()
 
     def on_item_changed(self, item: QTableWidgetItem):
+        if item.column() == QUEUE_COL_CHECK:
+            self._update_queue_check_header()
+            return
+
         if item.column() == QUEUE_COL_FILE:
             row = item.row()
             path_item = self.queue_table.item(row, QUEUE_COL_FILE)
@@ -10787,8 +17333,8 @@ class MainWindow(QMainWindow):
         delete_act = menu.addAction(self._tr("act_delete"))
         menu.addSeparator()
 
-        check_all_act = menu.addAction("Alle markieren")
-        uncheck_all_act = menu.addAction("Alle Markierungen entfernen")
+        check_all_act = menu.addAction(self._tr("queue_ctx_check_all"))
+        uncheck_all_act = menu.addAction(self._tr("queue_ctx_uncheck_all"))
 
         action = menu.exec(self.queue_table.viewport().mapToGlobal(pos))
         if not action:
@@ -10832,23 +17378,13 @@ class MainWindow(QMainWindow):
             self.delete_selected_queue_items()
 
     def check_all_queue_items(self):
-        for row in range(self.queue_table.rowCount()):
-            item = self.queue_table.item(row, QUEUE_COL_CHECK)
-            if item:
-                item.setCheckState(Qt.Checked)
+        self._set_all_queue_checkmarks(True)
 
     def uncheck_all_queue_items(self):
-        for row in range(self.queue_table.rowCount()):
-            item = self.queue_table.item(row, QUEUE_COL_CHECK)
-            if item:
-                item.setCheckState(Qt.Unchecked)
+        self._set_all_queue_checkmarks(False)
 
     def delete_selected_queue_items(self, reset_preview: bool = False):
-        checked_rows = []
-        for row in range(self.queue_table.rowCount()):
-            item = self.queue_table.item(row, QUEUE_COL_CHECK)
-            if item and item.checkState() == Qt.Checked:
-                checked_rows.append(row)
+        checked_rows = self._checked_queue_rows()
 
         # Priorität: Checkmarks vor Auswahl
         rows = checked_rows if checked_rows else sorted(
@@ -10885,6 +17421,7 @@ class MainWindow(QMainWindow):
                 self.preview_image(p)
 
         self._refresh_queue_numbers()
+        self._update_queue_check_header()
         self._fit_queue_columns_exact()
         self._update_queue_hint()
 
@@ -10897,6 +17434,7 @@ class MainWindow(QMainWindow):
     def clear_queue(self):
         self.queue_items.clear()
         self.queue_table.setRowCount(0)
+        self._update_queue_check_header()
         self.canvas.clear_all()
         self.canvas.set_overlay_enabled(False)
         self.list_lines.clear()
@@ -10942,6 +17480,13 @@ class MainWindow(QMainWindow):
         self.list_lines.blockSignals(True)
         self.list_lines.clear()
 
+        if self.current_theme == "dark":
+            even_bg = QColor(43, 43, 43)
+            odd_bg = QColor(54, 54, 54)
+        else:
+            even_bg = QColor(255, 255, 255)
+            odd_bg = QColor(245, 245, 245)
+
         for i, rv in enumerate(recs):
             it = QTreeWidgetItem([f"{i + 1:04d}", rv.text])
             it.setData(0, Qt.UserRole, i)
@@ -10952,6 +17497,12 @@ class MainWindow(QMainWindow):
                 | Qt.ItemIsDropEnabled
                 | Qt.ItemIsEditable
             )
+            it.setTextAlignment(0, Qt.AlignCenter)
+
+            row_bg = odd_bg if (i % 2) else even_bg
+            for col in range(2):
+                it.setBackground(col, QBrush(row_bg))
+
             self.list_lines.addTopLevelItem(it)
 
         self.list_lines.blockSignals(False)
@@ -10990,7 +17541,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("paths/last_rec_model_dir", self.last_rec_model_dir)
 
             name = os.path.basename(p)
-            self.btn_rec_model.setText(f"Rec-Modell: {name}")
+            self.btn_rec_model.setText(self._tr("btn_rec_model_value", name))
             self.status_bar.showMessage(self._tr("msg_loaded_rec", name))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
@@ -11010,7 +17561,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("paths/last_seg_model_dir", self.last_seg_model_dir)
 
             name = os.path.basename(p)
-            self.btn_seg_model.setText(f"Seg-Modell: {name}")
+            self.btn_seg_model.setText(self._tr("btn_seg_model_value", name))
             self.status_bar.showMessage(self._tr("msg_loaded_seg", name))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
@@ -11031,14 +17582,14 @@ class MainWindow(QMainWindow):
 
     def clear_rec_model(self):
         self.model_path = ""
-        self.btn_rec_model.setText("Rec-Modell: -")
+        self.btn_rec_model.setText(self._tr("btn_rec_model_empty"))
         self.status_bar.showMessage(self._tr("msg_loaded_rec", "-"))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
 
     def clear_seg_model(self):
         self.seg_model_path = ""
-        self.btn_seg_model.setText("Seg-Modell: -")
+        self.btn_seg_model.setText(self._tr("btn_seg_model_empty"))
         self.status_bar.showMessage(self._tr("msg_loaded_seg", "-"))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
@@ -11055,11 +17606,15 @@ class MainWindow(QMainWindow):
         self.log_visible = bool(checked)
         self.log_edit.setVisible(self.log_visible)
 
-        # Button-Text umschalten
-        if self.act_toggle_log.isChecked():
-            self.act_toggle_log.setText(self._tr("log_toggle_hide"))
-        else:
-            self.act_toggle_log.setText(self._tr("log_toggle_show"))
+        if hasattr(self, "act_toggle_log"):
+            self.act_toggle_log.setChecked(checked)
+            self.act_toggle_log.setText(
+                self._tr("log_toggle_hide") if checked else self._tr("log_toggle_show")
+            )
+        if hasattr(self, "btn_toggle_log"):
+            self.btn_toggle_log.setText(
+                self._tr("log_toggle_hide") if checked else self._tr("log_toggle_show")
+            )
 
     def export_log_txt(self):
         base_dir = self.current_export_dir or os.getcwd()
@@ -11116,12 +17671,12 @@ class MainWindow(QMainWindow):
                                 out.append(txt)
                     return out
 
-        raise ValueError(f"Nicht unterstütztes Importformat: {file_path}")
+        raise ValueError(self._tr("warn_import_unsupported_format", file_path))
 
     def _apply_imported_lines_to_task(self, task: TaskItem, lines: List[str]):
         lines = [str(x).strip() for x in lines if str(x).strip()]
         if not lines:
-            raise ValueError("Die Importdatei enthält keine verwertbaren Zeilen.")
+            raise ValueError(self._tr("warn_import_no_usable_lines"))
 
         if task.results:
             old_text, old_kr, old_im, old_recs = task.results
@@ -11186,12 +17741,12 @@ class MainWindow(QMainWindow):
     def import_lines_for_current_image(self):
         task = self._current_task()
         if not task:
-            QMessageBox.information(self, self._tr("info_title"), "Kein aktuelles Bild geladen.")
+            QMessageBox.information(self, self._tr("info_title"), self._tr("info_no_current_image_loaded"))
             return
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Zeilen importieren",
+            self._tr("dlg_import_lines_current"),
             "",
             "Text/JSON (*.txt *.json)"
         )
@@ -11210,12 +17765,12 @@ class MainWindow(QMainWindow):
             tasks = self._selected_queue_tasks()
 
         if not tasks:
-            QMessageBox.information(self, self._tr("info_title"), "Keine Bilder ausgewählt oder markiert.")
+            QMessageBox.information(self, self._tr("info_title"), self._tr("info_no_images_selected_or_marked"))
             return
 
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            "Zeilen-Dateien für ausgewählte Bilder laden",
+            self._tr("dlg_import_lines_selected"),
             "",
             "Text/JSON (*.txt *.json)"
         )
@@ -11228,7 +17783,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Keine Importdatei passt zu den ausgewählten Bildern.\n\nDie Dateinamen müssen über den Basisnamen passen."
+                self._tr("warn_no_matching_import_for_selected")
             )
             return
 
@@ -11240,16 +17795,16 @@ class MainWindow(QMainWindow):
                 lines = self._read_import_lines_file(fp)
                 self._apply_imported_lines_to_task(task, lines)
             except Exception as e:
-                self._log(f"Import-Fehler: {task.display_name} -> {e}")
+                self._log(self._tr_log("log_import_error", task.display_name, e))
 
     def import_lines_for_all_images(self):
         if not self.queue_items:
-            QMessageBox.information(self, self._tr("info_title"), "Keine Bilder geladen.")
+            QMessageBox.information(self, self._tr("info_title"), self._tr("info_no_images_loaded"))
             return
 
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            "Zeilen-Dateien für alle Bilder laden",
+            self._tr("dlg_import_lines_all"),
             "",
             "Text/JSON (*.txt *.json)"
         )
@@ -11262,7 +17817,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 self._tr("warn_title"),
-                "Keine Importdatei passt zu den geladenen Bildern.\n\nDie Dateinamen müssen über den Basisnamen passen."
+                self._tr("warn_no_matching_import_for_loaded")
             )
             return
 
@@ -11274,7 +17829,7 @@ class MainWindow(QMainWindow):
                 lines = self._read_import_lines_file(fp)
                 self._apply_imported_lines_to_task(task, lines)
             except Exception as e:
-                self._log(f"Import-Fehler: {task.display_name} -> {e}")
+                self._log(self._tr_log("log_import_error", task.display_name, e))
 
     # -----------------------------
     # OCR-Steuerung
@@ -11283,20 +17838,24 @@ class MainWindow(QMainWindow):
         if not self.model_path or not os.path.exists(self.model_path):
             QMessageBox.critical(self, self._tr("err_title"), self._tr("warn_need_rec"))
             return
-        use_pageseg = False
 
         if not self.seg_model_path or not os.path.exists(self.seg_model_path):
-            QMessageBox.critical(self, self._tr("err_title"), "blla-Segmentierungsmodell wurde nicht gefunden.")
+            QMessageBox.critical(self, self._tr("err_title"), self._tr("warn_blla_model_missing"))
             return
-
-        segmenter_mode = "pageseg" if use_pageseg else "blla"
-        self.current_segmenter_mode = segmenter_mode
 
         checked_tasks = self._checked_queue_tasks()
         selected_tasks = self._selected_queue_tasks()
 
         # Priorität: Checkmarks vor Auswahl
         target_tasks = checked_tasks if checked_tasks else selected_tasks
+
+        # Falls in der Queue nichts markiert/ausgewählt ist:
+        # auf die aktuell geladene Datei zurückfallen,
+        # damit Re-OCR nach Zeilenbearbeitung trotzdem funktioniert.
+        if not target_tasks:
+            current_task = self._current_task()
+            if current_task and current_task.status in (STATUS_WAITING, STATUS_ERROR, STATUS_DONE):
+                target_tasks = [current_task]
 
         if target_tasks:
             tasks = []
@@ -11316,6 +17875,7 @@ class MainWindow(QMainWindow):
                     tasks.append(it)
         else:
             tasks = [i for i in self.queue_items if i.status == STATUS_WAITING]
+
         if not tasks:
             QMessageBox.information(self, self._tr("info_title"), self._tr("warn_queue_empty"))
             return
@@ -11336,12 +17896,11 @@ class MainWindow(QMainWindow):
         job = OCRJob(
             input_paths=paths,
             recognition_model_path=self.model_path,
-            segmentation_model_path=None if use_pageseg else self.seg_model_path,
+            segmentation_model_path=self.seg_model_path,
             device=self.device_str,
             reading_direction=self.reading_direction,
             export_format="pdf",
             export_dir=self.current_export_dir,
-            segmenter_mode=segmenter_mode,
             preset_bboxes_by_path={},  # normales Re-OCR ohne alte Split-Boxen
         )
 
@@ -11354,15 +17913,14 @@ class MainWindow(QMainWindow):
         self.worker.failed.connect(self.on_failed)
         self.worker.device_resolved.connect(self.on_device_resolved)
         self.worker.gpu_info.connect(self.on_gpu_info)
-        self._log(self._tr_log("log_ocr_started", len(paths), self.device_str,
-                               self.reading_direction) + f", Seg={segmenter_mode}")
+        self._log(self._tr_log("log_ocr_started", len(paths), self.device_str, self.reading_direction))
         self.worker.start()
 
     def on_device_resolved(self, dev_str: str):
-        self.status_bar.showMessage(self._tr("msg_using_device", dev_str) + f" | Seg={self.current_segmenter_mode}")
+        self.status_bar.showMessage(self._tr("msg_using_device", dev_str))
 
     def on_gpu_info(self, info: str):
-        self.status_bar.showMessage(self._tr("msg_detected_gpu", info) + f" | Seg={self.current_segmenter_mode}")
+        self.status_bar.showMessage(self._tr("msg_detected_gpu", info))
 
     def stop_ocr(self):
         if self.worker and self.worker.isRunning():
@@ -11660,7 +18218,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
 
         act_ai_single = menu.addAction(self._tr("line_menu_ai_revise_single"))
-        act_ai_multi = menu.addAction("Ausgewählte Zeilen mit LM überarbeiten")
+        act_ai_multi = menu.addAction(self._tr("line_menu_ai_revise_selected"))
         if len(selected_rows) < 2:
             act_ai_multi.setEnabled(False)
 
@@ -12387,6 +18945,150 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _build_kraken_segmentation_for_export(
+            self,
+            image_path: str,
+            record_views: List[RecordView]
+    ):
+        export_lines = []
+
+        for i, rv in enumerate(record_views):
+            if not rv.bbox:
+                continue
+
+            x0, y0, x1, y1 = rv.bbox
+
+            export_lines.append(
+                containers.BBoxLine(
+                    id=f"line_{i + 1:04d}",
+                    bbox=(int(x0), int(y0), int(x1), int(y1)),
+                    text=str(rv.text or ""),
+                    base_dir=None,
+                    imagename=image_path,
+                    regions=None,
+                    tags=None,
+                    split=None,
+                    text_direction="horizontal-lr",
+                )
+            )
+
+        if not export_lines:
+            return None
+
+        return containers.Segmentation(
+            type="bbox",
+            imagename=image_path,
+            text_direction="horizontal-lr",
+            script_detection=False,
+            lines=export_lines,
+            regions=None,
+            line_orders=None,
+        )
+
+    def _render_hocr_html(self, path: str, item: TaskItem, export_image: Image.Image, record_views: List[RecordView]):
+        buf = BytesIO()
+        export_image.save(buf, format="PNG")
+        img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        width, height = export_image.size
+        page_name = html.escape(os.path.basename(item.path))
+
+        line_blocks = []
+
+        for i, rv in enumerate(record_views):
+            if not rv.bbox:
+                continue
+
+            x0, y0, x1, y1 = rv.bbox
+            w = max(1, x1 - x0)
+            h = max(1, y1 - y0)
+            txt = html.escape(rv.text or "")
+
+            line_blocks.append(f"""
+            <span class="ocr_line"
+                  id="line_{i + 1:04d}"
+                  title="bbox {x0} {y0} {x1} {y1}"
+                  style="left:{x0}px; top:{y0}px; width:{w}px; height:{h}px;">
+                <span class="ocrx_word"
+                      id="word_{i + 1:04d}"
+                      title="bbox {x0} {y0} {x1} {y1}">{txt}</span>
+            </span>
+            """)
+
+        html_doc = f"""<!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <meta name="ocr-system" content="Bottled Kraken">
+    <meta name="ocr-capabilities" content="ocr_page ocr_line ocrx_word">
+    <title>{page_name}</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 20px;
+            background: #f3f3f3;
+            font-family: Arial, sans-serif;
+        }}
+
+        .page-wrap {{
+            display: inline-block;
+            position: relative;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.18);
+            background: white;
+        }}
+
+        .ocr_page {{
+            position: relative;
+            width: {width}px;
+            height: {height}px;
+            overflow: hidden;
+            background: white;
+        }}
+
+        .ocr_page img {{
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: {width}px;
+            height: {height}px;
+            display: block;
+        }}
+
+        .ocr_line {{
+            position: absolute;
+            box-sizing: border-box;
+            border: 1px solid rgba(220, 38, 38, 0.45);
+            background: rgba(255, 255, 255, 0.10);
+            overflow: hidden;
+            white-space: nowrap;
+        }}
+
+        .ocrx_word {{
+            position: absolute;
+            left: 0;
+            top: 0;
+            font-size: 12px;
+            line-height: 1.1;
+            color: rgba(180, 0, 0, 0.92);
+            background: rgba(255, 255, 255, 0.55);
+            padding: 0 2px;
+        }}
+    </style>
+    </head>
+    <body>
+    <div class="page-wrap">
+        <div class="ocr_page" title="image {page_name}; bbox 0 0 {width} {height}">
+            <img src="data:image/png;base64,{img_b64}" alt="{page_name}">
+            {''.join(line_blocks)}
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html_doc)
+
     def _render_file(self, path: str, fmt: str, item: TaskItem):
         if not item.results:
             return
@@ -12414,21 +19116,27 @@ class MainWindow(QMainWindow):
                 json.dump({"rows": grid}, f, indent=2, ensure_ascii=False)
             return
 
-        if fmt in ("alto", "hocr"):
-            try:
-                for i, rv in enumerate(record_views):
-                    if i < len(kr_records) and hasattr(kr_records[i], "prediction"):
-                        try:
-                            kr_records[i].prediction = rv.text
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        if fmt == "alto":
+            seg_result = self._build_kraken_segmentation_for_export(
+                image_path=item.path,
+                record_views=record_views
+            )
 
-            img_name = os.path.basename(path)
-            xml = serialization.serialize(kr_records, image_name=img_name, image_size=export_image.size, template=fmt)
+            if seg_result is None:
+                raise ValueError("ALTO-Export benötigt Zeilen mit Bounding-Boxen.")
+
+            xml = serialization.serialize(
+                seg_result,
+                image_size=export_image.size,
+                template="alto"
+            )
+
             with open(path, "w", encoding="utf-8") as f:
                 f.write(xml)
+            return
+
+        if fmt == "hocr":
+            self._render_hocr_html(path, item, export_image, record_views)
             return
 
         if fmt == "pdf":
@@ -12470,10 +19178,14 @@ class MainWindow(QMainWindow):
         return os.path.dirname(os.path.abspath(sys.argv[0]))
 
     def _default_whisper_base_dir(self) -> str:
+        home = os.path.expanduser("~")
+
         if sys.platform.startswith("win"):
-            base = r"C:\bk_whisper"
+            base = os.path.join(home, "BottledKraken", "whisper")
+        elif sys.platform == "darwin":
+            base = os.path.join(home, "Library", "Application Support", "BottledKraken", "whisper")
         else:
-            base = os.path.join("/tmp", "bk_whisper")
+            base = os.path.join(home, ".local", "share", "BottledKraken", "whisper")
 
         os.makedirs(base, exist_ok=True)
         return base
@@ -12484,7 +19196,7 @@ class MainWindow(QMainWindow):
     def _hf_cli_executable(self, platform_name: str) -> str:
         """
         Liefert den hf-CLI-Pfad passend zur Python-Umgebung.
-        Unter Windows bevorzugt <python>\Scripts\hf.exe
+        Unter Windows bevorzugt <python>\\Scripts\\hf.exe
         """
         name = (platform_name or "").strip().lower()
 
@@ -12560,50 +19272,45 @@ class MainWindow(QMainWindow):
         name = (platform_name or "").strip().lower()
 
         if name in ("debian", "ubuntu", "linux mint", "mint"):
-            return (
-                "Hinweis für Debian/Ubuntu/Linux Mint:\n"
-                "Die App verwendet hier automatisch eine eigene Python-Umgebung (venv),\n"
-                "damit kein PEP-668-Fehler mit dem System-Python entsteht.\n\n"
-                "Falls das Erzeugen der venv scheitert, fehlen meist Systempakete.\n"
-                "Dann bitte einmal im Terminal ausführen:\n\n"
-                "sudo apt update\n"
-                "sudo apt install -y python3-venv python3-pip ffmpeg portaudio19-dev"
-            )
+            return self._tr("whisper_hint_debian")
 
         if name == "fedora":
-            return (
-                "Optionaler Hinweis für Fedora:\n"
-                "Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n\n"
-                "sudo dnf install -y python3-pip ffmpeg portaudio-devel"
-            )
+            return self._tr("whisper_hint_fedora")
 
         if name == "arch":
-            return (
-                "Optionaler Hinweis für Arch Linux:\n"
-                "Falls später Probleme mit sounddevice auftreten, können diese Systempakete helfen.\n\n"
-                "sudo pacman -S --needed python-pip ffmpeg portaudio"
-            )
+            return self._tr("whisper_hint_arch")
 
         if name in ("mac", "macos", "darwin"):
-            return (
-                "Optionaler Hinweis für macOS:\n"
-                "Falls später Probleme mit sounddevice auftreten, können diese Pakete helfen.\n\n"
-                "brew install ffmpeg portaudio"
-            )
+            return self._tr("whisper_hint_macos")
 
         if name == "windows":
-            return (
-                "Optionaler Hinweis für Windows:\n"
-                "Normalerweise sind keine zusätzlichen Systempakete nötig.\n"
-                "Falls es später Audioprobleme gibt, liegt das meist eher an Treibern oder Mikrofonrechten."
-            )
+            return self._tr("whisper_hint_windows")
 
-        return (
-            "Optionaler Hinweis:\n"
-            "Falls später Probleme mit sounddevice auftreten, können zusätzliche Systempakete nötig sein."
-        )
+        return self._tr("whisper_hint_generic")
 
     def download_whisper_model_from_help_dialog(self, platform_name: str, dialog_parent=None):
+        # 1) zuerst prüfen, ob large-v3 schon vorhanden ist
+        existing_model_dir = self._find_existing_whisper_large_v3_model()
+        if existing_model_dir:
+            base_dir = os.path.dirname(existing_model_dir)
+
+            self.whisper_models_base_dir = self._normalize_whisper_base_dir(base_dir)
+            self.settings.setValue("paths/whisper_models_base_dir", self.whisper_models_base_dir)
+
+            self._scan_whisper_models()
+            self._set_whisper_model(existing_model_dir)
+            self._update_whisper_menu_status()
+
+            QMessageBox.information(
+                dialog_parent or self,
+                self._tr("info_title"),
+                "Das Faster-Whisper large-v3 Modell ist bereits vorhanden.\n\n"
+                f"Pfad:\n{existing_model_dir}\n\n"
+                "Ein erneuter Download ist nicht nötig."
+            )
+            self.status_bar.showMessage(self._tr("msg_whisper_model_already_present", existing_model_dir))
+            return
+
         platform_hint = self._whisper_system_hint(platform_name)
 
         QMessageBox.information(
@@ -12625,7 +19332,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 dialog_parent or self,
                 self._tr("info_title"),
-                "Es läuft bereits ein Whisper-Download."
+                self._tr("warn_whisper_download_running")
             )
             return
 
@@ -12635,31 +19342,16 @@ class MainWindow(QMainWindow):
         try:
             os.makedirs(target_base, exist_ok=True)
 
-            # Schon vorhanden?
-            if os.path.isdir(target_model_dir) and os.path.isfile(os.path.join(target_model_dir, "model.bin")):
-                self.whisper_models_base_dir = target_base
-                self._scan_whisper_models()
-                self._set_whisper_model(target_model_dir)
-                self._update_whisper_menu_status()
-
-                QMessageBox.information(
-                    self,
-                    self._tr("info_title"),
-                    "Das Whisper-Modell ist bereits vorhanden.\n\n"
-                    f"Pfad:\n{target_model_dir}"
-                )
-                self.status_bar.showMessage(f"Whisper-Modell bereits vorhanden: {target_model_dir}")
-                return
-
             self.status_bar.showMessage(
-                f"Starte Requirement-Installation und Modell-Download nach: {target_model_dir}"
+                self._tr("msg_whisper_download_prepare_target", target_model_dir)
             )
 
             self.hf_download_dialog = ProgressStatusDialog(
-                "Whisper-Modell wird geladen",
+                self._tr("dlg_whisper_download_title"),
+                self._tr,
                 dialog_parent or self
             )
-            self.hf_download_dialog.set_status("Starte Whisper-Vorbereitung …")
+            self.hf_download_dialog.set_status(self._tr("dlg_whisper_download_prepare"))
             self.hf_download_dialog.set_progress(0)
             self.hf_download_dialog.show()
             self.hf_download_dialog.raise_()
@@ -12737,6 +19429,7 @@ class MainWindow(QMainWindow):
                 prepare_cmds=prepare_cmds,
                 install_cmd=install_cmd,
                 download_cmd=download_cmd,
+                tr_func=self._tr,
                 parent=self
             )
             self.hf_download_worker.progress_changed.connect(self.hf_download_dialog.set_progress)
@@ -12752,12 +19445,12 @@ class MainWindow(QMainWindow):
                 self._tr("warn_title"),
                 f"Download des Whisper-Modells konnte nicht gestartet werden:\n{e}"
             )
-            self.status_bar.showMessage("Whisper-Download konnte nicht gestartet werden.")
+            self.status_bar.showMessage(self._tr("msg_whisper_download_start_failed"))
 
     def on_hf_download_finished(self, local_dir: str):
-        self.status_bar.showMessage(f"Whisper-Modell geladen: {local_dir}")
+        self.status_bar.showMessage(self._tr("msg_whisper_model_loaded", local_dir))
 
-        self.whisper_models_base_dir = self._default_whisper_base_dir()
+        self.whisper_models_base_dir = self._normalize_whisper_base_dir(os.path.dirname(local_dir))
         self._scan_whisper_models()
 
         if os.path.isfile(os.path.join(local_dir, "model.bin")):
@@ -12781,7 +19474,7 @@ class MainWindow(QMainWindow):
         )
 
     def on_hf_download_failed(self, msg: str):
-        self.status_bar.showMessage("Whisper-Download fehlgeschlagen.")
+        self.status_bar.showMessage(self._tr("msg_whisper_download_failed"))
 
         if hasattr(self, "hf_download_dialog") and self.hf_download_dialog:
             self.hf_download_dialog.hide()
@@ -12795,46 +19488,12 @@ class MainWindow(QMainWindow):
             self._tr("warn_title"),
             f"Download des Whisper-Modells fehlgeschlagen:\n{msg}"
         )
-
     def show_lm_help_dialog(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("Hinweise")
-        dlg.resize(1080, 760)
-        dlg.setMinimumSize(980, 680)
-        dlg.setStyleSheet("""
-            QDialog {
-                background: #f6f7fb;
-            }
-            QTextBrowser {
-                background: white;
-                border: 1px solid #d9dce3;
-                border-radius: 10px;
-                padding: 8px;
-            }
-            QLabel {
-                color: #1f2937;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton {
-                background: white;
-                border: 1px solid #cfd5df;
-                border-radius: 8px;
-                padding: 6px 12px;
-                min-height: 28px;
-            }
-            QPushButton:hover {
-                background: #f0f4ff;
-                border-color: #9bb5ff;
-            }
-            QPushButton:pressed {
-                background: #e5edff;
-            }
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-        """)
+        dlg.setWindowTitle(self._tr("dlg_help_title"))
+        dlg.resize(1380, 860)
+        dlg.setMinimumSize(1240, 760)
+        dlg.setStyleSheet(_help_dialog_qss(self.current_theme))
 
         layout = QVBoxLayout(dlg)
 
@@ -12848,1078 +19507,74 @@ class MainWindow(QMainWindow):
 
         default_install_cmd, default_download_cmd = self._whisper_button_commands("Windows")
 
-        left_text = """
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.45;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 14px 16px;
-            margin-bottom: 12px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        .muted {
-            color: #6b7280;
-        }
-        .badge {
-            display: inline-block;
-            background: #eef2ff;
-            color: #3730a3;
-            border: 1px solid #c7d2fe;
-            border-radius: 999px;
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 700;
-        }
-        code, pre {
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 12px;
-        }
-        pre {
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 10px;
-            white-space: pre-wrap;
-        }
-        ul {
-            margin-top: 6px;
-            margin-bottom: 6px;
-        }
-        li {
-            margin-bottom: 4px;
-        }
-        </style>
-
-        <div class="card">
-            <div class="h1">Ablauf</div>
-            <ol>
-                <li>Bild oder PDF laden</li>
-                <li>Recognition-Modell laden</li>
-                <li>Segmentierungs-Modell laden</li>
-                <li>Kraken-OCR starten</li>
-            </ol>
-        </div>
-
-        <div class="card">
-            <div class="h2">Nachbearbeitung</div>
-            <span class="badge">Optional</span>
-            <ul>
-                <li>LM-Modell über LM Studio oder vLLM laden</li>
-                <li>LM-Überarbeitung starten</li>
-                <li>Einzelne Zeilen per Mikrofon ersetzen</li>
-                <li>Zeilen aus TXT importieren</li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">Overlay-Boxen & Zeilen</div>
-            <span class="badge">Optional</span>
-            <ul>
-                <li>Zeilen und rote Overlay-Boxen können jederzeit angepasst, verschoben oder gelöscht werden.</li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">LM-Server-URL</div><br>
-            Gültige Beispiele:
-            <pre>http://127.0.0.1:1234/v1
-http://localhost:8000/v1
-http://192.0.0.200:8000/v1</pre>
-            <div class="muted">
-                Wenn der Server direkt im LAN oder VPN erreichbar ist, genügt die URL.<br>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="h2">Remote-Zugriff per SSH-Tunnel</div><br>
-            Falls der Dienst nur auf <code>127.0.0.1</code> des Zielrechners läuft:
-            <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>
-            Danach lokal im Programm verwenden:
-            <pre>http://127.0.0.1:1234/v1</pre>
-        </div>
-
-        <div class="card">
-            <div class="h2">Faster-Whisper Download</div><br>
-            Es wird nur das Modell <b>Systran/faster-whisper-large-v3</b> geladen.<br><br>
-            Vor dem Download werden automatisch die benötigten Python-Pakete installiert.
-            Unter Linux und macOS wird dafür automatisch eine eigene <b>venv</b>-Umgebung genutzt.
-        </div>
-        """
-
-        right_text = """
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.45;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 14px 16px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 12px;
-            color: #111827;
-        }
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        .table td {
-            padding: 8px 10px;
-            border-bottom: 1px solid #edf0f5;
-            vertical-align: top;
-        }
-        .kbd {
-            font-family: Consolas, 'Courier New', monospace;
-            background: #f3f4f6;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            padding: 2px 6px;
-            color: #111827;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .section {
-            font-size: 14px;
-            font-weight: 700;
-            color: #1d4ed8;
-            padding-top: 12px;
-            padding-bottom: 6px;
-        }
-        </style>
-
-        <div class="card">
-            <div class="h1">Tastenkürzel</div>
-
-            <table class="table">
-                <tr><td class="section" colspan="2">Projekt</td></tr>
-                <tr><td><span class="kbd">Strg + S</span></td><td>Projekt speichern</td></tr>
-                <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Projekt speichern unter</td></tr>
-                <tr><td><span class="kbd">Strg + I</span></td><td>Projekt laden</td></tr>
-                <tr><td><span class="kbd">Strg + E</span></td><td>Export</td></tr>
-                <tr><td><span class="kbd">Strg + Q</span></td><td>Programm beenden</td></tr>
-
-                <tr><td class="section" colspan="2">OCR & LM</td></tr>
-                <tr><td><span class="kbd">Strg + K</span></td><td>Kraken-OCR starten</td></tr>
-                <tr><td><span class="kbd">Strg + P</span></td><td>Kraken-OCR stoppen</td></tr>
-                <tr><td><span class="kbd">Strg + L</span></td><td>LM-Überarbeitung starten</td></tr>
-                <tr><td><span class="kbd">Strg + M</span></td><td>Faster-Whisper / Mikrofon starten</td></tr>
-
-                <tr><td class="section" colspan="2">Auswahl</td></tr>
-                <tr><td><span class="kbd">Strg + A</span></td><td>Alles im aktuellen Kontext auswählen</td></tr>
-                <tr><td><span class="kbd">Entf</span></td><td>Ausgewählte Zeilen oder Boxen löschen</td></tr>
-
-                <tr><td class="section" colspan="2">F-Tasten</td></tr>
-                <tr><td><span class="kbd">F1</span></td><td>Shortcut-Hilfe</td></tr>
-                <tr><td><span class="kbd">F2</span></td><td>Recognition-Modell laden</td></tr>
-                <tr><td><span class="kbd">F3</span></td><td>Segmentierungs-Modell laden</td></tr>
-                <tr><td><span class="kbd">F4</span></td><td>LM-Server-URL eingeben</td></tr>
-                <tr><td><span class="kbd">F5</span></td><td>LM-Scan starten</td></tr>
-                <tr><td><span class="kbd">F6</span></td><td>Log-Fenster ein/aus</td></tr>
-            </table>
-        </div>
-        """
-
-        data_protection = """
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        .warn {
-            border-left: 4px solid #f59e0b;
-            background: #fffbeb;
-        }
-        .ok {
-            border-left: 4px solid #2563eb;
-            background: #f8fbff;
-        }
-        ul {
-            margin-top: 6px;
-            margin-bottom: 6px;
-        }
-        li {
-            margin-bottom: 4px;
-        }
-        a {
-            color: #1d4ed8;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        code, pre {
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 12px;
-        }
-        </style>
-
-        <div class="card warn">
-            <div class="h1">Datenschutz</div>
-        </div>
-
-        <div class="card">
-            <div class="h2">LM Studio</div><br>
-            Laut offizieller Dokumentation laufen heruntergeladene Modelle lokal.
-            Auch Eingaben beim lokalen Chat, lokale Dokumentverarbeitung und Requests
-            an den lokalen Server bleiben lokal, <b>wenn</b> LM Studio wirklich lokal genutzt wird.
-            <br><br>
-            Das ist also datenschutzfreundlich und für viele lokale Workflows gut geeignet.
-            Eine pauschale Rechtsaussage für jeden Einzelfall sollte daraus aber nicht gemacht werden.
-            <br><br>
-            Quellen:
-            <ul>
-                <li><a href="https://lmstudio.ai/docs/app/offline">LM Studio Docs – Offline Operation</a></li>
-                <li><a href="https://lmstudio.ai/docs/developer/core/server">LM Studio Docs – Local LLM API Server</a></li>
-                <li><a href="https://lmstudio.ai/privacy">LM Studio Privacy Policy</a></li><br>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">faster-whisper</div><br>
-            faster-whisper ist eine lokale Whisper-Implementierung auf Basis von CTranslate2.
-            In Bottled Kraken wird dafür ein lokaler Modellordner geladen und eine lokale WAV-Datei
-            transkribiert. Solange dieser Ablauf lokal bleibt, erfolgt die Audioverarbeitung ebenfalls lokal.
-            <br><br>
-            Quellen:
-            <ul>
-                <li><a href="https://github.com/SYSTRAN/faster-whisper">SYSTRAN / faster-whisper</a></li>
-                <li><a href="https://github.com/opennmt/ctranslate2">CTranslate2</a></li><br>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">Wichtige Einschränkungen</div>
-            <ul>
-                <li>Sobald LM Studio über Netzwerk, VPN oder Tunnel genutzt wird, ist es nicht mehr rein localhost-lokal.</li>
-                <li>Der einmalige Modelldownload für LM Studio oder faster-whisper benötigt natürlich Internetzugriff.</li>
-                <li>Ob ein Einsatz im Einzelfall datenschutzkonform ist, hängt zusätzlich von Speicherort, Zugriffsschutz, Backups, Logs und internen Regeln ab.</li>
-            </ul>
-        </div>
-        """
-        legal_text = """
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        .warn {
-            border-left: 4px solid #dc2626;
-            background: #fff7f7;
-        }
-        .ok {
-            border-left: 4px solid #2563eb;
-            background: #f8fbff;
-        }
-        ul {
-            margin-top: 6px;
-            margin-bottom: 6px;
-        }
-        li {
-            margin-bottom: 4px;
-        }
-        a {
-            color: #1d4ed8;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        code {
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 12px;
-        }
-        .small {
-            color: #6b7280;
-            font-size: 12px;
-        }
-        </style>
-
-        <div class="card warn">
-            <div class="h1">Rechtliches</div><br>
-            Die folgenden Hinweise sind eine allgemeine Orientierung und ersetzen keine Rechtsberatung.
-            Für die konkrete Nutzung in Behörden, Archiven, Unternehmen, Forschungseinrichtungen oder
-            veröffentlichten Produkten sollte die rechtliche Einordnung im Einzelfall geprüft werden.
-        </div>
-
-        <div class="card ok">
-            <div class="h2">Bottled Kraken</div>
-            <ul>
-                <li><b>Besonderer Hinweis:</b> Dieses Projekt sollte entsprechend der im GitHub-Repository hinterlegten Lizenz weitergegeben, verändert und verteilt werden.</li>
-                <li><b>Repository-Lizenz:</b> GPL-3.0.</li>
-                <li><b>Bedeutung in Kurzform:</b> Wenn Bottled Kraken selbst weiterverbreitet oder in veränderter Form veröffentlicht wird, müssen die Bedingungen der GPL-3.0 beachtet werden, insbesondere die Beibehaltung der Lizenz- und Copyright-Hinweise sowie die Weitergabe des Quellcodes unter derselben Lizenz, soweit die GPL dies verlangt.</li>
-                <li><b>Wichtig:</b> Ob eine bloße interne Nutzung, eine Weitergabe innerhalb einer Organisation oder ein kombiniertes Gesamtprodukt zusätzliche Pflichten auslöst, hängt vom genauen Verwendungsfall ab.</li>
-            </ul>
-            <div class="small">
-                Quelle: GitHub-Repository Bottled Kraken
-            </div>
-            <ul>
-                <li><a href="https://github.com/Testatost/Bottled-Kraken">https://github.com/Testatost/Bottled-Kraken</a></li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">Kraken</div>
-            <ul>
-                <li>Kraken ist die OCR-Basis von Bottled Kraken.</li>
-                <li>Kraken steht unter der Apache License 2.0.</li>
-                <li>Für die rechtliche Nutzung sind insbesondere Lizenztext, Copyright-Hinweise und ggf. NOTICE-Hinweise zu beachten.</li>
-                <li>Die Apache-2.0-Lizenz ist grundsätzlich auch für kommerzielle Nutzung geeignet; maßgeblich bleiben aber immer die Original-Lizenzbedingungen.</li>
-            </ul>
-            <div class="small">Quellen:</div>
-            <ul>
-                <li><a href="https://github.com/mittagessen/kraken">https://github.com/mittagessen/kraken</a></li>
-                <li><a href="https://kraken.re/7.0/index.html">https://kraken.re/7.0/index.html</a></li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">faster-whisper</div>
-            <ul>
-                <li>faster-whisper wird in Bottled Kraken für lokale Sprach-zu-Text-Funktionen verwendet.</li>
-                <li>Das Projekt steht unter der MIT-Lizenz.</li>
-                <li>Die MIT-Lizenz ist sehr offen; typischerweise müssen Copyright- und Lizenzhinweise erhalten bleiben.</li>
-                <li>Zusätzlich können für Modelle oder weitere Abhängigkeiten gesonderte Bedingungen gelten.</li>
-            </ul>
-            <div class="small">Quellen:</div>
-            <ul>
-                <li><a href="https://github.com/SYSTRAN/faster-whisper">https://github.com/SYSTRAN/faster-whisper</a></li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">LM Studio</div>
-            <ul>
-                <li>LM Studio wird in Bottled Kraken optional als lokaler oder angebundener Sprachmodell-Server genutzt.</li>
-                <li>Für die rechtliche Nutzung solltest du dich an den offiziellen Terms of Use und der Privacy Policy von LM Studio orientieren.</li>
-                <li>Gerade bei Nutzung über Netzwerk, Remote-Zugriff oder verknüpfte Dienste gelten nicht nur technische, sondern auch organisatorische und rechtliche Rahmenbedingungen.</li>
-                <li>Für geladene Modelle können zusätzlich eigene Modelllizenzen gelten, die getrennt geprüft werden sollten.</li>
-            </ul>
-            <div class="small">Quellen:</div>
-            <ul>
-                <li><a href="https://lmstudio.ai/">https://lmstudio.ai/</a></li>
-                <li><a href="https://lmstudio.ai/app-terms">https://lmstudio.ai/app-terms</a></li>
-                <li><a href="https://lmstudio.ai/privacy">https://lmstudio.ai/privacy</a></li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">PySide6 / Qt for Python</div>
-            <ul>
-                <li>Die grafische Oberfläche von Bottled Kraken basiert auf PySide6 / Qt for Python.</li>
-                <li>Qt for Python verwendet Lizenzmodelle, die je nach Komponente LGPL bzw. kommerzielle Qt-Lizenz einschließen können.</li>
-                <li>Für Redistribution, Packaging und kommerzielle Weitergabe sollte die Qt-Lizenzsituation gesondert geprüft werden.</li>
-                <li>Besonders bei ausgelieferten Binärpaketen oder proprietären Gesamtanwendungen ist eine genaue Lizenzprüfung wichtig.</li>
-            </ul>
-            <div class="small">Quellen:</div>
-            <ul>
-                <li><a href="https://doc.qt.io/qtforpython-6/">https://doc.qt.io/qtforpython-6/</a></li>
-                <li><a href="https://doc.qt.io/qtforpython-6/licenses.html">https://doc.qt.io/qtforpython-6/licenses.html</a></li>
-            </ul>
-        </div>
-
-        <div class="card warn">
-            <div class="h2">Zusätzlicher Hinweis zu Modellen und Inhalten</div>
-            <ul>
-                <li>Die Software-Lizenz der Anwendung ist von der Lizenz der geladenen OCR-, Sprach- oder KI-Modelle zu unterscheiden.</li>
-                <li>Auch die Verarbeitung urheberrechtlich geschützter Dokumente, personenbezogener Daten oder sensibler Archivbestände ist gesondert rechtlich zu bewerten.</li>
-                <li>Dieses Fenster gibt nur einen kompakten Überblick und keine verbindliche Einzelfallprüfung.</li>
-            </ul>
-        </div>
-        
-        <div class="card">
-            <div class="h2">Lizenz-Überblick</div>
-            <ul>
-                <li><b>Bottled Kraken:</b> GPL-3.0</li>
-                <li><b>Kraken:</b> Apache License 2.0</li>
-                <li><b>faster-whisper:</b> MIT License</li>
-                <li><b>PySide6 / Qt for Python:</b> LGPL / Qt Commercial je nach Nutzung</li>
-                <li><b>LM Studio:</b> Nutzung nach offiziellen Terms of Use</li>
-            </ul>
-        </div>
-        """
-
         def _small_btn(text: str) -> QPushButton:
-            b = QPushButton(text)
-            b.setFixedHeight(30)
-            b.setMinimumWidth(82)
-            b.setMaximumWidth(110)
-            b.setCursor(Qt.PointingHandCursor)
-            return b
+            button = QPushButton(text)
+            button.setFixedHeight(30)
+            button.setMinimumWidth(82)
+            button.setMaximumWidth(110)
+            button.setCursor(Qt.PointingHandCursor)
+            return button
 
-        def make_page(html: str) -> QTextBrowser:
+        def make_page(content_html: str) -> QTextBrowser:
             browser = QTextBrowser()
             browser.setReadOnly(True)
             browser.setOpenExternalLinks(True)
             browser.setFrameShape(QTextBrowser.NoFrame)
             browser.setOpenLinks(False)
             browser.anchorClicked.connect(QDesktopServices.openUrl)
-            browser.setHtml(html)
-            browser.setMinimumWidth(420)
+            browser.setHtml(_help_html(self.current_theme, content_html))
+            browser.setMinimumWidth(760)
             browser.document().setDocumentMargin(8)
             return browser
 
-        # ---------------------------------
-        # Navigation links + Stack rechts
-        # ---------------------------------
         nav_list = QListWidget()
         nav_list.setFixedWidth(180)
         nav_list.setSpacing(4)
-        nav_list.setStyleSheet("""
-                    QListWidget {
-                        background: #f8fafc;
-                        border: 1px solid #d9dce3;
-                        border-radius: 12px;
-                        padding: 8px;
-                        font-size: 14px;
-                    }
-                    QListWidget::item {
-                        min-height: 34px;
-                        padding: 8px 12px;
-                        margin: 2px 0;
-                        border-radius: 8px;
-                    }
-                    QListWidget::item:selected {
-                        background: #dbeafe;
-                        border: 1px solid #93c5fd;
-                        color: #111827;
-                        font-weight: 700;
-                    }
-                    QListWidget::item:hover {
-                        background: #eff6ff;
-                    }
-                """)
 
         stack = QStackedWidget()
-        stack.setStyleSheet("""
-                    QStackedWidget {
-                        background: transparent;
-                    }
-                """)
 
-        # ---------------------------------
-        # Seite 1: Schnellstart
-        # ---------------------------------
-        page_quick = QWidget()
-        page_quick_layout = QVBoxLayout(page_quick)
-        page_quick_layout.setContentsMargins(0, 0, 0, 0)
-        page_quick_layout.setSpacing(8)
+        quick_html = self._tr("help_html_quick")
 
-        browser_quick = make_page("""
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        .badge {
-            display: inline-block;
-            background: #eef2ff;
-            color: #3730a3;
-            border: 1px solid #c7d2fe;
-            border-radius: 999px;
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 700;
-        }
-        ul, ol {
-            margin-top: 6px;
-            margin-bottom: 6px;
-        }
-        li {
-            margin-bottom: 4px;
-        }
-        </style>
+        kraken_html = self._tr("help_html_kraken")
 
-       <div class="card warn">
-            <div class="h1">Ablauf</div>
-        </div>
-            <ol>
-                <li>Bild oder PDF laden</li>
-                <li>Recognition-Modell laden</li>
-                <li>Segmentierungs-Modell laden</li>
-                <li>Kraken-OCR starten</li>
-                <li>Erkannte Zeilen prüfen und bei Bedarf korrigieren</li>
-                <li>Optional: LM-Überarbeitung oder Whisper verwenden</li>
-                <li>Ergebnis als TXT, CSV, JSON, ALTO, hOCR oder PDF exportieren</li>
-            </ol>
-        </div>
-        <div class="card">
-            <div class="h2">Nachbearbeitung</div>
-            <span class="badge">Optional</span>
-            <ul>
-                <li>LM-Modell über LM Studio oder vLLM laden</li>
-                <li>OCR-Zeilen mit lokalem Sprachmodell sprachlich oder inhaltlich glätten</li>
-                <li>Einzelne Zeilen per Mikrofon mit Faster-Whisper neu einsprechen</li>
-                <li>Zeilen aus TXT oder JSON importieren</li>
-            </ul>
-        </div>
+        lm_server_html = self._tr("help_html_lm_server")
 
-        <div class="card">
-            <div class="h2">Overlay-Boxen & Zeilen</div>
-            <span class="badge">Optional</span>
-            <ul>
-                <li>Zeilen und Overlay-Boxen können verschoben, geteilt, ergänzt oder gelöscht werden.</li>
-                <li>Damit lässt sich die Zeilenstruktur vor einem erneuten OCR-Durchlauf gezielt verbessern.</li>
-                <li>Besonders nützlich bei Formularen, Spaltenlayouts und fehlerhaft segmentierten Handschriften.</li>
-            </ul>
-        </div>
-        <br>
-        <br>
-         <div class="card">
-            <div class="h2">Was macht Bottled Kraken?</div><br>
-            Bottled Kraken kombiniert klassische OCR mit manueller Nachbearbeitung und optionaler lokaler KI-Unterstützung.
-            So kannst du schwer lesbare historische Drucke, Handschriften oder Formularseiten schrittweise verbessern.
-        </div>
-        """)
-        page_quick_layout.addWidget(browser_quick)
+        ssh_html = self._tr("help_html_ssh")
 
-        # ---------------------------------
-        # Seite 2: Kraken
-        # ---------------------------------
-        page_kraken = make_page("""
-                <style>
-                body {
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    color: #1f2937;
-                    line-height: 1.5;
-                }
-                .card {
-                    border: 1px solid #e3e7ef;
-                    border-radius: 12px;
-                    padding: 12px 14px;
-                    margin-bottom: 10px;
-                    background: #ffffff;
-                }
-                .h1 {
-                    font-size: 18px;
-                    font-weight: 700;
-                    margin-bottom: 10px;
-                    color: #111827;
-                }
-                .h2 {
-                    font-size: 15px;
-                    font-weight: 700;
-                    margin-bottom: 8px;
-                    color: #1d4ed8;
-                }
-                .badge {
-                    display: inline-block;
-                    background: #eef2ff;
-                    color: #3730a3;
-                    border: 1px solid #c7d2fe;
-                    border-radius: 999px;
-                    padding: 2px 8px;
-                    font-size: 11px;
-                    font-weight: 700;
-                }
-                pre {
-                    background: #f8fafc;
-                    border: 1px solid #e5e7eb;
-                    border-radius: 8px;
-                    padding: 10px;
-                    white-space: pre-wrap;
-                    font-family: Consolas, 'Courier New', monospace;
-                    font-size: 12px;
-                }
-                ul, ol {
-                    margin-top: 6px;
-                    margin-bottom: 6px;
-                }
-                li {
-                    margin-bottom: 4px;
-                }
-                a {
-                    color: #1d4ed8;
-                    text-decoration: none;
-                }
-                a:hover {
-                    text-decoration: underline;
-                }
-                .muted {
-                    color: #6b7280;
-                }
-                </style>
-
-                <div class="card">
-                    <div class="h1">Kraken</div><br>
-                    Kraken ist die OCR-/ATR-Basis von Bottled Kraken.
-                    Es handelt sich um ein Open-Source-System für automatische Texterkennung,
-                    das besonders für historische Drucke, Handschriften und nicht-lateinische Schriften entwickelt wurde.
-                </div>
-
-                <div class="card">
-                    <div class="h2">Was ist für Bottled Kraken daran wichtig?</div>
-                    <ul>
-                        <li><b>Segmentierung:</b> Erkennt Layout, Textregionen, Zeilen und Lesereihenfolge.</li>
-                        <li><b>Recognition:</b> Liest den eigentlichen Text aus den erkannten Zeilen.</li>
-                        <li><b>Modelle:</b> Segmentierung und Recognition laufen über trainierte Modelle, die zum Material passen müssen.</li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <div class="h2">Typischer Kraken-Ablauf</div>
-                    <ol>
-                        <li>Bild vorbereiten</li>
-                        <li>Seite segmentieren (<code>segment</code>)</li>
-                        <li>Text erkennen (<code>ocr</code>)</li>
-                        <li>Ergebnis strukturieren / exportieren</li>
-                    </ol>
-                    In Bottled Kraken sind genau diese Schritte in die Oberfläche übertragen:
-                    zuerst Segmentierungs-Modell, dann Recognition-Modell, danach OCR und Export.<br>
-                </div>
-
-                <div class="card">
-                    <div class="h2">Wichtige Stärken von Kraken</div>
-                    <ul>
-                        <li>trainierbare Layoutanalyse, Lesereihenfolge und Zeichenerkennung</li>
-                        <li>Unterstützung für Rechts-nach-Links, BiDi und Top-to-Bottom</li>
-                        <li>Ausgabe als ALTO, PageXML, abbyyXML und hOCR</li>
-                        <li>Wort-Bounding-Boxes und Character-Cuts</li>
-                        <li>öffentliche Modellsammlung über HTRMoPo / Zenodo</li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <div class="h2">Modelle</div><br>
-                    Kraken arbeitet modellbasiert.
-                    Gute Ergebnisse hängen stark davon ab, dass das Modell zum Dokumenttyp passt.
-                    Ein auf historische Drucke trainiertes Modell ist meist deutlich besser für historische Drucke
-                    als ein allgemeines Modell für modernes Material.
-                </div>
-
-                <div class="card">
-                    <div class="h2">Schnittstellen</div>
-                    Kraken bietet zwei Hauptwege:
-                    <ul>
-                        <li><b>CLI:</b> für klassische OCR-Workflows</li>
-                        <li><b>Python-API:</b> für eigene Anwendungen und Integrationen</li>
-                    </ul>
-                    Bottled Kraken nutzt die Python-Bibliothek direkt im Programmcode.<br>
-                </div>
-
-                <div class="card">
-                    <div class="h2">Offizielle Quellen</div>
-                    <ul>
-                        <li><a href="https://github.com/mittagessen/kraken">GitHub: mittagessen/kraken</a></li>
-                        <li><a href="https://kraken.re/7.0/index.html">Kraken Dokumentation 7.0</a></li>
-                        <li><a href="https://kraken.re/7.0/getting_started.html">Getting Started</a></li>
-                        <li><a href="https://kraken.re/7.0/user_guide/models.html">Model Management</a></li><br>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <div class="h2">Hinweis</div>
-                    <span class="badge">Wichtig</span><br>
-                    Wenn die Segmentierung nicht sauber ist, wird auch die Recognition schlechter.
-                    Genau deshalb verwendet Bottled Kraken standardmäßig das "blla.mlmodell" anstatt des Legacy-
-                    Segmentierungs-Modells "pageseg".
-                </div>
-                """)
-
-        # ---------------------------------
-        # Seite 3: LM-Server
-        # ---------------------------------
-        page_lm = make_page("""
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        pre {
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 10px;
-            white-space: pre-wrap;
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 12px;
-        }
-        a {
-            color: #1d4ed8;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .muted {
-            color: #6b7280;
-        }
-        </style>
-
-        <div class="card">
-            <div class="h1">LM-Server / LM Studio</div><br>
-            Dieser Bereich ist für die <b>lokale Sprachmodell-Nachbearbeitung</b> gedacht.
-            Bottled Kraken kann dazu einen OpenAI-kompatiblen lokalen Server ansprechen.
-        </div>
-
-        <div class="card">
-            <div class="h2">Was macht LM Studio?</div><br>
-            LM Studio lädt ein lokales Sprachmodell auf deinem Rechner und kann dieses zusätzlich
-            über eine API bereitstellen. Bottled Kraken nutzt genau diese lokale API, um OCR-Zeilen
-            nachzubessern, ohne dass deine Texte an einen Cloud-Dienst gesendet werden.
-        </div>
-
-        <div class="card">
-            <div class="h2">LM Studio herunterladen</div><br>
-            Offizielle Download-Seite:<br>
-            <a href="https://lmstudio.ai/download">LM Studio Download</a><br>
-        </div>
-
-        <div class="card">
-            <div class="h2">Einrichtung mit LM Studio</div>
-            <ol>
-                <li>LM Studio installieren und starten</li>
-                <li>Im Discover-Bereich ein passendes Modell herunterladen</li>
-                <li>Das Modell laden</li>
-                <li>Den lokalen Server in LM Studio starten</li>
-                <li>In Bottled Kraken die LM-Server-URL eintragen oder per Scan erkennen lassen</li>
-            </ol>
-        </div>
-
-        <div class="card">
-            <div class="h2">Welche URL wird in Bottled Kraken eingetragen?</div>
-            Gültige Beispiele:
-            <pre>http://127.0.0.1:1234/v1
-http://localhost:8000/v1
-http://192.0.0.200:8000/v1</pre>
-
-            Typische Fälle:
-            <ul>
-                <li><b>LM Studio lokal auf demselben Rechner:</b> meist <code>http://127.0.0.1:1234/v1</code></li>
-                <li><b>vLLM lokal oder im Netzwerk:</b> häufig <code>http://HOST:8000/v1</code></li>
-                <li><b>Remote-Rechner:</b> entweder direkte Netzwerk-URL oder SSH-Tunnel</li>
-            </ul>
-        </div>
-
-        <div class="card">
-            <div class="h2">Hinweise</div>
-            <ul>
-                <li>Der Server muss laufen, bevor Bottled Kraken Modelle scannen kann.</li>
-                <li>Wenn mehrere Modelle verfügbar sind, kannst du in Bottled Kraken das gewünschte Modell auswählen.</li>
-                <li>Die LM-Überarbeitung ist optional und ergänzt die normale Kraken-OCR.</li>
-            </ul>
-            <div class="muted">
-                Besonders nützlich ist der LM-Schritt bei verrauschter OCR, historischen Schreibweisen
-                oder wenn einzelne Zeilen sprachlich geglättet werden sollen.
-            </div>
-        </div>
-        """)
-
-        # ---------------------------------
-        # Seite 4: SSH-Tunnel
-        # ---------------------------------
-        page_ssh = make_page("""
-        <style>
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
-        }
-        .card {
-            border: 1px solid #e3e7ef;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            background: #ffffff;
-        }
-        .h1 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #111827;
-        }
-        .h2 {
-            font-size: 15px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #1d4ed8;
-        }
-        pre {
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 10px;
-            white-space: pre-wrap;
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 12px;
-        }
-        </style>
-
-        <div class="card">
-            <div class="h1">Remote-Zugriff per SSH-Tunnel</div><br>
-            Ein SSH-Tunnel ist nützlich, wenn dein LM-Server auf einem anderen Rechner läuft,
-            dort aber nur an <code>127.0.0.1</code> gebunden ist und deshalb nicht direkt im Netzwerk erreichbar ist.
-        </div>
-
-        <div class="card">
-            <div class="h2">Was passiert dabei?</div><br>
-            Der Tunnel leitet einen lokalen Port deines Rechners an einen Port des entfernten Rechners weiter.
-            Für Bottled Kraken sieht es dann so aus, als würde der LM-Server lokal auf deinem eigenen Rechner laufen.
-        </div>
-
-        <div class="card">
-            <div class="h2">Beispiel</div><br>
-            Falls LM Studio oder vLLM auf dem Zielrechner nur lokal auf Port 1234 läuft:
-            <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>
-
-            Danach in Bottled Kraken verwenden:
-            <pre>http://127.0.0.1:1234/v1</pre>
-        </div>
-
-        <div class="card">
-            <div class="h2">Typischer Ablauf</div>
-            <ol>
-                <li>Auf dem Zielrechner LM Studio oder vLLM starten</li>
-                <li>Prüfen, auf welchem Port der lokale API-Server läuft</li>
-                <li>Vom eigenen Rechner den SSH-Tunnel öffnen</li>
-                <li>In Bottled Kraken die lokale Tunnel-URL eintragen</li>
-            </ol>
-        </div>
-
-        <div class="card">
-            <div class="h2">Wichtig</div>
-            <ul>
-                <li>In Bottled Kraken trägst du <b>nicht</b> den SSH-Befehl ein.</li>
-                <li>Du trägst immer die resultierende HTTP-URL ein, also zum Beispiel <code>http://127.0.0.1:1234/v1</code>.</li>
-                <li>Der SSH-Tunnel muss geöffnet bleiben, solange Bottled Kraken den Server nutzen soll.</li>
-            </ul>
-        </div>
-        """)
-
-        # ---------------------------------
-        # Seite 5: Whisper
-        # ---------------------------------
         page_whisper = QWidget()
         page_whisper_layout = QVBoxLayout(page_whisper)
         page_whisper_layout.setContentsMargins(0, 0, 0, 0)
         page_whisper_layout.setSpacing(8)
         page_whisper_layout.setAlignment(Qt.AlignTop)
 
-        browser_whisper_intro = make_page("""
-            <style>
-            body {
-                font-family: 'Segoe UI', Arial, sans-serif;
-                color: #1f2937;
-                line-height: 1.45;
-                margin: 0;
-            }
-            .card {
-                border: 1px solid #e3e7ef;
-                border-radius: 12px;
-                padding: 12px 14px;
-                margin-bottom: 8px;
-                background: #ffffff;
-            }
-            .hero {
-                border-left: 4px solid #2563eb;
-                background: #f8fbff;
-            }
-            .h1 {
-                font-size: 18px;
-                font-weight: 700;
-                margin: 0 0 6px 0;
-                color: #111827;
-            }
-            .h2 {
-                font-size: 14px;
-                font-weight: 700;
-                margin: 0 0 4px 0;
-                color: #1d4ed8;
-            }
-            p {
-                margin: 0 0 6px 0;
-            }
-            ul, ol {
-                margin: 4px 0 0 18px;
-                padding: 0;
-            }
-            li {
-                margin: 2px 0;
-            }
-            .muted {
-                color: #6b7280;
-            }
-            .model {
-                display: inline-block;
-                background: #eef2ff;
-                border: 1px solid #c7d2fe;
-                border-radius: 8px;
-                padding: 2px 8px;
-                font-weight: 600;
-                color: #3730a3;
-            }
-            </style>
+        whisper_intro_html = self._tr("help_html_whisper_intro")
 
-            <div class="card">
-                <div class="h1">Faster-Whisper</div>
-                <p>
-                    Faster-Whisper ist eine schnelle lokale Sprach-zu-Text-Erkennung.
-                    In Bottled Kraken kannst du damit einzelne OCR-Zeilen per Mikrofon
-                    neu einsprechen und direkt als Text übernehmen.
-                </p>
-            </div>
-
-            <div class="card">
-                <div class="h2">Wofür ist das nützlich?</div>
-                <ul>
-                    <li>wenn eine OCR-Zeile stark beschädigt oder falsch erkannt wurde</li>
-                    <li>wenn du einzelne Felder oder Namen schneller einsprechen als tippen möchtest</li>
-                    <li>wenn du Korrekturen gezielt zeilenweise durchführen willst</li>
-                </ul>
-            </div>
-
-            <div class="card">
-                <div class="h2">Was wird heruntergeladen?</div>
-                <p>
-                    Es wird das Modell <span class="model">Systran/faster-whisper-large-v3</span> geladen.
-                </p>
-                <p class="muted">
-                    Vor dem Download installiert Bottled Kraken die benötigten Python-Pakete automatisch.
-                    Der eigentliche Modell-Download läuft über die Hugging-Face-CLI <code>hf download</code>.
-                    Unter Linux und macOS wird dafür automatisch eine eigene venv-Umgebung genutzt.
-                </p>
-            </div>
-
-            <div class="card">
-                <div class="h2">Ablauf in Bottled Kraken</div>
-                <ol>
-                    <li>Whisper-Modell herunterladen oder vorhandenes Modell scannen</li>
-                    <li>Mikrofon auswählen</li>
-                    <li>Eine Zeile markieren</li>
-                    <li>Audioaufnahme starten</li>
-                    <li>Die gesprochene Eingabe wird lokal transkribiert und ersetzt die Zeile</li>
-                </ol>
-            </div>
-        """)
-
+        browser_whisper_intro = make_page(whisper_intro_html)
         browser_whisper_intro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         browser_whisper_intro.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         browser_whisper_intro.setMinimumHeight(260)
 
         page_whisper_layout.addWidget(browser_whisper_intro, 1)
 
-        btn_info = QLabel("<b>Whisper-Modell per Button herunterladen:</b>")
+        btn_info = QLabel(self._tr("help_whisper_download_label"))
         page_whisper_layout.addWidget(btn_info, 0)
 
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.setSpacing(6)
 
-        btn_windows = _small_btn("Windows")
-        btn_arch = _small_btn("Arch")
-        btn_debian = _small_btn("Debian")
-        btn_fedora = _small_btn("Fedora")
-        btn_mac = _small_btn("macOS")
+        btn_windows = _small_btn(self._tr("help_os_windows"))
+        btn_arch = _small_btn(self._tr("help_os_arch"))
+        btn_debian = _small_btn(self._tr("help_os_debian"))
+        btn_fedora = _small_btn(self._tr("help_os_fedora"))
+        btn_mac = _small_btn(self._tr("help_os_macos"))
 
         hf_cmd_browser = QTextBrowser()
         hf_cmd_browser.setReadOnly(True)
         hf_cmd_browser.setOpenExternalLinks(False)
         hf_cmd_browser.setFrameShape(QTextBrowser.NoFrame)
-        hf_cmd_browser.setHtml(f"<pre>{default_install_cmd}\n{default_download_cmd}</pre>")
-        hf_cmd_browser.setMinimumWidth(460)
+        hf_cmd_browser.setHtml(_help_pre(f"{default_install_cmd}\n{default_download_cmd}"))
+        hf_cmd_browser.setMinimumWidth(760)
         hf_cmd_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         hf_cmd_browser.setFixedHeight(96)
 
@@ -13927,8 +19582,8 @@ http://192.0.0.200:8000/v1</pre>
         hf_hint_browser.setReadOnly(True)
         hf_hint_browser.setOpenExternalLinks(False)
         hf_hint_browser.setFrameShape(QTextBrowser.NoFrame)
-        hf_hint_browser.setHtml("<pre>" + self._whisper_system_hint("windows") + "</pre>")
-        hf_hint_browser.setMinimumWidth(460)
+        hf_hint_browser.setHtml(_help_pre(self._whisper_system_hint("windows")))
+        hf_hint_browser.setMinimumWidth(760)
         hf_hint_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         hf_hint_browser.setFixedHeight(112)
 
@@ -13937,8 +19592,8 @@ http://192.0.0.200:8000/v1</pre>
                 install_cmd, download_cmd = self._whisper_button_commands(platform_name)
                 system_hint = self._whisper_system_hint(platform_name)
 
-                hf_cmd_browser.setHtml(f"<pre>{install_cmd}\n{download_cmd}</pre>")
-                hf_hint_browser.setHtml(f"<pre>{system_hint}</pre>")
+                hf_cmd_browser.setHtml(_help_pre(f"{install_cmd}\n{download_cmd}"))
+                hf_hint_browser.setHtml(_help_pre(system_hint))
 
                 self.download_whisper_model_from_help_dialog(platform_name, dlg)
 
@@ -13961,41 +19616,33 @@ http://192.0.0.200:8000/v1</pre>
         page_whisper_layout.addWidget(hf_cmd_browser, 0)
         page_whisper_layout.addWidget(hf_hint_browser, 0)
 
-        # ---------------------------------
-        # Seite 6: Tastenkürzel
-        # ---------------------------------
-        page_shortcuts = make_page(right_text)
+        shortcuts_html = self._tr("help_html_shortcuts")
 
-        # ---------------------------------
-        # Seite 7: Datenschutz
-        # ---------------------------------
-        page_data_protection = make_page(data_protection)
+        data_protection_html = self._tr("help_html_data_protection")
 
-        # ---------------------------------
-        # Seite 8: Rechtliches
-        # ---------------------------------
-        page_legal = make_page(legal_text)
+        legal_html = self._tr("help_html_legal")
 
-        # ---------------------------------
-        # Stack füllen
-        # ---------------------------------
-        stack.addWidget(page_quick)  # 0
-        stack.addWidget(page_kraken)  # 1
-        stack.addWidget(page_lm)  # 2
-        stack.addWidget(page_ssh)  # 3
-        stack.addWidget(page_whisper)  # 4
-        stack.addWidget(page_shortcuts)  # 5
-        stack.addWidget(page_data_protection)  # 6
-        stack.addWidget(page_legal)  # 7
+        stack.addWidget(make_page(quick_html))
+        stack.addWidget(make_page(kraken_html))
+        stack.addWidget(make_page(lm_server_html))
+        stack.addWidget(make_page(ssh_html))
+        stack.addWidget(page_whisper)
+        stack.addWidget(make_page(shortcuts_html))
+        stack.addWidget(make_page(data_protection_html))
+        stack.addWidget(make_page(legal_html))
 
-        nav_list.addItem("Ablauf")
-        nav_list.addItem("Kraken")
-        nav_list.addItem("LM-Server")
-        nav_list.addItem("SSH-Tunnel")
-        nav_list.addItem("Whisper")
-        nav_list.addItem("Tastenkürzel")
-        nav_list.addItem("Datenschutz")
-        nav_list.addItem("Rechtliches")
+        nav_items = [
+            self._tr("help_nav_quick"),
+            self._tr("help_nav_kraken"),
+            self._tr("help_nav_lm_server"),
+            self._tr("help_nav_ssh"),
+            self._tr("help_nav_whisper"),
+            self._tr("help_nav_shortcuts"),
+            self._tr("help_nav_data_protection"),
+            self._tr("help_nav_legal"),
+        ]
+        for label in nav_items:
+            nav_list.addItem(label)
 
         nav_list.currentRowChanged.connect(stack.setCurrentIndex)
         nav_list.setCurrentRow(0)
@@ -14007,10 +19654,310 @@ http://192.0.0.200:8000/v1</pre>
         layout.addWidget(scroll)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.button(QDialogButtonBox.Ok).setText(self._tr("btn_ok"))
         buttons.accepted.connect(dlg.accept)
         layout.addWidget(buttons)
 
         dlg.exec()
+
+    def _edited_images_output_dir(self, source_task: TaskItem) -> str:
+        """
+        Sammelordner für bearbeitete Bilder im gleichen Verzeichnis
+        wie die Ursprungsdatei.
+        """
+        src_dir = os.path.dirname(os.path.abspath(source_task.path))
+        out_dir = os.path.join(src_dir, "Bottled Kraken - edited pictures")
+        os.makedirs(out_dir, exist_ok=True)
+        return out_dir
+
+    def _save_edited_image_under_original(
+            self,
+            source_task: TaskItem,
+            pil_image: Image.Image,
+            suggested_name: str
+    ) -> str:
+        edit_dir = self._edited_images_output_dir(source_task)
+
+        src_stem = os.path.splitext(os.path.basename(source_task.path))[0]
+        safe_src_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', src_stem).strip('._') or "bild"
+        safe_suggested = re.sub(r'[^A-Za-z0-9._-]+', '_', suggested_name).strip('._') or "edit"
+
+        safe_base = f"{safe_src_stem}__{safe_suggested}"
+        out_path = os.path.join(edit_dir, f"{safe_base}.png")
+
+        counter = 2
+        while os.path.exists(out_path):
+            out_path = os.path.join(edit_dir, f"{safe_base}_{counter}.png")
+            counter += 1
+
+        pil_image.convert("RGB").save(out_path, format="PNG")
+        return out_path
+
+    def _insert_task_row(self, row: int, task: TaskItem):
+        row = max(0, min(row, self.queue_table.rowCount()))
+        self.queue_items.insert(row, task)
+        self.queue_table.insertRow(row)
+        num_item = QTableWidgetItem(str(row + 1))
+        num_item.setTextAlignment(Qt.AlignCenter)
+        num_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        name_item = QTableWidgetItem(task.display_name)
+        name_item.setData(Qt.UserRole, task.path)
+        name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+        status_item = QTableWidgetItem()
+        status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        self.queue_table.setItem(row, QUEUE_COL_NUM, num_item)
+        self.queue_table.setCellWidget(row, QUEUE_COL_CHECK, self._make_queue_checkbox_widget(False))
+        self.queue_table.setItem(row, QUEUE_COL_FILE, name_item)
+        self.queue_table.setItem(row, QUEUE_COL_STATUS, status_item)
+        self._update_queue_row(task.path)
+
+    def _selected_or_checked_tasks_for_edit(self) -> List[TaskItem]:
+        checked = self._checked_queue_tasks()
+        if checked:
+            return checked
+        return self._selected_queue_tasks()
+
+    def _create_edited_tasks_from_images(
+            self,
+            source_task: TaskItem,
+            result_images: List[Image.Image]
+    ) -> List[TaskItem]:
+        created = []
+
+        original_name = source_task.display_name or os.path.basename(source_task.path)
+        original_stem = os.path.splitext(original_name)[0]
+        safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', original_stem).strip('._') or "bild"
+
+        total = max(1, len(result_images))
+
+        for idx, img in enumerate(result_images, start=1):
+            label_name = f"edit_{safe_stem}_{idx}_{total}"
+
+            out_path = self._save_edited_image_under_original(
+                source_task=source_task,
+                pil_image=img,
+                suggested_name=label_name
+            )
+
+            new_task = TaskItem(
+                path=out_path,
+                display_name=os.path.basename(out_path),
+                status=STATUS_WAITING,
+                edited=False,
+                source_kind="image",
+                relative_path=""
+            )
+
+            # IMMER ans Ende der Queue
+            end_row = self.queue_table.rowCount()
+            self._insert_task_row(end_row, new_task)
+            created.append(new_task)
+
+        return created
+
+    def _apply_image_edit_settings_to_task(self, task: TaskItem, settings: ImageEditSettings) -> List[Image.Image]:
+        img = _load_image_color(task.path)
+        dlg = ImageEditDialog(img, task.display_name, self)
+        dlg.set_settings(settings)
+        dlg._accept_dialog()
+        return list(dlg.result_images or [])
+
+    def _load_task_into_edit_dialog(self, dlg: ImageEditDialog, task: TaskItem):
+        image = _load_image_color(task.path)
+        dlg.original_image = image.convert("RGB")
+        dlg.setWindowTitle(self._tr("image_edit_title", task.display_name))
+        dlg.rotation_angle = 0.0
+        dlg.erase_actions = []
+        dlg.canvas.crop_rect = None
+        dlg.canvas.separator = None
+        dlg.canvas.erase_rect = None
+        dlg.canvas.show_erase = False
+        dlg.canvas.erase_shape = ""
+
+        dlg.chk_crop.blockSignals(True)
+        dlg.chk_crop.setChecked(False)
+        dlg.chk_crop.blockSignals(False)
+
+        dlg.chk_split.blockSignals(True)
+        dlg.chk_split.setChecked(False)
+        dlg.chk_split.blockSignals(False)
+
+        dlg.chk_smart_split.blockSignals(True)
+        dlg.chk_smart_split.setChecked(False)
+        dlg.chk_smart_split.setEnabled(False)
+        dlg.chk_smart_split.blockSignals(False)
+
+        dlg.chk_gray.blockSignals(True)
+        dlg.chk_gray.setChecked(False)
+        dlg.chk_gray.blockSignals(False)
+
+        dlg.chk_contrast.blockSignals(True)
+        dlg.chk_contrast.setChecked(False)
+        dlg.chk_contrast.blockSignals(False)
+
+        dlg.chk_erase_rect.blockSignals(True)
+        dlg.chk_erase_ellipse.blockSignals(True)
+        dlg.chk_erase_rect.setChecked(False)
+        dlg.chk_erase_ellipse.setChecked(False)
+        dlg.chk_erase_rect.blockSignals(False)
+        dlg.chk_erase_ellipse.blockSignals(False)
+
+        dlg._refresh_preview(reset_zoom=True)
+
+    def _finalize_image_edit_batch(self, status_message: str):
+        self._refresh_queue_numbers()
+        self._fit_queue_columns_exact()
+        self._update_queue_hint()
+        self.status_bar.showMessage(status_message)
+
+    def _apply_image_edit_to_targets(
+            self,
+            targets: List[TaskItem],
+            settings: ImageEditSettings,
+            status_message: str
+    ):
+        if not targets:
+            self._finalize_image_edit_batch(status_message)
+            return
+
+        total = len(targets)
+
+        progress = QProgressDialog(
+            self._tr("image_edit_batch_label", 0, total, ""),
+            self._tr("btn_cancel"),
+            0,
+            total,
+            self
+        )
+        progress.setWindowTitle(self._tr("image_edit_batch_title"))
+        progress.setWindowModality(Qt.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(True)
+        progress.setAutoReset(True)
+        progress.setValue(0)
+
+        try:
+            for idx, tgt in enumerate(targets, start=1):
+                progress.setLabelText(
+                    self._tr("image_edit_batch_label", idx, total, tgt.display_name)
+                )
+                progress.setValue(idx - 1)
+                QCoreApplication.processEvents()
+
+                if progress.wasCanceled():
+                    self._finalize_image_edit_batch(self._tr("msg_image_edit_batch_cancelled"))
+                    return
+
+                try:
+                    result_images = self._apply_image_edit_settings_to_task(tgt, settings)
+                    if result_images:
+                        self._create_edited_tasks_from_images(tgt, result_images)
+                except Exception as e:
+                    self._log(self._tr_log("log_image_edit_error", tgt.display_name, e))
+
+                progress.setValue(idx)
+                QCoreApplication.processEvents()
+
+                if progress.wasCanceled():
+                    self._finalize_image_edit_batch(self._tr("msg_image_edit_batch_cancelled"))
+                    return
+        finally:
+            progress.close()
+
+        self._finalize_image_edit_batch(status_message)
+
+    def open_image_edit_dialog(self):
+        task = self._current_task()
+        if not task or not task.path or not os.path.exists(task.path):
+            QMessageBox.information(self, self._tr("info_title"),
+                                    self._tr("warn_select_image_or_pdf_page"))
+            return
+
+        try:
+            image = _load_image_color(task.path)
+        except Exception as e:
+            QMessageBox.warning(self, self._tr("warn_title"), f"Bild konnte nicht geladen werden:\n{e}")
+            return
+
+        current_row = self.queue_table.currentRow()
+        if current_row < 0:
+            current_row = 0
+
+        def _prev(dialog):
+            row = self.queue_table.currentRow()
+            if row > 0:
+                self.queue_table.selectRow(row - 1)
+                next_task = self._current_task()
+                if next_task and os.path.exists(next_task.path):
+                    self._load_task_into_edit_dialog(dialog, next_task)
+
+        def _next(dialog):
+            row = self.queue_table.currentRow()
+            if row < self.queue_table.rowCount() - 1:
+                self.queue_table.selectRow(row + 1)
+                next_task = self._current_task()
+                if next_task and os.path.exists(next_task.path):
+                    self._load_task_into_edit_dialog(dialog, next_task)
+
+        def _apply_selected(dialog):
+            settings = dialog.get_settings()
+            targets = self._selected_or_checked_tasks_for_edit()
+            if not targets:
+                QMessageBox.information(self, self._tr("info_title"), self._tr("info_no_marked_images_found"))
+                return
+
+            self._apply_image_edit_to_targets(
+                targets,
+                settings,
+                self._tr("msg_image_edit_selected_applied")
+            )
+
+        def _apply_all(dialog):
+            settings = dialog.get_settings()
+            self._apply_image_edit_to_targets(
+                list(self.queue_items),
+                settings,
+                self._tr("msg_image_edit_all_applied")
+            )
+
+        dlg = ImageEditDialog(
+            image,
+            task.display_name or os.path.basename(task.path),
+            self,
+            on_prev=_prev,
+            on_next=_next,
+            on_apply_selected=_apply_selected,
+            on_apply_all=_apply_all,
+        )
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        if getattr(dlg, "_batch_apply_used", False):
+            return
+
+        result_images = [im for im in getattr(dlg, "result_images", []) if isinstance(im, Image.Image)]
+        if not result_images:
+            return
+
+        created = self._create_edited_tasks_from_images(task, result_images)
+
+        self._refresh_queue_numbers()
+        self._fit_queue_columns_exact()
+        self._update_queue_hint()
+
+        if created:
+            new_row = next(
+                (r for r in range(self.queue_table.rowCount())
+                 if self.queue_table.item(r, QUEUE_COL_FILE).data(Qt.UserRole) == created[0].path),
+                current_row
+            )
+            self.queue_table.selectRow(new_row)
+            self.preview_image(created[0].path)
+
+        self.status_bar.showMessage(self._tr("image_edit_applied_single_status"))
+        self._log(self._tr_log("log_image_edit_applied", task.display_name, len(result_images)))
 
     def closeEvent(self, event):
         if self._is_closing:
@@ -14021,6 +19968,10 @@ http://192.0.0.200:8000/v1</pre>
         self.setEnabled(False)
 
         try:
+            self.settings.setValue("ui/language", self.current_lang)
+            self.settings.setValue("ui/theme", self.current_theme)
+            self.settings.sync()
+
             self._request_all_workers_stop()
 
             # Threads kurz sauber auslaufen lassen
@@ -14036,6 +19987,7 @@ http://192.0.0.200:8000/v1</pre>
 
         except Exception:
             event.accept()
+
 
 
 def main():
@@ -14069,7 +20021,6 @@ def main():
         pass
 
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
