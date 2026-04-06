@@ -7,6 +7,7 @@ os.environ["LC_ALL"] = "C.UTF-8"
 
 import sys
 import locale
+import platform
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -896,12 +897,12 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'msg_device_cuda': 'CUDA',
         'msg_device_rocm': 'ROCm',
         'msg_device_mps': 'MPS',
-        'act_add_files': 'Dateien laden...',
+        'act_add_files': 'Datei(en) laden...',
         'act_download_model': 'Modell herunterladen (Zenodo)',
         'act_delete': 'Löschen',
         'act_rename': 'Umbenennen...',
         'act_clear_queue': 'Wartebereich leeren',
-        'act_start_ocr': 'Start Kraken OCR',
+        'act_start_ocr': 'Starte Kraken OCR',
         'act_stop_ocr': 'Stopp',
         'act_re_ocr': 'Wiederholen',
         'act_re_ocr_tip': 'Ausgewählte Datei(en) erneut verarbeiten',
@@ -973,11 +974,11 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'export_choose_mode_title': 'Export',
         'export_mode_all': 'Alle Dateien exportieren',
         'export_mode_selected': 'Ausgewählte Dateien exportieren',
-        'export_select_files_title': 'Dateien auswählen',
-        'export_select_files_hint': 'Wählen Sie die Dateien für den Export:',
+        'export_select_files_title': 'Datei(en) auswählen',
+        'export_select_files_hint': 'Wählen Sie die Datei(en) für den Export:',
         'export_choose_folder': 'Zielordner wählen',
         'export_need_done': 'Mindestens eine ausgewählte Datei ist nicht fertig verarbeitet.',
-        'export_none_selected': 'Keine Dateien ausgewählt.',
+        'export_none_selected': 'Keine Datei(en) ausgewählt.',
         'undo_nothing': 'Nichts zum Rückgängig machen.',
         'redo_nothing': 'Nichts zum Wiederholen.',
         'overlay_only_after_ocr': 'Overlay-Bearbeitung ist erst nach abgeschlossener OCR möglich.',
@@ -1022,12 +1023,12 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'msg_project_loaded': 'Projekt geladen: {}',
         'warn_project_load_failed': 'Projekt konnte nicht geladen werden: {}',
         'warn_project_save_failed': 'Projekt konnte nicht gespeichert werden: {}',
-        'warn_project_file_missing': 'Datei nicht gefunden: {}',
+        'warn_project_file_missing': 'Datei(en) nicht gefunden: {}',
         'line_menu_swap_with': 'Zeile tauschen mit…',
-        'dlg_swap_title': 'Zeilen tauschen',
+        'dlg_swap_title': 'Zeile(n) tauschen',
         'dlg_swap_label': 'Mit Zeilennummer tauschen (1…):',
-        'act_voice_fill': 'Zeilen diktieren',
-        'act_voice_fill_tip': 'Zeilen per Mikrofon mit faster-whisper überschreiben',
+        'act_voice_fill': 'Zeile(n) diktieren',
+        'act_voice_fill_tip': 'Zeile(n) per Mikrofon mit faster-whisper überschreiben',
         'act_voice_stop': 'Aufnahme stoppen',
         'msg_voice_started': 'Sprachaufnahme gestartet...',
         'msg_voice_stopped': 'Sprachaufnahme beendet. Transkribiere...',
@@ -1037,7 +1038,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'warn_voice_model_missing': 'Faster-Whisper-Modellordner wurde nicht gefunden.',
         'status_voice_recording': 'Spricht ein...',
         'lines_tree_header': 'Erkannte Zeilen und Wörter',
-        'col_loaded_files': 'Geladene Dateien',
+        'col_loaded_files': 'Geladene Datei(en)',
         'btn_rec_model_empty': 'Rec-Modell: -',
         'btn_rec_model_value': 'Rec-Modell: {}',
         'btn_seg_model_empty': 'Seg-Modell: -',
@@ -1078,7 +1079,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'log_ai_multi_started': 'LM-Mehrfachzeilenüberarbeitung gestartet: {} | Zeilen {}',
         'dlg_ai_multi_title': 'KI-Mehrfachzeilenüberarbeitung',
         'dlg_ai_multi_status': 'Überarbeite {} ausgewählte Zeilen …',
-        'btn_import_lines': 'Zeilen importieren',
+        'btn_import_lines': 'Zeile(n) importieren',
         'btn_import_lines_tip': 'Erkannte Zeilen aus TXT/JSON laden',
         'act_import_lines_current': 'Für aktuelles Bild',
         'act_import_lines_selected': 'Für ausgewählte Bilder',
@@ -1086,7 +1087,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'warn_import_unsupported_format': 'Nicht unterstütztes Importformat: {}',
         'warn_import_no_usable_lines': 'Die Importdatei enthält keine verwertbaren Zeilen.',
         'info_no_current_image_loaded': 'Kein aktuelles Bild geladen.',
-        'dlg_import_lines_current': 'Zeilen importieren',
+        'dlg_import_lines_current': 'Zeile(n) importieren',
         'info_no_images_selected_or_marked': 'Keine Bilder ausgewählt oder markiert.',
         'dlg_import_lines_selected': 'Zeilen-Dateien für ausgewählte Bilder laden',
         'info_no_images_loaded': 'Keine Bilder geladen.',
@@ -1244,18 +1245,18 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
         'ai_err_bad_scheme': 'Nicht unterstütztes Schema: {}',
         'ai_err_invalid_endpoint': 'Ungültiger Endpoint.',
-        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Studio.',
-        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Studio: {}',
+        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Server.',
+        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Server: {}',
         'ai_err_http': 'HTTP-Fehler: {}\n{}',
-        'ai_err_server_unreachable': 'LM Studio nicht erreichbar: {}',
-        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_server_unreachable': 'LM Server nicht erreichbar: {}',
+        'ai_err_no_choices': 'LM Server lieferte keine choices. Antwort:\n{}',
         'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
                                       'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
                                       'verwende ein nicht-thinkendes Modell.',
         'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
                                  'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
                                  'reasoning.',
-        'ai_err_no_content': 'LM Studio lieferte keinen verwertbaren Antwortinhalt.',
+        'ai_err_no_content': 'LM Server lieferte keinen verwertbaren Antwortinhalt.',
         'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
         'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
         'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
@@ -1383,11 +1384,12 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                             '            <div class="card">\n'
                             '                <div class="h2">Modelle</div><br>\n'
                             '                Kraken arbeitet modellbasiert.\n'
-                            '                Gute Ergebnisse hängen stark davon ab, dass das Modell zum Dokumenttyp '
-                            'passt.\n'
-                            '                Ein auf historische Drucke trainiertes Modell ist meist deutlich besser '
-                            'für historische Drucke\n'
+                            '                Gute Ergebnisse hängen stark davon ab, dass das Modell zum Dokumenttyp passt.\n'
+                            '                Ein auf historische Drucke trainiertes Modell ist meist deutlich besser für historische Drucke\n'
                             '                als ein allgemeines Modell für modernes Material.\n'
+                            '                <br><br>\n'
+                            '                <b>Hinweis:</b> Heruntergeladene Kraken-Modelle sollten sich im gleichen Ordner / Verzeichnis\n'
+                            '                wie die EXE-Datei befinden, damit Bottled Kraken sie automatisch finden kann.\n'
                             '            </div>\n'
                             '\n'
                             '            <div class="card">\n'
@@ -1435,8 +1437,8 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                '\n'
                                '            <div class="card">\n'
                                '                <div class="h2">Direkt kompatible Basis-URLs in Bottled Kraken</div>\n'
-                               '                <pre>LM Studio:              http://localhost:1234/v1\n'
-                               'Ollama (OpenAI-kompat.): http://localhost:11434/v1\n'
+                               '<pre>LM Studio:              http://localhost:1234/v1\n'
+                               'Ollama:                 http://localhost:11434/v1\n'
                                'GPT4All:                http://localhost:4891/v1\n'
                                'text-generation-webui:  http://127.0.0.1:5000/v1\n'
                                'LocalAI:                http://localhost:8080/v1</pre>\n'
@@ -1598,22 +1600,35 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                          'deinem eigenen Rechner laufen.\n'
                          '            </div>\n'
                          '\n'
-                         '            <div class="card">\n'
-                         '                <div class="h2">Beispiel</div>\n'
-                         '                <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
-                         '                Danach in Bottled Kraken verwenden:\n'
-                         '                <pre>http://127.0.0.1:1234/v1</pre>\n'
-                         '            </div>\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Beispiel</div><br>\n'
+                            '                <b>Auf Rechner A</b><br>\n'
+                            '                LM Studio starten<br>\n'
+                            '                IP von Rechner A herausfinden, z. B. mit:\n'
+                            '                <pre>ipconfig\n'
+                            'hostname -I</pre>\n'
+                            '                Angenommen, die IP ist:\n'
+                            '                <pre>192.168.1.50</pre>\n'
+                            '                <b>Auf Rechner B</b><br>\n'
+                            '                SSH-Tunnel öffnen:\n'
+                            '                <pre>ssh -N -L 1234:127.0.0.1:1234 user@192.168.1.50</pre>\n'
+                            '                <b>Auf Rechner B benutzen</b><br>\n'
+                            '                Test im Terminal:\n'
+                            '                <pre>curl http://127.0.0.1:1234/v1/models</pre>\n'
+                            '                In Bottled Kraken eintragen:\n'
+                            '                <pre>http://127.0.0.1:1234/v1</pre>\n'
+                            '            </div>\n'
                          '\n'
-                         '            <div class="card">\n'
-                         '                <div class="h2">Typischer Ablauf</div>\n'
-                         '                <ol>\n'
-                         '                    <li>Auf dem Zielrechner LM Studio oder vLLM starten</li>\n'
-                         '                    <li>Prüfen, auf welchem Port der lokale API-Server läuft</li>\n'
-                         '                    <li>Vom eigenen Rechner den SSH-Tunnel öffnen</li>\n'
-                         '                    <li>In Bottled Kraken die lokale Tunnel-URL eintragen</li>\n'
-                         '                </ol>\n'
-                         '            </div>\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Typischer Ablauf</div>\n'
+                            '                <ol>\n'
+                            '                    <li>Auf Rechner A LM Studio starten</li>\n'
+                            '                    <li>Auf Rechner A die IP-Adresse herausfinden</li>\n'
+                            '                    <li>Auf Rechner B den SSH-Tunnel mit dieser IP öffnen</li>\n'
+                            '                    <li>Auf Rechner B testen, ob <code>http://127.0.0.1:1234/v1/models</code> erreichbar ist</li>\n'
+                            '                    <li>In Bottled Kraken <code>http://127.0.0.1:1234/v1</code> eintragen</li>\n'
+                            '                </ol>\n'
+                            '            </div>\n'
                          '\n'
                          '            <div class="card warn">\n'
                          '                <div class="h2">Wichtig</div>\n'
@@ -2216,7 +2231,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_whisper_set_path': 'Whisper-Modellpfad festlegen...',
         'act_whisper_set_mic': 'Mikrofon auswählen...',
         'act_scan_local': 'Lokal scannen',
-        'no_models_scan': '(keine Modelle – bitte scannen)',
+        'no_models_scan': '(Keine Modelle – Verzeichnis überprüfen)',
         'act_unload_model': 'Modell entladen',
         'msg_whisper_model_unloaded': 'Whisper-Modell entladen.',
         'msg_whisper_models_found': '{} Whisper-Modell(e) gefunden.',
@@ -2237,8 +2252,8 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_clear_ai_model': 'LM-Modell entfernen',
         'msg_ai_model_choice_cleared': 'LM-Modellwahl gelöscht.',
         'msg_ai_model_removed': 'LM-Modell entfernt.',
-        'header_rec_models': 'Recognition-Modelle',
-        'header_seg_models': 'Segmentierungs-Modelle',
+        'header_rec_models': 'Recognition-Modelle:',
+        'header_seg_models': 'Segmentierungs-Modelle:',
         'status_rec_model': 'Recognition-Modell: {}',
         'status_seg_model': 'Segmentierungs-Modell: {}',
         'msg_ai_model_id_cleared_auto': 'KI-Modell-ID geleert, localhost-Autoerkennung aktiv.',
@@ -2855,18 +2870,18 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
         'ai_err_bad_scheme': 'Unsupported scheme: {}',
         'ai_err_invalid_endpoint': 'Invalid endpoint.',
-        'ai_err_timeout': 'Timeout while waiting for LM Studio.',
-        'ai_err_invalid_json': 'Invalid JSON response from LM Studio: {}',
+        'ai_err_timeout': 'Timeout while waiting for LM server.',
+        'ai_err_invalid_json': 'Invalid JSON response from LM server: {}',
         'ai_err_http': 'HTTP error: {}\n{}',
-        'ai_err_server_unreachable': 'LM Studio not reachable: {}',
-        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_server_unreachable': 'LM server not reachable: {}',
+        'ai_err_no_choices': 'LM server lieferte keine choices. Antwort:\n{}',
         'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
                                       'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
                                       'verwende ein nicht-thinkendes Modell.',
         'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
                                  'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
                                  'reasoning.',
-        'ai_err_no_content': 'LM Studio returned no usable response content.',
+        'ai_err_no_content': 'LM server returned no usable response content.',
         'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
         'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
         'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
@@ -2988,9 +3003,11 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                             '        <div class="h2">Models</div><br>\n'
                             '        Kraken works in a model-based way.\n'
                             '        Good results depend heavily on the model matching the document type.\n'
-                            '        A model trained on historical prints is usually much better for historical '
-                            'prints\n'
+                            '        A model trained on historical prints is usually much better for historical prints\n'
                             '        than a general model for modern material.\n'
+                            '        <br><br>\n'
+                            '        <b>Note:</b> Downloaded Kraken models should be placed in the same folder / directory\n'
+                            '        as the EXE file so that Bottled Kraken can find them automatically.\n'
                             '    </div>\n'
                             '\n'
                             '    <div class="card">\n'
@@ -3036,7 +3053,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                '            <div class="card">\n'
                                '                <div class="h2">Base URLs that fit Bottled Kraken directly</div>\n'
                                '                <pre>LM Studio:               http://localhost:1234/v1\n'
-                               'Ollama (OpenAI compat):  http://localhost:11434/v1\n'
+                               'Ollama:                  http://localhost:11434/v1\n'
                                'GPT4All:                 http://localhost:4891/v1\n'
                                'text-generation-webui:   http://127.0.0.1:5000/v1\n'
                                'LocalAI:                 http://localhost:8080/v1</pre>\n'
@@ -3195,22 +3212,35 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                          'own computer.\n'
                          '    </div>\n'
                          '\n'
-                         '    <div class="card">\n'
-                         '        <div class="h2">Example</div>\n'
-                         '        <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
-                         '        Then use this in Bottled Kraken:\n'
-                         '        <pre>http://127.0.0.1:1234/v1</pre>\n'
-                         '    </div>\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Example</div><br>\n'
+                            '                <b>On machine A</b><br>\n'
+                            '                Start LM Studio<br>\n'
+                            '                Find the IP address of machine A, for example with:\n'
+                            '                <pre>ipconfig\n'
+                            'hostname -I</pre>\n'
+                            '                Assume the IP address is:\n'
+                            '                <pre>192.168.1.50</pre>\n'
+                            '                <b>On machine B</b><br>\n'
+                            '                Open the SSH tunnel:\n'
+                            '                <pre>ssh -N -L 1234:127.0.0.1:1234 user@192.168.1.50</pre>\n'
+                            '                <b>Use on machine B</b><br>\n'
+                            '                Test in the terminal:\n'
+                            '                <pre>curl http://127.0.0.1:1234/v1/models</pre>\n'
+                            '                Enter this in Bottled Kraken:\n'
+                            '                <pre>http://127.0.0.1:1234/v1</pre>\n'
+                            '            </div>\n'
                          '\n'
-                         '    <div class="card">\n'
-                         '        <div class="h2">Typical workflow</div>\n'
-                         '        <ol>\n'
-                         '            <li>Start LM Studio or vLLM on the target machine</li>\n'
-                         '            <li>Check which port the local API server is using</li>\n'
-                         '            <li>Open the SSH tunnel from your own computer</li>\n'
-                         '            <li>Enter the local tunnel URL in Bottled Kraken</li>\n'
-                         '        </ol>\n'
-                         '    </div>\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Typical workflow</div>\n'
+                            '        <ol>\n'
+                            '            <li>Start LM Studio on machine A</li>\n'
+                            '            <li>Find the IP address of machine A</li>\n'
+                            '            <li>Open the SSH tunnel on machine B using that IP address</li>\n'
+                            '            <li>Test on machine B whether <code>http://127.0.0.1:1234/v1/models</code> is reachable</li>\n'
+                            '            <li>Enter <code>http://127.0.0.1:1234/v1</code> in Bottled Kraken</li>\n'
+                            '        </ol>\n'
+                            '    </div>\n'
                          '\n'
                          '    <div class="card warn">\n'
                          '        <div class="h2">Important</div>\n'
@@ -3276,27 +3306,27 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                '        <div class="h1">Keyboard Shortcuts</div>\n'
                                '        <table class="table">\n'
                                '            <tr><td class="section" colspan="2">Project</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + S</span></td><td>Save project</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Save project '
+                               '            <tr><td><span class="kbd">Ctrl + S</span></td><td>Save project</td></tr>\n'
+                               '            <tr><td><span class="kbd">Ctrl + Shift + S</span></td><td>Save project '
                                'as</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + I</span></td><td>Load project</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + E</span></td><td>Export</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + Q</span></td><td>Quit program</td></tr>\n'
+                               '            <tr><td><span class="kbd">Ctrl + I</span></td><td>Load project</td></tr>\n'
+                               '            <tr><td><span class="kbd">Ctrl + E</span></td><td>Export</td></tr>\n'
+                               '            <tr><td><span class="kbd">Ctrl + Q</span></td><td>Quit program</td></tr>\n'
                                '\n'
                                '            <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + K</span></td><td>Start Kraken '
+                               '            <tr><td><span class="kbd">Ctrl + K</span></td><td>Start Kraken '
                                'OCR</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + P</span></td><td>Stop Kraken '
+                               '            <tr><td><span class="kbd">Ctrl + P</span></td><td>Stop Kraken '
                                'OCR</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + L</span></td><td>Start LM '
+                               '            <tr><td><span class="kbd">Ctrl + L</span></td><td>Start LM '
                                'revision</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + M</span></td><td>Start Faster-Whisper / '
+                               '            <tr><td><span class="kbd">Ctrl + M</span></td><td>Start Faster-Whisper / '
                                'microphone</td></tr>\n'
                                '\n'
                                '            <tr><td class="section" colspan="2">Selection</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + A</span></td><td>Select everything in the '
+                               '            <tr><td><span class="kbd">Ctrl + A</span></td><td>Select everything in the '
                                'current context</td></tr>\n'
-                               '            <tr><td><span class="kbd">Entf</span></td><td>Delete selected lines or '
+                               '            <tr><td><span class="kbd">Del</span></td><td>Delete selected lines or '
                                'boxes</td></tr>\n'
                                '\n'
                                '            <tr><td class="section" colspan="2">Function Keys</td></tr>\n'
@@ -3794,7 +3824,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_whisper_set_path': 'Set Whisper model path...',
         'act_whisper_set_mic': 'Choose microphone...',
         'act_scan_local': 'Scan locally',
-        'no_models_scan': '(no models – please scan)',
+        'no_models_scan': 'No models - check directory',
         'act_unload_model': 'Unload model',
         'msg_whisper_model_unloaded': 'Whisper model unloaded.',
         'msg_whisper_models_found': '{} Whisper model(s) found.',
@@ -3815,8 +3845,8 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_clear_ai_model': 'Remove LM model',
         'msg_ai_model_choice_cleared': 'LM model selection cleared.',
         'msg_ai_model_removed': 'LM model removed.',
-        'header_rec_models': 'Recognition models',
-        'header_seg_models': 'Segmentation models',
+        'header_rec_models': 'Recognition models:',
+        'header_seg_models': 'Segmentation models:',
         'status_rec_model': 'Recognition model: {}',
         'status_seg_model': 'Segmentation model: {}',
         'msg_ai_model_id_cleared_auto': 'AI model ID cleared, localhost auto-detection active.',
@@ -4432,18 +4462,18 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
         'ai_err_bad_scheme': 'Nicht unterstütztes Schema: {}',
         'ai_err_invalid_endpoint': 'Ungültiger Endpoint.',
-        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Studio.',
-        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Studio: {}',
+        'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Server.',
+        'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Server: {}',
         'ai_err_http': 'HTTP-Fehler: {}\n{}',
-        'ai_err_server_unreachable': 'LM Studio nicht erreichbar: {}',
-        'ai_err_no_choices': 'LM Studio lieferte keine choices. Antwort:\n{}',
+        'ai_err_server_unreachable': 'LM Server nicht erreichbar: {}',
+        'ai_err_no_choices': 'LM Server lieferte keine choices. Antwort:\n{}',
         'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen '
                                       'JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder '
                                       'verwende ein nicht-thinkendes Modell.',
         'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. '
                                  'Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne '
                                  'reasoning.',
-        'ai_err_no_content': 'LM Studio lieferte keinen verwertbaren Antwortinhalt.',
+        'ai_err_no_content': 'LM Server lieferte keinen verwertbaren Antwortinhalt.',
         'ai_err_page_invalid_json': 'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}',
         'ai_err_page_invalid_lines': "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}",
         'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
@@ -4567,15 +4597,16 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                             '        </ul>\n'
                             '    </div>\n'
                             '\n'
-                            '    <div class="card">\n'
-                            '        <div class="h2">Modèles</div><br>\n'
-                            '        Kraken fonctionne de manière basée sur des modèles.\n'
-                            '        La qualité des résultats dépend fortement de l’adéquation entre le modèle et le '
-                            'type de document.\n'
-                            '        Un modèle entraîné sur des imprimés historiques est en général nettement meilleur '
-                            'pour ce type de documents\n'
-                            '        qu’un modèle général destiné à des documents modernes.\n'
-                            '    </div>\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Modèles</div><br>\n'
+                            '                Kraken fonctionne avec des modèles.\n'
+                            '                La qualité du résultat dépend fortement de l’adéquation du modèle au type de document.\n'
+                            '                Un modèle entraîné sur des imprimés historiques est généralement bien meilleur pour ce type de documents\n'
+                            '                qu’un modèle généraliste pour des documents modernes.\n'
+                            '                <br><br>\n'
+                            '                <b>Remarque :</b> Les modèles Kraken téléchargés doivent se trouver dans le même dossier / répertoire\n'
+                            '                que le fichier EXE afin que Bottled Kraken puisse les trouver automatiquement.\n'
+                            '            </div>\n'
                             '\n'
                             '    <div class="card">\n'
                             '        <div class="h2">Interfaces</div><br>\n'
@@ -4623,11 +4654,11 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                '\n'
                                '    <div class="card">\n'
                                '        <div class="h2">URLs de base directement adaptées à Bottled Kraken</div>\n'
-                               '        <pre>LM Studio :              http://localhost:1234/v1\n'
-                               'Ollama (compat. OpenAI) : http://localhost:11434/v1\n'
-                               'GPT4All :                http://localhost:4891/v1\n'
-                               'text-generation-webui :  http://127.0.0.1:5000/v1\n'
-                               'LocalAI :                http://localhost:8080/v1</pre>\n'
+                               '        <pre>LM Studio:              http://localhost:1234/v1\n'
+                               'Ollama:                 http://localhost:11434/v1\n'
+                               'GPT4All:                http://localhost:4891/v1\n'
+                               'text-generation-webui:  http://127.0.0.1:5000/v1\n'
+                               'LocalAI:                http://localhost:8080/v1</pre>\n'
                                '        <div class="muted">\n'
                                '            Important : avec Ollama, il faut saisir dans Bottled Kraken l’URL '
                                '<b>compatible OpenAI</b> en <code>/v1</code>, et non la route brute '
@@ -4782,22 +4813,35 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                          'localement sur ton propre ordinateur.\n'
                          '    </div>\n'
                          '\n'
-                         '    <div class="card">\n'
-                         '        <div class="h2">Exemple</div>\n'
-                         '        <pre>ssh -L 1234:127.0.0.1:1234 USER@192.0.0.200</pre>\n'
-                         '        Puis utiliser dans Bottled Kraken :\n'
-                         '        <pre>http://127.0.0.1:1234/v1</pre>\n'
-                         '    </div>\n'
+                            '            <div class="card">\n'
+                            '                <div class="h2">Exemple</div><br>\n'
+                            '                <b>Sur la machine A</b><br>\n'
+                            '                Démarrer LM Studio<br>\n'
+                            '                Trouver l’adresse IP de la machine A, par exemple avec :\n'
+                            '                <pre>ipconfig\n'
+                            'hostname -I</pre>\n'
+                            '                Supposons que l’adresse IP soit :\n'
+                            '                <pre>192.168.1.50</pre>\n'
+                            '                <b>Sur la machine B</b><br>\n'
+                            '                Ouvrir le tunnel SSH :\n'
+                            '                <pre>ssh -N -L 1234:127.0.0.1:1234 user@192.168.1.50</pre>\n'
+                            '                <b>À utiliser sur la machine B</b><br>\n'
+                            '                Test dans le terminal :\n'
+                            '                <pre>curl http://127.0.0.1:1234/v1/models</pre>\n'
+                            '                Saisir ceci dans Bottled Kraken :\n'
+                            '                <pre>http://127.0.0.1:1234/v1</pre>\n'
+                            '            </div>\n'
                          '\n'
-                         '    <div class="card">\n'
-                         '        <div class="h2">Déroulement typique</div>\n'
-                         '        <ol>\n'
-                         '            <li>Démarrer LM Studio ou vLLM sur la machine cible</li>\n'
-                         '            <li>Vérifier sur quel port le serveur API local fonctionne</li>\n'
-                         '            <li>Ouvrir le tunnel SSH depuis ton propre ordinateur</li>\n'
-                         '            <li>Saisir l’URL locale du tunnel dans Bottled Kraken</li>\n'
-                         '        </ol>\n'
-                         '    </div>\n'
+                            '    <div class="card">\n'
+                            '        <div class="h2">Déroulement typique</div>\n'
+                            '        <ol>\n'
+                            '            <li>Démarrer LM Studio sur la machine A</li>\n'
+                            '            <li>Trouver l’adresse IP de la machine A</li>\n'
+                            '            <li>Ouvrir le tunnel SSH sur la machine B avec cette adresse IP</li>\n'
+                            '            <li>Tester sur la machine B si <code>http://127.0.0.1:1234/v1/models</code> est accessible</li>\n'
+                            '            <li>Saisir <code>http://127.0.0.1:1234/v1</code> dans Bottled Kraken</li>\n'
+                            '        </ol>\n'
+                            '    </div>\n'
                          '\n'
                          '    <div class="card warn">\n'
                          '        <div class="h2">Important</div>\n'
@@ -4861,51 +4905,36 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                    '        </ol>\n'
                                    '    </div>\n',
         'help_html_shortcuts': '\n'
-                               '    <div class="card">\n'
-                               '        <div class="h1">Raccourcis clavier</div>\n'
-                               '        <table class="table">\n'
-                               '            <tr><td class="section" colspan="2">Projet</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + S</span></td><td>Enregistrer le '
-                               'projet</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + Shift + S</span></td><td>Enregistrer le '
-                               'projet sous</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + I</span></td><td>Charger le '
-                               'projet</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + E</span></td><td>Exporter</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + Q</span></td><td>Quitter le '
-                               'programme</td></tr>\n'
-                               '\n'
-                               '            <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + K</span></td><td>Démarrer Kraken '
-                               'OCR</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + P</span></td><td>Arrêter Kraken '
-                               'OCR</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + L</span></td><td>Démarrer la révision '
-                               'LM</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + M</span></td><td>Démarrer Faster-Whisper '
-                               '/ microphone</td></tr>\n'
-                               '\n'
-                               '            <tr><td class="section" colspan="2">Sélection</td></tr>\n'
-                               '            <tr><td><span class="kbd">Strg + A</span></td><td>Tout sélectionner dans '
-                               'le contexte actuel</td></tr>\n'
-                               '            <tr><td><span class="kbd">Entf</span></td><td>Supprimer les lignes ou '
-                               'boîtes sélectionnées</td></tr>\n'
-                               '\n'
-                               '            <tr><td class="section" colspan="2">Touches de fonction</td></tr>\n'
-                               '            <tr><td><span class="kbd">F1</span></td><td>Aide des raccourcis</td></tr>\n'
-                               '            <tr><td><span class="kbd">F2</span></td><td>Charger le modèle de '
-                               'reconnaissance</td></tr>\n'
-                               '            <tr><td><span class="kbd">F3</span></td><td>Charger le modèle de '
-                               'segmentation</td></tr>\n'
-                               '            <tr><td><span class="kbd">F4</span></td><td>Saisir l’URL du serveur '
-                               'LM</td></tr>\n'
-                               '            <tr><td><span class="kbd">F5</span></td><td>Démarrer le scan LM</td></tr>\n'
-                               '            <tr><td><span class="kbd">F6</span></td><td>Scanner les modèles Whisper + '
-                               'définir le premier microphone</td></tr>\n'
-                               '            <tr><td><span class="kbd">F7</span></td><td>Afficher / masquer la fenêtre '
-                               'de log</td></tr>\n'
-                               '        </table>\n'
-                               '    </div>\n',
+                       '    <div class="card">\n'
+                       '        <div class="h1">Raccourcis clavier</div>\n'
+                       '        <table class="table">\n'
+                       '            <tr><td class="section" colspan="2">Projet</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + S</span></td><td>Enregistrer le projet</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + Maj + S</span></td><td>Enregistrer le projet sous</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + I</span></td><td>Charger un projet</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + E</span></td><td>Exporter</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + Q</span></td><td>Quitter le programme</td></tr>\n'
+                       '\n'
+                       '            <tr><td class="section" colspan="2">OCR &amp; LM</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + K</span></td><td>Démarrer l’OCR Kraken</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + P</span></td><td>Arrêter l’OCR Kraken</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + L</span></td><td>Démarrer la révision LM</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + M</span></td><td>Démarrer Faster-Whisper / microphone</td></tr>\n'
+                       '\n'
+                       '            <tr><td class="section" colspan="2">Sélection</td></tr>\n'
+                       '            <tr><td><span class="kbd">Ctrl + A</span></td><td>Tout sélectionner dans le contexte actuel</td></tr>\n'
+                       '            <tr><td><span class="kbd">Suppr</span></td><td>Supprimer les lignes ou boîtes sélectionnées</td></tr>\n'
+                       '\n'
+                       '            <tr><td class="section" colspan="2">Touches de fonction</td></tr>\n'
+                       '            <tr><td><span class="kbd">F1</span></td><td>Aide des raccourcis</td></tr>\n'
+                       '            <tr><td><span class="kbd">F2</span></td><td>Charger le modèle de reconnaissance</td></tr>\n'
+                       '            <tr><td><span class="kbd">F3</span></td><td>Charger le modèle de segmentation</td></tr>\n'
+                       '            <tr><td><span class="kbd">F4</span></td><td>Saisir l’URL du serveur LM</td></tr>\n'
+                       '            <tr><td><span class="kbd">F5</span></td><td>Lancer la détection LM</td></tr>\n'
+                       '            <tr><td><span class="kbd">F6</span></td><td>Scanner les modèles Whisper + définir le premier microphone</td></tr>\n'
+                       '            <tr><td><span class="kbd">F7</span></td><td>Afficher / masquer la fenêtre de log</td></tr>\n'
+                       '        </table>\n'
+                       '    </div>\n',
         'help_html_data_protection': '\n'
                                      '    <div class="card warn">\n'
                                      '        <div class="h1">Protection des données</div><br>\n'
@@ -5379,7 +5408,7 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_whisper_set_path': 'Définir le chemin du modèle Whisper...',
         'act_whisper_set_mic': 'Choisir le microphone...',
         'act_scan_local': 'Scanner localement',
-        'no_models_scan': '(aucun modèle – veuillez scanner)',
+        'no_models_scan': 'Aucun modèle - vérifier le répertoire',
         'act_unload_model': 'Décharger le modèle',
         'msg_whisper_model_unloaded': 'Modèle Whisper déchargé.',
         'msg_whisper_models_found': '{} modèle(s) Whisper trouvé(s).',
@@ -5400,8 +5429,8 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
         'act_clear_ai_model': 'Retirer le modèle LM',
         'msg_ai_model_choice_cleared': 'Sélection du modèle LM effacée.',
         'msg_ai_model_removed': 'Modèle LM retiré.',
-        'header_rec_models': 'Modèles de reconnaissance',
-        'header_seg_models': 'Modèles de segmentation',
+        'header_rec_models': 'Modèles de reconnaissance:',
+        'header_seg_models': 'Modèles de segmentation:',
         'status_rec_model': 'Modèle de reconnaissance : {}',
         'status_seg_model': 'Modèle de segmentation : {}',
         'msg_ai_model_id_cleared_auto': 'Identifiant du modèle IA effacé, auto-détection localhost active.',
@@ -5631,9 +5660,173 @@ TRANSLATIONS = {'de': {'dlg_filter_img': 'Bilder/PDF (*.png *.jpg *.jpeg *.tif *
                                      '        '}}
 
 ADDITIONAL_TRANSLATIONS = {
-    "de": {},
-    "en": {},
-    "fr": {},
+    "de": {
+        "btn_line_search": "Suche",
+        "btn_line_search_tooltip": "In den erkannten Zeilen suchen",
+        "line_search_placeholder": "Wort oder Text eingeben...",
+        "line_search_tooltip": "In den erkannten Zeilen nach Wörtern suchen",
+        "help_hw_card_title": "Hardwarevoraussetzungen",
+        "help_hw_badge": "System-Check",
+        "help_hw_intro": "Schnelle Einschätzung für Kraken, LM-Überarbeitung und Whisper auf diesem Rechner.",
+        "help_hw_h2_detected": "Erkannte Hardware",
+        "help_hw_h2_usage": "Status: Verwendbarkeit",
+        "help_hw_h2_components": "Komponentencheck",
+        "help_hw_h2_requirements": "Mindest- und empfohlene Voraussetzungen",
+
+        "help_hw_col_area": "Bereich",
+        "help_hw_col_min": "Minimum",
+        "help_hw_col_rec": "Empfohlen",
+
+        "help_hw_label_threads": "Threads",
+        "help_hw_label_vram": "VRAM",
+        "help_hw_label_kraken": "Kraken OCR",
+        "help_hw_label_lm": "LM-Überarbeitung",
+        "help_hw_label_whisper": "Whisper",
+        "help_hw_label_all": "Alles zusammen",
+
+        "help_hw_gpu_none": "Keine nutzbare GPU erkannt",
+        "help_hw_unknown": "unbekannt",
+        "help_hw_vram_unknown": "nicht verfügbar",
+        "help_hw_vram_shared": "geteilt / nicht direkt abgefragt",
+        "help_hw_fmt_gb": "{:.1f} GB",
+
+        "help_hw_status_good": "gut nutzbar",
+        "help_hw_status_usable_slow": "nutzbar, aber eher langsam",
+        "help_hw_status_limited": "nutzbar, aber eingeschränkt",
+        "help_hw_status_limited_cpu": "nur eingeschränkt im CPU-Betrieb",
+        "help_hw_status_weak": "Hardware eher zu schwach",
+
+        "help_hw_component_ok": "ok",
+        "help_hw_component_borderline": "grenzwertig",
+        "help_hw_component_not_enough": "nicht ausreichend",
+
+        "help_hw_req_kraken_min": "2+ CPU-Threads, 4+ GB RAM, GPU optional",
+        "help_hw_req_kraken_rec": "4+ CPU-Threads, 8+ GB RAM, GPU optional",
+
+        "help_hw_req_lm_min": "4+ CPU-Threads, 8+ GB RAM, 6+ GB VRAM für kleine lokale Modelle",
+        "help_hw_req_lm_rec": "6+ CPU-Threads, 16+ GB RAM, 8+ bis 12+ GB VRAM",
+
+        "help_hw_req_whisper_min": "4+ CPU-Threads, 6+ GB RAM, 4+ GB VRAM optional für GPU-Betrieb",
+        "help_hw_req_whisper_rec": "6+ CPU-Threads, 8+ GB RAM, 6+ GB VRAM für schnelle GPU-Nutzung",
+
+        "help_hw_req_all_min": "4+ CPU-Threads, 8+ GB RAM, 6+ GB VRAM wenn LM/Whisper auf GPU laufen sollen",
+        "help_hw_req_all_rec": "8+ CPU-Threads, 16+ GB RAM, 8+ bis 12+ GB VRAM",
+
+        "help_hw_req_note": "Hinweis: Vor allem die LM-Überarbeitung hängt stark vom geladenen Modell und dessen Quantisierung ab.",
+        "help_hw_note": "Die Einschätzung ist eine interne Bottled-Kraken-Heuristik und keine harte technische Sperre."
+    },
+
+    "en": {
+        "btn_line_search": "Search",
+        "btn_line_search_tooltip": "Search in recognized lines",
+        "line_search_placeholder": "Enter word or text...",
+        "line_search_tooltip": "Search words in recognized lines",
+        "help_hw_card_title": "Hardware requirements",
+        "help_hw_badge": "System check",
+        "help_hw_intro": "Quick estimate for Kraken, LM revision, and Whisper on this computer.",
+        "help_hw_h2_detected": "Detected hardware",
+        "help_hw_h2_usage": "Status: usability",
+        "help_hw_h2_components": "Component check",
+        "help_hw_h2_requirements": "Minimum and recommended requirements",
+
+        "help_hw_col_area": "Area",
+        "help_hw_col_min": "Minimum",
+        "help_hw_col_rec": "Recommended",
+
+        "help_hw_label_threads": "Threads",
+        "help_hw_label_vram": "VRAM",
+        "help_hw_label_kraken": "Kraken OCR",
+        "help_hw_label_lm": "LM revision",
+        "help_hw_label_whisper": "Whisper",
+        "help_hw_label_all": "Everything together",
+
+        "help_hw_gpu_none": "No usable GPU detected",
+        "help_hw_unknown": "unknown",
+        "help_hw_vram_unknown": "not available",
+        "help_hw_vram_shared": "shared / not queried directly",
+        "help_hw_fmt_gb": "{:.1f} GB",
+
+        "help_hw_status_good": "works well",
+        "help_hw_status_usable_slow": "usable, but rather slow",
+        "help_hw_status_limited": "usable, but limited",
+        "help_hw_status_limited_cpu": "only limited in CPU mode",
+        "help_hw_status_weak": "hardware is likely too weak",
+
+        "help_hw_component_ok": "ok",
+        "help_hw_component_borderline": "borderline",
+        "help_hw_component_not_enough": "not sufficient",
+
+        "help_hw_req_kraken_min": "2+ CPU threads, 4+ GB RAM, GPU optional",
+        "help_hw_req_kraken_rec": "4+ CPU threads, 8+ GB RAM, GPU optional",
+
+        "help_hw_req_lm_min": "4+ CPU threads, 8+ GB RAM, 6+ GB VRAM for small local models",
+        "help_hw_req_lm_rec": "6+ CPU threads, 16+ GB RAM, 8+ to 12+ GB VRAM",
+
+        "help_hw_req_whisper_min": "4+ CPU threads, 6+ GB RAM, 4+ GB VRAM optional for GPU use",
+        "help_hw_req_whisper_rec": "6+ CPU threads, 8+ GB RAM, 6+ GB VRAM for fast GPU use",
+
+        "help_hw_req_all_min": "4+ CPU threads, 8+ GB RAM, 6+ GB VRAM if LM/Whisper should run on GPU",
+        "help_hw_req_all_rec": "8+ CPU threads, 16+ GB RAM, 8+ to 12+ GB VRAM",
+
+        "help_hw_req_note": "Note: LM revision especially depends heavily on the loaded model and its quantization.",
+        "help_hw_note": "This estimate is an internal Bottled Kraken heuristic and not a hard technical lock."
+    },
+
+    "fr": {
+        "btn_line_search": "Recherche",
+        "btn_line_search_tooltip": "Rechercher dans les lignes reconnues",
+        "line_search_placeholder": "Saisir un mot ou un texte...",
+        "line_search_tooltip": "Rechercher des mots dans les lignes reconnues",
+        "help_hw_card_title": "Configuration matérielle",
+        "help_hw_badge": "Vérification système",
+        "help_hw_intro": "Estimation rapide pour Kraken, la révision LM et Whisper sur cet ordinateur.",
+        "help_hw_h2_detected": "Matériel détecté",
+        "help_hw_h2_usage": "Statut : utilisabilité",
+        "help_hw_h2_components": "Vérification des composants",
+        "help_hw_h2_requirements": "Configuration minimale et recommandée",
+
+        "help_hw_col_area": "Domaine",
+        "help_hw_col_min": "Minimum",
+        "help_hw_col_rec": "Recommandé",
+
+        "help_hw_label_threads": "Threads",
+        "help_hw_label_vram": "VRAM",
+        "help_hw_label_kraken": "Kraken OCR",
+        "help_hw_label_lm": "Révision LM",
+        "help_hw_label_whisper": "Whisper",
+        "help_hw_label_all": "Ensemble",
+
+        "help_hw_gpu_none": "Aucun GPU exploitable détecté",
+        "help_hw_unknown": "inconnu",
+        "help_hw_vram_unknown": "non disponible",
+        "help_hw_vram_shared": "partagée / non interrogée directement",
+        "help_hw_fmt_gb": "{:.1f} GB",
+
+        "help_hw_status_good": "bonne utilisation possible",
+        "help_hw_status_usable_slow": "utilisable, mais plutôt lent",
+        "help_hw_status_limited": "utilisable, mais limité",
+        "help_hw_status_limited_cpu": "seulement limité en mode CPU",
+        "help_hw_status_weak": "matériel probablement trop faible",
+
+        "help_hw_component_ok": "ok",
+        "help_hw_component_borderline": "limite",
+        "help_hw_component_not_enough": "insuffisant",
+
+        "help_hw_req_kraken_min": "2+ threads CPU, 4+ GB RAM, GPU optionnel",
+        "help_hw_req_kraken_rec": "4+ threads CPU, 8+ GB RAM, GPU optionnel",
+
+        "help_hw_req_lm_min": "4+ threads CPU, 8+ GB RAM, 6+ GB VRAM pour petits modèles locaux",
+        "help_hw_req_lm_rec": "6+ threads CPU, 16+ GB RAM, 8+ à 12+ GB VRAM",
+
+        "help_hw_req_whisper_min": "4+ threads CPU, 6+ GB RAM, 4+ GB VRAM optionnels pour l’usage GPU",
+        "help_hw_req_whisper_rec": "6+ threads CPU, 8+ GB RAM, 6+ GB VRAM pour une utilisation GPU rapide",
+
+        "help_hw_req_all_min": "4+ threads CPU, 8+ GB RAM, 6+ GB VRAM si LM/Whisper doivent fonctionner sur GPU",
+        "help_hw_req_all_rec": "8+ threads CPU, 16+ GB RAM, 8+ à 12+ GB VRAM",
+
+        "help_hw_req_note": "Remarque : la révision LM dépend fortement du modèle chargé et de sa quantification.",
+        "help_hw_note": "Cette estimation est une heuristique interne de Bottled Kraken et non un blocage technique strict."
+    },
 }
 
 for _lang, _values in ADDITIONAL_TRANSLATIONS.items():
@@ -9461,7 +9654,7 @@ class AIRevisionWorker(QThread):
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError(
-                f"LM Studio lieferte keine choices. Antwort:\n{json.dumps(data, ensure_ascii=False)[:3000]}"
+                f"LM Server lieferte keine choices. Antwort:\n{json.dumps(data, ensure_ascii=False)[:3000]}"
             )
 
         choice0 = choices[0] or {}
@@ -12060,9 +12253,6 @@ class ImageEditDialog(QDialog):
 
         if self.canvas.show_erase and old_erase:
             self.canvas.set_erase_from_orig(old_erase)
-        elif self.canvas.show_erase and self.canvas.erase_rect is None and self.canvas.view_image is not None:
-            w, h = self.canvas.view_image.size
-            self.canvas.erase_rect = QRectF(w * 0.35, h * 0.20, w * 0.25, h * 0.25)
 
         if self.chk_split.isChecked() and self.canvas.separator is None and self.canvas.view_image is not None:
             w, h = self.canvas.view_image.size
@@ -12131,6 +12321,7 @@ class ImageEditDialog(QDialog):
             return
 
         self.erase_actions.pop()
+        self.canvas.erase_rect = None
         self._refresh_preview(reset_zoom=False)
         self.canvas.setFocus()
 
@@ -12772,32 +12963,47 @@ class MainWindow(QMainWindow):
         self.lbl_lines = QLabel(self._tr("lbl_lines"))
 
         # Toolbar-Aktionen
-        self.act_add = QAction(QIcon.fromTheme("document-open"), self._tr("act_add_files"), self)
+        self.act_add = QAction(
+            self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton),
+            self._tr("act_add_files"),
+            self,
+        )
         self.act_add.triggered.connect(self.choose_files)
 
-        self.act_paste_files = QAction(self._tr("act_paste_clipboard"), self)
-        self.act_paste_files.setShortcut(QKeySequence.Paste)
-        self.act_paste_files.triggered.connect(self.paste_files_from_clipboard)
-        self.addAction(self.act_paste_files)
-
-        self.shortcut_paste_files_main = QShortcut(QKeySequence.Paste, self)
-        self.shortcut_paste_files_main.setContext(Qt.WindowShortcut)
-        self.shortcut_paste_files_main.activated.connect(self.paste_files_from_clipboard)
-
-        self.act_clear = QAction(QIcon.fromTheme("edit-clear"), self._tr("act_clear_queue"), self)
+        self.act_clear = QAction(
+            self._themed_or_standard_icon("edit-clear", QStyle.SP_DialogResetButton),
+            self._tr("act_clear_queue"),
+            self,
+        )
         self.act_clear.triggered.connect(self.clear_queue)
 
-        self.act_play = QAction(QIcon.fromTheme("media-playback-start"), self._tr("act_start_ocr"), self)
+        self.act_play = QAction(
+            self._themed_or_standard_icon("media-playback-start", QStyle.SP_MediaPlay),
+            self._tr("act_start_ocr"),
+            self,
+        )
         self.act_play.triggered.connect(self.start_ocr)
 
-        self.act_stop = QAction(QIcon.fromTheme("media-playback-stop"), self._tr("act_stop_ocr"), self)
+        self.act_stop = QAction(
+            self._themed_or_standard_icon("media-playback-stop", QStyle.SP_MediaStop),
+            self._tr("act_stop_ocr"),
+            self,
+        )
         self.act_stop.setEnabled(False)
         self.act_stop.triggered.connect(self.stop_ocr)
 
-        self.act_image_edit = QAction(QIcon.fromTheme("document-edit"), self._tr("act_image_edit"), self)
+        self.act_image_edit = QAction(
+            self._themed_or_standard_icon("edit-cut", QStyle.SP_FileDialogDetailedView),
+            self._tr("act_image_edit"),
+            self,
+        )
         self.act_image_edit.triggered.connect(self.open_image_edit_dialog)
 
-        self.act_project_load_toolbar = QAction(QIcon.fromTheme("document-open"), self._tr("menu_project_load"), self)
+        self.act_project_load_toolbar = QAction(
+            self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton),
+            self._tr("menu_project_load"),
+            self,
+        )
         self.act_project_load_toolbar.triggered.connect(self.load_project)
 
         self.act_ai_revise = QAction(self._tr("act_ai_revise"), self)
@@ -12922,16 +13128,21 @@ class MainWindow(QMainWindow):
         self.addAction(self.act_delete_context_sc)
 
         self.btn_rec_model = QPushButton(self._tr("btn_rec_model_empty"))
-        self.btn_rec_model.setIcon(QIcon.fromTheme("document-open"))
+        self.btn_rec_model.setIcon(
+            self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+        )
         self.btn_rec_model.clicked.connect(self.choose_rec_model)
 
         self.btn_seg_model = QPushButton(self._tr("btn_seg_model_empty"))
-        self.btn_seg_model.setIcon(QIcon.fromTheme("document-open"))
+        self.btn_seg_model.setIcon(
+            self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+        )
         self.btn_seg_model.clicked.connect(self.choose_seg_model)
 
         self.btn_theme_toggle = QToolButton()
         self.btn_theme_toggle.setCheckable(True)
         self.btn_theme_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.btn_theme_toggle.clicked.connect(self.toggle_theme)
 
         self.btn_lang_menu = QToolButton()
@@ -14931,6 +15142,85 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btn_theme_toggle"):
             self.btn_theme_toggle.setFixedWidth(target_height + 8)
 
+    def _icon_fg_color(self) -> QColor:
+        return QColor("#ffffff") if self.current_theme == "dark" else QColor("#000000")
+
+    def _tinted_theme_or_standard_icon(
+            self,
+            theme_name: str,
+            std_icon,
+            size: Optional[QSize] = None
+    ):
+        icon = QIcon.fromTheme(theme_name)
+        if icon.isNull():
+            icon = self.style().standardIcon(std_icon)
+
+        if icon.isNull():
+            return icon
+
+        if size is None:
+            if hasattr(self, "toolbar"):
+                size = self.toolbar.iconSize()
+            else:
+                size = QSize(16, 16)
+
+        src = icon.pixmap(size)
+        if src.isNull():
+            return icon
+
+        tinted = QPixmap(src.size())
+        tinted.fill(Qt.transparent)
+
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, src)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), self._icon_fg_color())
+        painter.end()
+
+        return QIcon(tinted)
+
+    def _themed_or_standard_icon(self, theme_name: str, std_icon):
+        icon = QIcon.fromTheme(theme_name)
+        if icon.isNull():
+            icon = self.style().standardIcon(std_icon)
+        return icon
+
+    def _set_primary_toolbar_icons(self):
+        if hasattr(self, "act_add"):
+            self.act_add.setIcon(
+                self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+            )
+
+        if hasattr(self, "act_project_load_toolbar"):
+            self.act_project_load_toolbar.setIcon(
+                self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+            )
+
+        if hasattr(self, "act_image_edit"):
+            self.act_image_edit.setIcon(
+                self._tinted_theme_or_standard_icon("edit-cut", QStyle.SP_FileDialogDetailedView)
+            )
+
+        if hasattr(self, "act_play"):
+            self.act_play.setIcon(
+                self._tinted_theme_or_standard_icon("media-playback-start", QStyle.SP_MediaPlay)
+            )
+
+        if hasattr(self, "act_stop"):
+            self.act_stop.setIcon(
+                self._tinted_theme_or_standard_icon("media-playback-stop", QStyle.SP_MediaStop)
+            )
+
+        if hasattr(self, "btn_rec_model"):
+            self.btn_rec_model.setIcon(
+                self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+            )
+
+        if hasattr(self, "btn_seg_model"):
+            self.btn_seg_model.setIcon(
+                self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton)
+            )
+
     def _set_secondary_button_icons(self):
         def themed_or_standard(theme_name: str, std_icon):
             icon = QIcon.fromTheme(theme_name)
@@ -14944,19 +15234,23 @@ class MainWindow(QMainWindow):
             )
 
         if hasattr(self, "btn_voice_fill"):
-            mic_icon = QIcon.fromTheme("audio-input-microphone")
-            if mic_icon.isNull():
-                mic_icon = self.style().standardIcon(QStyle.SP_MediaVolume)
-            self.btn_voice_fill.setIcon(mic_icon)
+            self.btn_voice_fill.setIcon(
+                self._tinted_theme_or_standard_icon("audio-input-microphone", QStyle.SP_MediaVolume)
+            )
 
         if hasattr(self, "btn_ai_revise_bottom"):
             self.btn_ai_revise_bottom.setIcon(
-                themed_or_standard("system-run", QStyle.SP_ArrowForward)
+                themed_or_standard("preferences-system", QStyle.SP_ComputerIcon)
+            )
+
+        if hasattr(self, "btn_line_search"):
+            self.btn_line_search.setIcon(
+                self._tinted_theme_or_standard_icon("system-search", QStyle.SP_FileDialogContentsView)
             )
 
         if hasattr(self, "btn_clear_queue"):
             self.btn_clear_queue.setIcon(
-                themed_or_standard("edit-clear", QStyle.SP_DialogResetButton)
+                self._tinted_theme_or_standard_icon("edit-clear", QStyle.SP_DialogResetButton)
             )
 
         if hasattr(self, "btn_toggle_log"):
@@ -16088,6 +16382,12 @@ class MainWindow(QMainWindow):
         self.btn_ai_revise_bottom.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.btn_ai_revise_bottom.clicked.connect(self.run_ai_revision)
 
+        self.btn_line_search = QToolButton()
+        self.btn_line_search.setText(self._tr("btn_line_search"))
+        self.btn_line_search.setToolTip(self._tr("btn_line_search_tooltip"))
+        self.btn_line_search.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_line_search.clicked.connect(self._toggle_line_search_popup)
+
         import_menu = QMenu(self)
 
         self.act_import_lines_current = QAction(self._tr("act_import_lines_current"), self)
@@ -16104,9 +16404,27 @@ class MainWindow(QMainWindow):
 
         self.btn_import_lines.setMenu(import_menu)
 
+        self.line_search_popup = QDialog(self, Qt.Popup | Qt.FramelessWindowHint)
+        self.line_search_popup.setModal(False)
+        self.line_search_popup.setObjectName("line_search_popup")
+
+        popup_layout = QVBoxLayout(self.line_search_popup)
+        popup_layout.setContentsMargins(6, 6, 6, 6)
+        popup_layout.setSpacing(0)
+
+        self.line_search_popup_edit = QLineEdit()
+        self.line_search_popup_edit.setClearButtonEnabled(True)
+        self.line_search_popup_edit.setPlaceholderText(self._tr("line_search_placeholder"))
+        self.line_search_popup_edit.setToolTip(self._tr("line_search_tooltip"))
+        self.line_search_popup_edit.setFixedWidth(260)
+        self.line_search_popup_edit.textChanged.connect(self._filter_lines_list)
+
+        popup_layout.addWidget(self.line_search_popup_edit)
+
         lines_head.addWidget(self.btn_import_lines)
         lines_head.addWidget(self.btn_voice_fill)
         lines_head.addWidget(self.btn_ai_revise_bottom)
+        lines_head.addWidget(self.btn_line_search)
         lines_head.addStretch(1)
 
         right.addLayout(lines_head)
@@ -16130,6 +16448,7 @@ class MainWindow(QMainWindow):
 
         self._make_toolbar_buttons_pushy()
         self._update_model_clear_buttons()
+        self._set_primary_toolbar_icons()
         self._set_secondary_button_icons()
 
         header = self.queue_table.horizontalHeader()
@@ -16140,6 +16459,113 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(QUEUE_COL_STATUS, QHeaderView.Interactive)
 
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
+
+    def _filter_lines_list(self, text: str = ""):
+        needle = (text or "").strip().casefold()
+
+        first_visible_row = None
+        current_row = self.list_lines.currentRow()
+
+        self.list_lines.blockSignals(True)
+        try:
+            for row in range(self.list_lines.count()):
+                it = self.list_lines.row_item(row)
+                if it is None:
+                    continue
+
+                hay = (it.text(1) or "").casefold()
+                visible = (not needle) or (needle in hay)
+                it.setHidden(not visible)
+
+                if visible and first_visible_row is None:
+                    first_visible_row = row
+
+            if first_visible_row is None:
+                self.list_lines.clearSelection()
+                self.canvas.select_indices([], center=False)
+                return
+
+            cur_item = self.list_lines.row_item(current_row) if current_row >= 0 else None
+            if cur_item is None or cur_item.isHidden():
+                self.list_lines.setCurrentRow(first_visible_row)
+        finally:
+            self.list_lines.blockSignals(False)
+
+        visible_selected_rows = []
+        for row in self._selected_line_rows():
+            it = self.list_lines.row_item(row)
+            if it is not None and not it.isHidden():
+                visible_selected_rows.append(row)
+
+        if visible_selected_rows:
+            self.canvas.select_indices(visible_selected_rows, center=False)
+        else:
+            row = self.list_lines.currentRow()
+            if row >= 0:
+                self.canvas.select_idx(row, center=False)
+            else:
+                self.canvas.select_indices([], center=False)
+
+    def _toggle_line_search_popup(self):
+        if not hasattr(self, "line_search_popup") or not hasattr(self, "btn_line_search"):
+            return
+
+        if self.line_search_popup.isVisible():
+            self.line_search_popup.hide()
+            return
+
+        self.line_search_popup.adjustSize()
+        popup_w = self.line_search_popup.sizeHint().width()
+        popup_h = self.line_search_popup.sizeHint().height()
+
+        btn_bottom_left = self.btn_line_search.mapToGlobal(
+            QPoint(0, self.btn_line_search.height() + 2)
+        )
+
+        main_top_left = self.mapToGlobal(self.rect().topLeft())
+        main_top_right = self.mapToGlobal(self.rect().topRight())
+        main_bottom_left = self.mapToGlobal(self.rect().bottomLeft())
+
+        margin = 8
+
+        # Rechts am Hauptfenster ausrichten
+        x = main_top_right.x() - popup_w - margin
+
+        # Nicht weiter links als das Hauptfenster
+        x = max(main_top_left.x() + margin, x)
+
+        # Standard: unter dem Button
+        y = btn_bottom_left.y()
+
+        # Sicherheit: auch am Bildschirm clampen
+        screen = self.windowHandle().screen() if self.windowHandle() else QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+
+            if x + popup_w > geo.right() - margin:
+                x = geo.right() - popup_w - margin
+            if x < geo.left() + margin:
+                x = geo.left() + margin
+
+            # Falls unten kein Platz mehr ist, oberhalb des Buttons anzeigen
+            if y + popup_h > geo.bottom() - margin:
+                y = self.btn_line_search.mapToGlobal(QPoint(0, -popup_h - 2)).y()
+
+            if y < geo.top() + margin:
+                y = geo.top() + margin
+
+        self.line_search_popup.move(QPoint(x, y))
+        self.line_search_popup.show()
+        self.line_search_popup.raise_()
+        self.line_search_popup.activateWindow()
+
+        if hasattr(self, "line_search_popup_edit"):
+            self.line_search_popup_edit.setFocus()
+            self.line_search_popup_edit.selectAll()
+
+    def _close_line_search_popup(self):
+        if hasattr(self, "line_search_popup") and self.line_search_popup.isVisible():
+            self.line_search_popup.hide()
 
     def on_ai_batch_file_done(self, path: str, revised_lines: list, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
@@ -16599,6 +17025,8 @@ class MainWindow(QMainWindow):
         app.setStyleSheet(_theme_app_qss(theme))
 
         self._update_toolbar_language_theme_ui()
+        self._set_primary_toolbar_icons()
+        self._set_secondary_button_icons()
 
     def toggle_theme(self):
         new_theme = "dark" if self.current_theme == "bright" else "bright"
@@ -16645,28 +17073,23 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btn_theme_toggle"):
             is_dark = self.current_theme == "dark"
             self.btn_theme_toggle.setChecked(is_dark)
-            self.btn_theme_toggle.setText("")
-
-            theme_icon = (
-                QIcon.fromTheme("weather-clear-night")
-                if is_dark
-                else QIcon.fromTheme("weather-clear")
-            )
-            if theme_icon.isNull():
-                theme_icon = self.style().standardIcon(QStyle.SP_DesktopIcon)
-
-            self.btn_theme_toggle.setIcon(theme_icon)
+            self.btn_theme_toggle.setText("🔅" if is_dark else "💡")
+            self.btn_theme_toggle.setIcon(QIcon())
             self.btn_theme_toggle.setToolTip(self._tr("toolbar_theme_tooltip"))
 
         if hasattr(self, "btn_lang_menu"):
             self.btn_lang_menu.setText(self._tr("toolbar_language"))
-            lang_icon = QIcon.fromTheme("preferences-desktop-locale")
-            if lang_icon.isNull():
-                lang_icon = QIcon.fromTheme("accessories-dictionary")
-            if lang_icon.isNull():
-                lang_icon = self.style().standardIcon(QStyle.SP_FileDialogContentsView)
 
-            self.btn_lang_menu.setIcon(lang_icon)
+            lang_theme_name = "preferences-desktop-locale"
+            if QIcon.fromTheme(lang_theme_name).isNull():
+                lang_theme_name = "accessories-dictionary"
+
+            self.btn_lang_menu.setIcon(
+                self._tinted_theme_or_standard_icon(
+                    lang_theme_name,
+                    QStyle.SP_FileDialogContentsView
+                )
+            )
             self.btn_lang_menu.setToolTip(self._tr("toolbar_language_tooltip"))
 
         if hasattr(self, "act_lang_de"):
@@ -16758,6 +17181,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btn_ai_revise_bottom"):
             self.btn_ai_revise_bottom.setText(self._tr("act_ai_revise"))
             self.btn_ai_revise_bottom.setToolTip(self._tr("act_ai_revise_tip"))
+        if hasattr(self, "btn_line_search"):
+            self.btn_line_search.setText(self._tr("btn_line_search"))
+            self.btn_line_search.setToolTip(self._tr("btn_line_search_tooltip"))
+        if hasattr(self, "line_search_popup_edit"):
+            self.line_search_popup_edit.setPlaceholderText(self._tr("line_search_placeholder"))
+            self.line_search_popup_edit.setToolTip(self._tr("line_search_tooltip"))
         if hasattr(self, "btn_clear_queue"):
             self.btn_clear_queue.setText(self._tr("act_clear_queue"))
         if hasattr(self, "btn_toggle_log"):
@@ -16817,6 +17246,7 @@ class MainWindow(QMainWindow):
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
         self._update_toolbar_language_theme_ui()
+        self._set_primary_toolbar_icons()
         self._set_secondary_button_icons()
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
 
@@ -16915,6 +17345,339 @@ class MainWindow(QMainWindow):
         caps["rocm"] = (rocm_avail, rocm_details if rocm_details else "ROCm")
         caps["mps"] = (mps_avail, mps_details if mps_details else "MPS")
         return caps
+
+    def _total_ram_bytes(self) -> int:
+        try:
+            if sys.platform.startswith("win"):
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    return int(stat.ullTotalPhys)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(os, "sysconf"):
+                pages = os.sysconf("SC_PHYS_PAGES")
+                page_size = os.sysconf("SC_PAGE_SIZE")
+                if isinstance(pages, int) and isinstance(page_size, int) and pages > 0 and page_size > 0:
+                    return int(pages * page_size)
+        except Exception:
+            pass
+
+        return 0
+
+    def _total_ram_gb(self) -> float:
+        ram_bytes = self._total_ram_bytes()
+        if ram_bytes <= 0:
+            return 0.0
+        return round(ram_bytes / (1024 ** 3), 1)
+
+    def _cpu_summary(self) -> Tuple[str, int]:
+        logical = os.cpu_count() or 1
+        name = ""
+
+        if sys.platform.startswith("win"):
+            try:
+                import winreg
+                key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+                )
+                name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+                name = " ".join(str(name).split()).strip()
+                if name:
+                    return name, logical
+            except Exception:
+                pass
+
+            try:
+                out = subprocess.check_output(
+                    ["wmic", "cpu", "get", "name"],
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore"
+                )
+                lines = [x.strip() for x in out.splitlines() if x.strip() and x.strip().lower() != "name"]
+                if lines:
+                    return lines[0], logical
+            except Exception:
+                pass
+
+        elif sys.platform == "darwin":
+            try:
+                out = subprocess.check_output(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore"
+                ).strip()
+                if out:
+                    return out, logical
+            except Exception:
+                pass
+
+        else:
+            try:
+                with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if ":" in line and line.lower().startswith("model name"):
+                            name = line.split(":", 1)[1].strip()
+                            if name:
+                                return name, logical
+            except Exception:
+                pass
+
+        try:
+            name = (platform.processor() or "").strip()
+        except Exception:
+            name = ""
+
+        if not name and sys.platform.startswith("win"):
+            name = os.environ.get("PROCESSOR_IDENTIFIER", "").strip()
+
+        if not name:
+            name = "CPU"
+
+        return name, logical
+
+    def _gpu_summary(self) -> Dict[str, object]:
+        caps = self._gpu_capabilities()
+
+        info = {
+            "gpu_ok": False,
+            "gpu_label": self._tr("help_hw_gpu_none"),
+            "gpu_vram_gb": 0.0,
+            "gpu_vram_text": self._tr("help_hw_vram_unknown"),
+        }
+
+        for key in ("cuda", "rocm", "mps"):
+            ok, detail = caps.get(key, (False, ""))
+            if not ok:
+                continue
+
+            info["gpu_ok"] = True
+            info["gpu_label"] = detail if detail else key.upper()
+
+            if key in ("cuda", "rocm"):
+                try:
+                    props = torch.cuda.get_device_properties(0)
+                    total_memory = int(getattr(props, "total_memory", 0) or 0)
+                    if total_memory > 0:
+                        vram_gb = round(total_memory / (1024 ** 3), 1)
+                        info["gpu_vram_gb"] = vram_gb
+                        info["gpu_vram_text"] = self._tr("help_hw_fmt_gb", vram_gb)
+                    else:
+                        info["gpu_vram_text"] = self._tr("help_hw_vram_unknown")
+                except Exception:
+                    info["gpu_vram_text"] = self._tr("help_hw_vram_unknown")
+            else:
+                info["gpu_vram_text"] = self._tr("help_hw_vram_shared")
+
+            break
+
+        return info
+
+    def _hardware_snapshot(self) -> Dict[str, object]:
+        cpu_name, cpu_threads = self._cpu_summary()
+        ram_gb = self._total_ram_gb()
+        gpu = self._gpu_summary()
+
+        return {
+            "cpu_name": cpu_name,
+            "cpu_threads": cpu_threads,
+            "ram_gb": ram_gb,
+            "gpu_ok": gpu["gpu_ok"],
+            "gpu_label": gpu["gpu_label"],
+            "gpu_vram_gb": gpu["gpu_vram_gb"],
+            "gpu_vram_text": gpu["gpu_vram_text"],
+        }
+
+    def _hardware_feature_status(self, hw: Dict[str, object], feature: str) -> Tuple[str, str]:
+        cpu_threads = int(hw.get("cpu_threads", 1) or 1)
+        ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
+        gpu_ok = bool(hw.get("gpu_ok", False))
+        gpu_vram_gb = float(hw.get("gpu_vram_gb", 0.0) or 0.0)
+
+        feature = (feature or "").lower().strip()
+
+        if feature == "kraken":
+            if cpu_threads >= 4 and ram_gb >= 8:
+                return "green", "help_hw_status_good"
+            if cpu_threads >= 2 and ram_gb >= 4:
+                return "yellow", "help_hw_status_usable_slow"
+            return "red", "help_hw_status_weak"
+
+        if feature == "lm":
+            if gpu_ok and gpu_vram_gb >= 8 and cpu_threads >= 6 and ram_gb >= 16:
+                return "green", "help_hw_status_good"
+            if gpu_ok and gpu_vram_gb >= 6 and cpu_threads >= 4 and ram_gb >= 8:
+                return "yellow", "help_hw_status_limited"
+            if (not gpu_ok) and cpu_threads >= 8 and ram_gb >= 16:
+                return "yellow", "help_hw_status_limited_cpu"
+            return "red", "help_hw_status_weak"
+
+        if feature == "whisper":
+            if gpu_ok and gpu_vram_gb >= 4 and ram_gb >= 8:
+                return "green", "help_hw_status_good"
+            if cpu_threads >= 6 and ram_gb >= 8:
+                return "green", "help_hw_status_good"
+            if cpu_threads >= 4 and ram_gb >= 6:
+                return "yellow", "help_hw_status_usable_slow"
+            return "red", "help_hw_status_weak"
+
+        return "red", "help_hw_status_weak"
+
+    def _hardware_component_status(self, hw: Dict[str, object], component: str) -> Tuple[str, str]:
+        cpu_threads = int(hw.get("cpu_threads", 1) or 1)
+        ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
+        gpu_ok = bool(hw.get("gpu_ok", False))
+        gpu_vram_gb = float(hw.get("gpu_vram_gb", 0.0) or 0.0)
+
+        component = (component or "").lower().strip()
+
+        if component == "cpu":
+            if cpu_threads >= 6:
+                return "green", "help_hw_component_ok"
+            if cpu_threads >= 4:
+                return "yellow", "help_hw_component_borderline"
+            return "red", "help_hw_component_not_enough"
+
+        if component == "gpu":
+            if gpu_ok and gpu_vram_gb >= 8:
+                return "green", "help_hw_component_ok"
+            if gpu_ok and (gpu_vram_gb >= 4 or gpu_vram_gb == 0):
+                return "yellow", "help_hw_component_borderline"
+            return "red", "help_hw_component_not_enough"
+
+        if component == "ram":
+            if ram_gb >= 16:
+                return "green", "help_hw_component_ok"
+            if ram_gb >= 8:
+                return "yellow", "help_hw_component_borderline"
+            return "red", "help_hw_component_not_enough"
+
+        return "red", "help_hw_component_not_enough"
+
+    def _status_dot_html(self, level: str) -> str:
+        colors = {
+            "green": "#16a34a",
+            "yellow": "#eab308",
+            "red": "#dc2626",
+        }
+        color = colors.get(level, "#6b7280")
+        return (
+            f'<span style="display:inline-block; width:12px; height:12px; '
+            f'border-radius:50%; background:{color}; margin-right:8px; '
+            f'vertical-align:middle;"></span>'
+        )
+
+    def _status_chip_html(self, level: str, text: str) -> str:
+        bg = {
+            "green": "#dcfce7",
+            "yellow": "#fef3c7",
+            "red": "#fee2e2",
+        }.get(level, "#e5e7eb")
+
+        fg = {
+            "green": "#166534",
+            "yellow": "#92400e",
+            "red": "#991b1b",
+        }.get(level, "#374151")
+
+        return (
+            f'<span style="display:inline-block; padding:2px 8px; '
+            f'border-radius:999px; background:{bg}; color:{fg}; '
+            f'font-weight:700; font-size:11px; white-space:nowrap;">{html.escape(text)}</span>'
+        )
+
+    def _build_hardware_requirements_help_html(self) -> str:
+        hw = self._hardware_snapshot()
+
+        kraken_level, kraken_key = self._hardware_feature_status(hw, "kraken")
+        lm_level, lm_key = self._hardware_feature_status(hw, "lm")
+        whisper_level, whisper_key = self._hardware_feature_status(hw, "whisper")
+
+        cpu_level, cpu_key = self._hardware_component_status(hw, "cpu")
+        gpu_level, gpu_key = self._hardware_component_status(hw, "gpu")
+        ram_level, ram_key = self._hardware_component_status(hw, "ram")
+
+        cpu_name = html.escape(str(hw.get("cpu_name", "CPU")))
+        cpu_threads = int(hw.get("cpu_threads", 1) or 1)
+        ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
+        gpu_label = html.escape(str(hw.get("gpu_label", self._tr("help_hw_gpu_none"))))
+        gpu_vram_text = html.escape(str(hw.get("gpu_vram_text", self._tr("help_hw_vram_unknown"))))
+
+        kraken_text = self._tr(kraken_key)
+        lm_text = self._tr(lm_key)
+        whisper_text = self._tr(whisper_key)
+
+        cpu_text = self._tr(cpu_key)
+        gpu_text = self._tr(gpu_key)
+        ram_text = self._tr(ram_key)
+
+        return (
+            '            <div class="card">\n'
+            f'                <div class="h2">{self._tr("help_hw_card_title")}</div>\n'
+            f'                <span class="badge">{self._tr("help_hw_badge")}</span>\n'
+            f'                <div class="small">{self._tr("help_hw_intro")}</div>\n'
+            '                <br>\n'
+            '                <table style="width:100%; border-collapse:separate; border-spacing:14px 0;">\n'
+            '                    <tr>\n'
+            '                        <td style="width:40%; vertical-align:top;">\n'
+            f'                            <div class="h2">{self._tr("help_hw_h2_detected")}</div>\n'
+            '                            <table class="table">\n'
+            f'                                <tr><td><b>CPU</b></td><td>{cpu_name}</td></tr>\n'
+            f'                                <tr><td><b>{self._tr("help_hw_label_threads")}</b></td><td>{cpu_threads}</td></tr>\n'
+            f'                                <tr><td><b>RAM</b></td><td>{self._tr("help_hw_fmt_gb", ram_gb)}</td></tr>\n'
+            f'                                <tr><td><b>GPU</b></td><td>{gpu_label}</td></tr>\n'
+            f'                                <tr><td><b>{self._tr("help_hw_label_vram")}</b></td><td>{gpu_vram_text}</td></tr>\n'
+            '                            </table>\n'
+            '                        </td>\n'
+            '                        <td style="width:30%; vertical-align:top;">\n'
+            f'                            <div class="h2">{self._tr("help_hw_h2_usage")}</div>\n'
+            '                            <table class="table">\n'
+            f'                                <tr><td><b>{self._tr("help_hw_label_kraken")}</b></td><td>{self._status_chip_html(kraken_level, kraken_text)}</td></tr>\n'
+            f'                                <tr><td><b>{self._tr("help_hw_label_lm")}</b></td><td>{self._status_chip_html(lm_level, lm_text)}</td></tr>\n'
+            f'                                <tr><td><b>{self._tr("help_hw_label_whisper")}</b></td><td>{self._status_chip_html(whisper_level, whisper_text)}</td></tr>\n'
+            '                            </table>\n'
+            '                        </td>\n'
+            '                        <td style="width:30%; vertical-align:top;">\n'
+            f'                            <div class="h2">{self._tr("help_hw_h2_components")}</div>\n'
+            '                            <table class="table">\n'
+            f'                                <tr><td><b>CPU</b></td><td>{self._status_chip_html(cpu_level, cpu_text)}</td></tr>\n'
+            f'                                <tr><td><b>GPU</b></td><td>{self._status_chip_html(gpu_level, gpu_text)}</td></tr>\n'
+            f'                                <tr><td><b>RAM</b></td><td>{self._status_chip_html(ram_level, ram_text)}</td></tr>\n'
+            '                            </table>\n'
+            '                        </td>\n'
+            '                    </tr>\n'
+            '                </table>\n'
+            '                <br>\n'
+            f'                <div class="h2">{self._tr("help_hw_h2_requirements")}</div>\n'
+            '                <table class="table">\n'
+            f'                    <tr><td class="section">{self._tr("help_hw_col_area")}</td><td class="section">{self._tr("help_hw_col_min")}</td><td class="section">{self._tr("help_hw_col_rec")}</td></tr>\n'
+            f'                    <tr><td><b>{self._tr("help_hw_label_kraken")}</b></td><td>{self._tr("help_hw_req_kraken_min")}</td><td>{self._tr("help_hw_req_kraken_rec")}</td></tr>\n'
+            f'                    <tr><td><b>{self._tr("help_hw_label_lm")}</b></td><td>{self._tr("help_hw_req_lm_min")}</td><td>{self._tr("help_hw_req_lm_rec")}</td></tr>\n'
+            f'                    <tr><td><b>{self._tr("help_hw_label_whisper")}</b></td><td>{self._tr("help_hw_req_whisper_min")}</td><td>{self._tr("help_hw_req_whisper_rec")}</td></tr>\n'
+            f'                    <tr><td><b>{self._tr("help_hw_label_all")}</b></td><td>{self._tr("help_hw_req_all_min")}</td><td>{self._tr("help_hw_req_all_rec")}</td></tr>\n'
+            '                </table>\n'
+            f'                <div class="small" style="margin-top:8px;">{self._tr("help_hw_req_note")}</div>\n'
+            f'                <div class="small" style="margin-top:4px;">{self._tr("help_hw_note")}</div>\n'
+            '            </div>\n'
+        )
 
     def _refresh_hw_menu_availability(self):
         caps = self._gpu_capabilities()
@@ -17477,6 +18240,7 @@ class MainWindow(QMainWindow):
             self.canvas.select_indices(rows, center=False)
 
     def _populate_lines_list(self, recs: List[RecordView], keep_row: Optional[int] = None):
+        self._close_line_search_popup()
         self.list_lines.blockSignals(True)
         self.list_lines.clear()
 
@@ -17512,6 +18276,9 @@ class MainWindow(QMainWindow):
                 self.list_lines.setCurrentRow(0)
             else:
                 self.list_lines.setCurrentRow(max(0, min(self.list_lines.count() - 1, keep_row)))
+
+        if hasattr(self, "line_search_edit"):
+            self._filter_lines_list(self.line_search_edit.text())
 
     def refresh_preview(self):
         if self.queue_table.currentRow() >= 0:
@@ -19533,7 +20300,7 @@ class MainWindow(QMainWindow):
 
         stack = QStackedWidget()
 
-        quick_html = self._tr("help_html_quick")
+        quick_html = self._tr("help_html_quick") + self._build_hardware_requirements_help_html()
 
         kraken_html = self._tr("help_html_kraken")
 
@@ -19988,8 +20755,6 @@ class MainWindow(QMainWindow):
         except Exception:
             event.accept()
 
-
-
 def main():
     if sys.platform.startswith("win"):
         try:
@@ -20011,7 +20776,7 @@ def main():
     if os.path.exists(icon_path):
         w.setWindowIcon(QIcon(icon_path))
 
-    w.show()
+    w.showMaximized()
     QCoreApplication.processEvents()
 
     try:
