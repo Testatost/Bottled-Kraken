@@ -102,7 +102,7 @@ Wenn dein lokaler LM-Server auf einem anderen Rechner läuft, dort aber nur an `
 Beispiel:
 
 ```bash
-ssh -N -L 1234:127.0.0.1:1234 user@192.168.1.50
+ssh -L 1234:127.0.0.1:1234 user@192.168.1.50
 ```
 
 Danach verwendest du in Bottled Kraken einfach:
