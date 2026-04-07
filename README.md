@@ -215,4 +215,4 @@ Wenn du eine GUI rund um Kraken suchst, die OCR nicht nur ausführt, sondern als
 
 ## Lizenz
 
-Dieses Repository steht unter **GPL-3.0**. Bitte beachte zusätzlich die Lizenzen der externen Modelle und Bibliotheken, die du zusammen mit der Anwendung verwendest.
+Dieses Repository steht unter **MIT**. Bitte beachte zusätzlich die Lizenzen der externen Modelle und Bibliotheken, die du zusammen mit der Anwendung verwendest.
