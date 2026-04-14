@@ -7,32 +7,44 @@
 
 [Kraken](https://github.com/mittagessen/kraken) · [faster-whisper](https://github.com/SYSTRAN/faster-whisper) · [Zenodo OCR-Modelle](https://zenodo.org/communities/ocr_models/)
 
-Bottled Kraken ist eine Desktop-OCR-Workbench auf Basis von Kraken. Das Projekt richtet sich an alle, die nicht nur schnell irgendeinen OCR-Text brauchen, sondern einen nachvollziehbaren Workflow: schwierige Scans vorbereiten, OCR ausführen, Zeilen prüfen, Segmentierung korrigieren, Text nachbearbeiten und das Ergebnis in brauchbaren Formaten exportieren.
+Bottled Kraken ist eine Desktop-OCR-Workbench auf Basis von **Kraken**.  
+Das Projekt richtet sich an alle, die nicht einfach nur schnell irgendeinen OCR-Text brauchen, sondern einen **nachvollziehbaren und bearbeitbaren Workflow**:
 
-Besonders sinnvoll ist Bottled Kraken für historische Drucke, Handschriften, Formulare und andere Seitenlayouts, bei denen ein rein automatischer OCR-Durchlauf meist nicht ausreicht.
+- schwierige Scans vorbereiten
+- OCR ausführen
+- Zeilen prüfen
+- Segmentierung korrigieren
+- Text nachbearbeiten
+- und Ergebnisse in brauchbaren Formaten exportieren
+
+Besonders sinnvoll ist Bottled Kraken für **historische Drucke, Handschriften, Formulare** und andere Seitenlayouts, bei denen ein rein automatischer OCR-Durchlauf oft nicht ausreicht.
 
 <p align="center">
-  <img src="update%20v2.9.png" alt="Bottled Kraken Screenshot" width="1000">
+  <img src="Bottled Kraken Screenshot.png" alt="Bottled Kraken Screenshot" width="1000">
 </p>
+
+---
 
 ## Ansatz
 
-Bottled Kraken verbindet mehrere Schritte, die sonst oft auf verschiedene Werkzeuge verteilt sind:
+Bottled Kraken verbindet mehrere Arbeitsschritte, die sonst oft auf verschiedene Werkzeuge verteilt sind:
 
-- **vorbereitende Bildbearbeitung** für schwierige Vorlagen,
-- **layoutbezogene OCR mit Kraken**,
-- **interaktive Bearbeitung von Zeilen und Overlay-Boxen**,
-- **optionale lokale LM-Überarbeitung**,
-- **optionale Mikrofonkorrektur mit Faster-Whisper**,
-- sowie **strukturierte Exportformate** für die Weiterverarbeitung.
+- **vorbereitende Bildbearbeitung** für schwierige Vorlagen
+- **layoutbezogene OCR mit Kraken**
+- **interaktive Bearbeitung von Zeilen und Overlay-Boxen**
+- **optionale lokale LM-Überarbeitung**
+- **optionale Mikrofonkorrektur mit Faster-Whisper**
+- **strukturierte Exportformate** für die Weiterverarbeitung
 
-OCR wird hier also nicht als einmaliger Blackbox-Klick behandelt, sondern als bearbeitbarer Arbeitsprozess. Genau das ist die Grundidee des Projekts.
+OCR wird hier also nicht als einmaliger Blackbox-Klick behandelt, sondern als **editierbarer Arbeitsprozess**. Genau das ist die Grundidee des Projekts.
+
+---
 
 ## Features
 
 - OCR mit **Kraken** über getrennte Recognition- und Segmentierungsmodelle
 - Unterstützung für **Bilder und PDFs**
-- Queue-basierter Batch-Workflow für mehrere Dateien
+- queue-basierter Batch-Workflow für mehrere Dateien
 - interaktive Anzeige erkannter Zeilen
 - bearbeitbare **Overlay-Boxen** und Zeilenstruktur
 - Zeilenfunktionen wie **verschieben, tauschen, ergänzen, löschen, teilen und neu ordnen**
@@ -45,6 +57,8 @@ OCR wird hier also nicht als einmaliger Blackbox-Klick behandelt, sondern als be
 - mehrsprachige Oberfläche (**Deutsch, Englisch, Französisch**)
 - Hell- und Dunkelmodus
 - Hardware-Auswahl für **CPU, CUDA, ROCm und MPS**
+
+---
 
 ## Bildbearbeitung
 
@@ -62,6 +76,8 @@ Verfügbare Werkzeuge sind unter anderem:
 
 Das ist besonders hilfreich bei schlecht beschnittenen Scans, Doppelseiten, Archivmaterial, Formularseiten und kontrastarmen historischen Vorlagen.
 
+---
+
 ## OCR-Workflow
 
 Ein typischer Ablauf in Bottled Kraken sieht so aus:
@@ -75,7 +91,9 @@ Ein typischer Ablauf in Bottled Kraken sieht so aus:
 7. Zeilen manuell, per lokalem LM oder per Spracheingabe korrigieren
 8. Ergebnis exportieren
 
-Bottled Kraken nutzt Kraken direkt aus Python heraus und ist stark auf die Idee ausgerichtet, dass OCR-Qualität wesentlich von sauberer Segmentierung abhängt. Deshalb ist die Arbeit mit **`blla`** der bevorzugte Weg, sobald ein passendes Segmentierungsmodell vorhanden ist.
+Bottled Kraken nutzt Kraken direkt aus Python heraus und ist stark auf die Idee ausgerichtet, dass die OCR-Qualität wesentlich von sauberer Segmentierung abhängt. Deshalb ist die Arbeit mit **`blla`** der bevorzugte Weg, sobald ein passendes Segmentierungsmodell vorhanden ist.
+
+---
 
 ## Lokale LM-Überarbeitung
 
@@ -95,6 +113,8 @@ Typische lokale Setups sind:
 
 Diese Nachbearbeitung ist für lokale Arbeitsabläufe gedacht, in denen OCR-Zeilen sprachlich geglättet, vereinheitlicht oder kontrolliert werden sollen, ohne den gesamten Workflow in einen Cloud-Dienst zu verlagern.
 
+---
+
 ## Remote-Zugriff per SSH-Tunnel
 
 Wenn dein lokaler LM-Server auf einem anderen Rechner läuft, dort aber nur an `127.0.0.1` gebunden ist, lässt er sich trotzdem über einen SSH-Tunnel verwenden.
@@ -111,17 +131,21 @@ Danach verwendest du in Bottled Kraken einfach:
 http://127.0.0.1:1234/v1
 ```
 
+---
+
 ## Sprachkorrektur mit Faster-Whisper
 
 Bottled Kraken kann **Faster-Whisper** für eine zeilenbezogene Mikrofonkorrektur verwenden.
 
 Das ist nützlich, wenn:
 
-- eine OCR-Zeile stark beschädigt ist,
-- einzelne Felder oder Namen schneller eingesprochen als getippt werden,
-- oder eine Korrektur bewusst auf genau eine Zeile begrenzt bleiben soll.
+- eine OCR-Zeile stark beschädigt ist
+- einzelne Felder oder Namen schneller eingesprochen als getippt werden
+- oder eine Korrektur bewusst auf genau eine Zeile begrenzt bleiben soll
 
-Es geht hier also nicht um die Volltranskription langer Audiodateien, sondern um gezielte Korrekturen innerhalb des OCR-Workflows.
+Es geht hier also nicht um die Volltranskription langer Audiodateien, sondern um **gezielte Korrekturen innerhalb des OCR-Workflows**.
+
+---
 
 ## Exportformate
 
@@ -136,6 +160,8 @@ Bottled Kraken unterstützt den Export in mehrere Ausgabeformate:
 | PDF | durchsuchbares PDF mit Bild + unsichtbarer Textebene |
 
 Dadurch lässt sich derselbe OCR-Durchlauf sowohl für lesbare Endergebnisse als auch für strukturierte Weiterverarbeitung nutzen.
+
+---
 
 ## Aus dem Quellcode starten
 
@@ -187,14 +213,16 @@ Je nach Setup können zusätzlich weitere Pakete für Audio, GPU-Unterstützung 
 python main.py
 ```
 
+---
+
 ## Modellverwaltung
 
 Bottled Kraken bringt OCR-Modelle nicht direkt mit. Stattdessen lädst du die Modelle, die zu deinem Material passen.
 
 In der Praxis brauchst du meistens:
 
-- ein **Recognition-Modell** für Schrift und Material,
-- und optional ein **Segmentierungs-Modell** für `blla`.
+- ein **Recognition-Modell** für Schrift und Material
+- und optional ein **Segmentierungs-Modell** für `blla`
 
 Eine gute öffentliche Fundstelle für Kraken-kompatible Modelle ist die Zenodo-Sammlung:
 
@@ -202,17 +230,22 @@ Eine gute öffentliche Fundstelle für Kraken-kompatible Modelle ist die Zenodo-
 
 Als Faustregel gilt: Ein Modell, das auf historische Drucke trainiert wurde, ist für historische Drucke meist deutlich besser als ein allgemeines Modell. Dasselbe gilt für Handschrift und formularlastiges Material.
 
+---
+
 ## Warum Bottled Kraken?
 
 Viele OCR-Werkzeuge enden nach der Erkennung. Bottled Kraken setzt genau in der Phase **zwischen OCR und fertigem Endtext** an:
 
-- wenn Segmentierung noch korrigiert werden muss,
-- wenn Zeilenstruktur wichtig ist,
-- wenn Formulare oder Archivseiten Nacharbeit brauchen,
-- und wenn möglichst lokal und transparent gearbeitet werden soll.
+- wenn Segmentierung noch korrigiert werden muss
+- wenn Zeilenstruktur wichtig ist
+- wenn Formulare oder Archivseiten Nacharbeit brauchen
+- und wenn möglichst lokal und transparent gearbeitet werden soll
 
 Wenn du eine GUI rund um Kraken suchst, die OCR nicht nur ausführt, sondern als editierbaren Workflow behandelt, dann ist Bottled Kraken genau für diesen Anwendungsfall gebaut.
 
+---
+
 ## Lizenz
 
-Dieses Repository steht unter **MIT**. Bitte beachte zusätzlich die Lizenzen der externen Modelle und Bibliotheken, die du zusammen mit der Anwendung verwendest.
+Dieses Repository steht unter **MIT**.  
+Bitte beachte zusätzlich die Lizenzen der externen Modelle und Bibliotheken, die du zusammen mit der Anwendung verwendest.
