@@ -1,0 +1,25 @@
+BOTTLED KRAKEN – KURZHINWEISE
+=============================
+
+1) Kraken-Modelle
+- Die Kraken-Modelle müssen im gleichen Verzeichnis wie die EXE liegen.
+- Lege also den Ordner „Kraken-Modelle“ direkt neben „Bottled Kraken.exe“.
+
+2) Whisper herunterladen
+- Wenn Whisper noch fehlt, drück F1 oder "Hinweis" -> Reiter "Whisper".
+- Dort kannst du das Whisper-Modell mit einem Klick herunterladen.
+
+3) OpenRouter
+- Für OpenRouter brauchst du einen eigenen Account und einen API-Key.
+- Erstelle dir bei OpenRouter einen kostenlosen Account und generiere dort deinen API-Key.
+- Trage den Key danach im Programm ein. OpenRouter verwendet Bearer-Token/API-Keys zur Authentifizierung. 
+- Kostenlose Nutzung ist möglich, kann aber rate-limitiert sein.
+
+4) LM Studio
+- LM Studio installieren.
+- In LM Studio ein Modell herunterladen.
+- Das Modell in LM Studio laden.
+- Den lokalen Server in LM Studio starten.
+- In Bottled Kraken dann LM Studio als lokale API verwenden.
+- LM Studio kann Modelle lokal laden und einen lokalen API-Server starten; der Server lässt sich in der App über den Developer-Bereich starten.
+- Standardmäßig läuft der LM-Studio-Server typischerweise auf Port 1234.
