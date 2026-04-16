@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+
+# Local secrets and settings
+.env
+.env.*
+*.local
+
+# OCR / model artifacts
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.safetensors
+whisper_models/
+ocr_models/
+
+# Generated outputs
+Bottled Kraken edited Bilder/
+exports/
+tmp/
+temp/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
