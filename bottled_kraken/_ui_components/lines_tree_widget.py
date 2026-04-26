@@ -1,5 +1,6 @@
 """Zeilenliste für erkannte OCR-Zeilen."""
 from ..shared import *
+from PySide6.QtGui import QCursor
 
 class LinesTreeWidget(QTreeWidget):
     delete_pressed = Signal()
@@ -15,11 +16,10 @@ class LinesTreeWidget(QTreeWidget):
         self.setUniformRowHeights(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
+        self.setDragEnabled(False)
+        self.setAcceptDrops(False)
         self.setDropIndicatorShown(False)
-        self.setDefaultDropAction(Qt.MoveAction)
-        self.setDragDropMode(QAbstractItemView.DragDrop)
+        self.setDragDropMode(QAbstractItemView.NoDragDrop)
         self.setDragDropOverwriteMode(False)
         self.header().setStretchLastSection(True)
         self.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -29,23 +29,20 @@ class LinesTreeWidget(QTreeWidget):
         self.setIndentation(0)
         self.setStyleSheet("")
         self._drag_ids_snapshot: List[int] = []
+        self._drag_rows_snapshot: List[int] = []
+        self._drag_seed_rows: List[int] = []
         self._drag_active = False
         self._placeholder_row = -1
         self._placeholder_item: Optional[QTreeWidgetItem] = None
+        self._drag_wheel_scroll_step = max(24, self.fontMetrics().height() + 8)
+        self._drag_press_pos: Optional[QPoint] = None
+        self._drag_last_pos: QPoint = QPoint()
+        self._pending_reselect_source_rows: List[int] = []
+        self._pending_reselect_new_rows: List[int] = []
     def edit(self, index, trigger, event):
         if index.isValid() and index.column() == 0:
             return False
         return super().edit(index, trigger, event)
-    def keyPressEvent(self, event):
-        if event.matches(QKeySequence.Copy):
-            self.copy_selected_contents()
-            event.accept()
-            return
-        if event.key() == Qt.Key_Delete:
-            self.delete_pressed.emit()
-            event.accept()
-            return
-        super().keyPressEvent(event)
     def copy_selected_contents(self):
         rows = self.selected_line_rows()
         if not rows:
@@ -165,12 +162,9 @@ class LinesTreeWidget(QTreeWidget):
                 idx = i
             order.append(int(idx))
         self.reorder_committed.emit(order, self.currentRow())
-    def startDrag(self, supportedActions):
-        rows = self.selected_line_rows()
-        if not rows:
-            return
+    def _selected_drag_ids(self) -> List[int]:
         drag_ids = []
-        for row in rows:
+        for row in self.selected_line_rows():
             item = self.topLevelItem(row)
             if item is None or self._is_placeholder_item(item):
                 continue
@@ -178,98 +172,172 @@ class LinesTreeWidget(QTreeWidget):
             if item_id is None:
                 continue
             drag_ids.append(int(item_id))
-        if not drag_ids:
-            return
+        return drag_ids
+    def _begin_manual_drag(self, pos: QPoint) -> bool:
+        drag_rows = self._drag_seed_rows if self._drag_seed_rows else self.selected_line_rows()
+        drag_ids = self._selected_drag_ids()
+        if not drag_rows:
+            self._drag_active = False
+            return False
+        self._drag_rows_snapshot = drag_rows
         self._drag_ids_snapshot = drag_ids
         self._drag_active = True
-        self._remove_placeholder()
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setData(self._DRAG_MIME, b"move")
-        drag.setMimeData(mime)
-        current = self.currentItem()
-        if current is not None and not self._is_placeholder_item(current):
-            rect = self.visualItemRect(current)
-            if rect.isValid():
-                drag.setPixmap(self.viewport().grab(rect))
-                drag.setHotSpot(QPoint(12, min(12, max(0, rect.height() // 2))))
-        try:
-            drag.exec(Qt.MoveAction)
-        finally:
+        self._drag_last_pos = QPoint(pos)
+        insert_row = self._drop_insert_row_from_pos(pos)
+        self._show_placeholder_at(insert_row)
+        self.viewport().setCursor(Qt.ClosedHandCursor)
+        self.viewport().update()
+        return True
+    def _finish_manual_drag(self, commit: bool):
+        if not self._drag_active:
+            self._remove_placeholder()
+            self._drag_rows_snapshot = []
+            self._drag_ids_snapshot = []
+            self._drag_seed_rows = []
+            self._pending_reselect_source_rows = []
+            self._pending_reselect_new_rows = []
+            self.viewport().unsetCursor()
+            return
+        if not commit:
             self._remove_placeholder()
             self._drag_active = False
+            self._drag_rows_snapshot = []
             self._drag_ids_snapshot = []
-    def dragEnterEvent(self, event):
-        if event.source() is self and event.mimeData().hasFormat(self._DRAG_MIME):
-            event.setDropAction(Qt.MoveAction)
-            event.accept()
-            return
-        event.ignore()
-    def dragMoveEvent(self, event):
-        if event.source() is not self or not event.mimeData().hasFormat(self._DRAG_MIME):
-            event.ignore()
-            return
-        insert_row = self._drop_insert_row_from_pos(self._event_pos(event))
-        self._show_placeholder_at(insert_row)
-        event.setDropAction(Qt.MoveAction)
-        event.accept()
-    def dragLeaveEvent(self, event):
-        self._remove_placeholder()
-        event.accept()
-    def dropEvent(self, event):
-        if event.source() is not self or not event.mimeData().hasFormat(self._DRAG_MIME):
-            event.ignore()
-            return
-        if not self._drag_ids_snapshot:
-            self._remove_placeholder()
-            event.ignore()
+            self._drag_seed_rows = []
+            self._pending_reselect_source_rows = []
+            self._pending_reselect_new_rows = []
+            self.viewport().unsetCursor()
             return
         insert_row = self._placeholder_row
         if insert_row < 0:
-            insert_row = self._drop_insert_row_from_pos(self._event_pos(event))
+            insert_row = self._drop_insert_row_from_pos(self._drag_last_pos)
         self._remove_placeholder()
-        id_to_row = {}
-        id_to_item = {}
-        for row in range(self.topLevelItemCount()):
-            item = self.topLevelItem(row)
-            if item is None or self._is_placeholder_item(item):
-                continue
-            item_id = item.data(0, Qt.UserRole)
-            if item_id is None:
-                continue
-            item_id = int(item_id)
-            if item_id in self._drag_ids_snapshot:
-                id_to_row[item_id] = row
-                id_to_item[item_id] = item
-        moving_ids = [item_id for item_id in self._drag_ids_snapshot if item_id in id_to_item]
-        if not moving_ids:
-            event.ignore()
+        moving_rows = sorted(set(
+            row for row in self._drag_rows_snapshot
+            if 0 <= row < self.topLevelItemCount()
+        ))
+        if not moving_rows:
+            self._drag_active = False
+            self._drag_rows_snapshot = []
+            self._drag_ids_snapshot = []
+            self._drag_seed_rows = []
+            self._pending_reselect_source_rows = []
+            self._pending_reselect_new_rows = []
+            self.viewport().unsetCursor()
             return
-        rows_to_take = sorted((id_to_row[item_id] for item_id in moving_ids), reverse=True)
-        taken_items = {}
+        rows_to_take = sorted(moving_rows, reverse=True)
+        taken_items_by_row = {}
         for row in rows_to_take:
             item = self.takeTopLevelItem(row)
             if item is None:
                 continue
-            item_id = item.data(0, Qt.UserRole)
-            if item_id is not None:
-                taken_items[int(item_id)] = item
+            taken_items_by_row[row] = item
         removed_before_insert = sum(1 for row in rows_to_take if row < insert_row)
         insert_row = max(0, min(self.topLevelItemCount(), insert_row - removed_before_insert))
         inserted_items = []
-        for offset, item_id in enumerate(moving_ids):
-            item = taken_items.get(item_id)
+        inserted_rows = []
+        for offset, row in enumerate(moving_rows):
+            item = taken_items_by_row.get(row)
             if item is None:
                 continue
-            self.insertTopLevelItem(insert_row + offset, item)
+            new_row = insert_row + offset
+            self.insertTopLevelItem(new_row, item)
             inserted_items.append(item)
-        self.clearSelection()
+            inserted_rows.append(new_row)
+        self._pending_reselect_new_rows = inserted_rows
+        selected_set = set(inserted_rows)
+        for row in range(self.topLevelItemCount()):
+            item = self.topLevelItem(row)
+            if item is None or self._is_placeholder_item(item):
+                continue
+            item.setSelected(row in selected_set)
         first_item = inserted_items[0] if inserted_items else None
-        for item in inserted_items:
-            item.setSelected(True)
         if first_item is not None:
-            self.setCurrentItem(first_item)
+            try:
+                self.setCurrentItem(first_item, 0, QItemSelectionModel.NoUpdate)
+            except Exception:
+                self.setCurrentItem(first_item)
             self.scrollToItem(first_item, QAbstractItemView.PositionAtCenter)
+        selected_sources = []
+        for item in inserted_items:
+            src_idx = item.data(0, Qt.UserRole)
+            if src_idx is None:
+                continue
+            selected_sources.append(int(src_idx))
+        self._pending_reselect_source_rows = selected_sources
         self._emit_current_visual_order()
-        event.setDropAction(Qt.MoveAction)
-        event.accept()
+        self._drag_active = False
+        self._drag_rows_snapshot = []
+        self._drag_ids_snapshot = []
+        self._drag_seed_rows = []
+        self.viewport().unsetCursor()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = self._event_pos(event)
+            self._drag_press_pos = pos
+            selected_rows = self.selected_line_rows()
+            self._drag_seed_rows = []
+            clicked_item = self.itemAt(pos)
+            if (
+                clicked_item is not None
+                and clicked_item.isSelected()
+                and QApplication.keyboardModifiers() == Qt.NoModifier
+            ):
+                if selected_rows:
+                    self._drag_seed_rows = selected_rows
+                event.accept()
+                return
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self, event):
+        pos = self._event_pos(event)
+        if self._drag_active:
+            self._drag_last_pos = QPoint(pos)
+            self._show_placeholder_at(self._drop_insert_row_from_pos(pos))
+            event.accept()
+            return
+        if (event.buttons() & Qt.LeftButton) and self._drag_press_pos is not None:
+            if (pos - self._drag_press_pos).manhattanLength() >= QApplication.startDragDistance():
+                if self._begin_manual_drag(pos):
+                    event.accept()
+                    return
+            # Während LMB-Drag keine native Bereichsauswahl laufen lassen,
+            # sonst markiert Qt zwischen Anker und Mausposition zusätzliche Zeilen.
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_press_pos = None
+            self._drag_seed_rows = []
+            if self._drag_active:
+                self._drag_last_pos = self._event_pos(event)
+                self._finish_manual_drag(commit=True)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
+    def wheelEvent(self, event):
+        super().wheelEvent(event)
+        if not self._drag_active:
+            return
+        global_pos_attr = getattr(event, "globalPosition", None)
+        if callable(global_pos_attr):
+            global_pos = global_pos_attr().toPoint()
+        else:
+            global_pos = QCursor.pos()
+        local_pos = self.viewport().mapFromGlobal(global_pos)
+        self._drag_last_pos = QPoint(local_pos)
+        self._show_placeholder_at(self._drop_insert_row_from_pos(local_pos))
+    def keyPressEvent(self, event):
+        if self._drag_active and event.key() == Qt.Key_Escape:
+            self._finish_manual_drag(commit=False)
+            event.accept()
+            return
+        if event.matches(QKeySequence.Copy):
+            self.copy_selected_contents()
+            event.accept()
+            return
+        if event.key() == Qt.Key_Delete:
+            self.delete_pressed.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
