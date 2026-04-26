@@ -16,7 +16,10 @@ def load_split_module(module_file: str, module_globals: MutableMapping[str, Any]
     ]
     if not part_paths:
         raise FileNotFoundError(f'No split module parts found in {parts_dir}')
-    source = ''.join(path.read_text(encoding='utf-8') for path in part_paths)
+    source = '\n'.join(
+        path.read_text(encoding='utf-8').rstrip('\n')
+        for path in part_paths
+    ) + '\n'
     virtual_path = str(parts_dir / '__assembled__.py')
     linecache.cache[virtual_path] = (
         len(source),
