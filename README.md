@@ -203,7 +203,7 @@ A practical starting point is:
 
 ```bash
 pip install --upgrade pip
-pip install pillow pyside6 reportlab torch kraken pymupdf numpy sounddevice huggingface_hub
+python -m pip install --upgrade pip setuptools wheel && python -m pip install torch torchvision torchaudio PySide6 PyMuPDF numpy sounddevice Pillow reportlab pyinstaller kraken huggingface_hub transformers accelerate openai-whisper
 ```
 
 Depending on your setup, additional packages for audio, GPU support, or Faster-Whisper may also be required.
