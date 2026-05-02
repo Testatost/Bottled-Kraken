@@ -1,10 +1,109 @@
 """Mixin-Methoden für den Bildbearbeitungsdialog."""
 from ..shared import *
 from ..dialogs import *
-from .common import ImageEditSettings, WhiteBorderDialog
+from .common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
 from .canvas import ImageEditCanvas
+from PySide6.QtGui import QPainterPath
 
 class ImageEditDialogSetupMixin:
+    def _set_preview_tool_mode(self, mode: str):
+        mode = "pan" if str(mode or "").lower() == "pan" else "select"
+        if hasattr(self, "canvas"):
+            self.canvas.set_tool_mode(mode)
+        if hasattr(self, "btn_preview_select"):
+            self.btn_preview_select.setChecked(mode == "select")
+        if hasattr(self, "btn_preview_pan"):
+            self.btn_preview_pan.setChecked(mode == "pan")
+
+    def _preview_tool_icon_color(self) -> QColor:
+        return QColor("#f8fafc" if getattr(self, "_preview_tool_theme", "bright") == "dark" else "#111827")
+
+    def _build_preview_tool_icon(self, tool: str) -> QIcon:
+        """Erzeugt kleine Vorschau-Werkzeugicons ohne Font-/Emoji-Abhängigkeit."""
+        ink = self._preview_tool_icon_color()
+        pix = QPixmap(24, 24)
+        pix.fill(Qt.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(ink, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+
+        if tool == "pan":
+            hand = QPainterPath()
+            hand.moveTo(7.2, 16.2)
+            hand.lineTo(6.2, 14.9)
+            hand.cubicTo(5.4, 13.8, 6.7, 12.8, 7.8, 13.8)
+            hand.lineTo(9.0, 15.0)
+            hand.lineTo(9.0, 7.1)
+            hand.cubicTo(9.0, 5.6, 11.0, 5.6, 11.0, 7.1)
+            hand.lineTo(11.0, 12.0)
+            hand.lineTo(11.0, 6.1)
+            hand.cubicTo(11.0, 4.7, 13.0, 4.7, 13.0, 6.1)
+            hand.lineTo(13.0, 12.1)
+            hand.lineTo(13.0, 7.0)
+            hand.cubicTo(13.0, 5.7, 15.0, 5.7, 15.0, 7.0)
+            hand.lineTo(15.0, 12.3)
+            hand.lineTo(15.0, 8.7)
+            hand.cubicTo(15.0, 7.5, 16.9, 7.5, 16.9, 8.7)
+            hand.lineTo(16.9, 14.0)
+            hand.cubicTo(16.9, 18.3, 14.4, 20.5, 11.4, 20.5)
+            hand.cubicTo(9.4, 20.5, 8.2, 18.3, 7.2, 16.2)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(hand)
+        else:
+            cursor = QPainterPath()
+            cursor.moveTo(5.4, 3.4)
+            cursor.lineTo(5.4, 19.1)
+            cursor.lineTo(9.4, 14.8)
+            cursor.lineTo(12.3, 21.0)
+            cursor.lineTo(15.2, 19.7)
+            cursor.lineTo(12.3, 13.6)
+            cursor.lineTo(18.6, 13.6)
+            cursor.closeSubpath()
+            painter.setBrush(QBrush(ink))
+            painter.drawPath(cursor)
+
+        painter.end()
+        icon = QIcon()
+        icon.addPixmap(pix, QIcon.Normal, QIcon.Off)
+        icon.addPixmap(pix, QIcon.Normal, QIcon.On)
+        return icon
+
+    def _preview_tool_button_qss(self) -> str:
+        return """
+            QToolButton {
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 2px;
+                background: transparent;
+            }
+            QToolButton:hover {
+                background: rgba(59, 130, 246, 0.16);
+                border: 1px solid rgba(59, 130, 246, 0.35);
+            }
+            QToolButton:checked {
+                background: rgba(59, 130, 246, 0.34);
+                border: 1px solid rgba(59, 130, 246, 0.95);
+            }
+            QToolButton:pressed {
+                background: rgba(59, 130, 246, 0.44);
+            }
+        """
+
+    def _make_preview_tool_button(self, tool: str, tooltip_key: str) -> QToolButton:
+        btn = QToolButton(self)
+        btn.setText("")
+        btn.setIcon(self._build_preview_tool_icon(tool))
+        btn.setIconSize(QSize(22, 22))
+        btn.setToolTip(self._tr(tooltip_key))
+        btn.setCheckable(True)
+        btn.setAutoRaise(False)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        btn.setFixedSize(30, 28)
+        btn.setStyleSheet(self._preview_tool_button_qss())
+        return btn
+
     def __init__(
             self,
             image: Image.Image,
@@ -28,10 +127,12 @@ class ImageEditDialogSetupMixin:
         self.setWindowTitle(self._tr("image_edit_title", title))
         self.resize(1360, 900)
         theme = getattr(parent, "current_theme", "bright")
+        self._preview_tool_theme = theme
         self.setStyleSheet(_image_edit_dialog_qss(theme))
         self.original_image = image.convert("RGB")
         self.color_mode = "RGB"
         self.contrast_enabled = False
+        self.contrast_level = 2.2
         self.rotation_angle = 0.0
         self.result_images: List[Image.Image] = []
         self._batch_apply_used = False
@@ -58,6 +159,11 @@ class ImageEditDialogSetupMixin:
         self.shortcut_erase_undo = QShortcut(QKeySequence.Undo, self)
         self.shortcut_erase_undo.setContext(Qt.WidgetWithChildrenShortcut)
         self.shortcut_erase_undo.activated.connect(self._undo_erase_commit)
+        self.btn_preview_select = self._make_preview_tool_button("select", "image_edit_preview_tool_select_tip")
+        self.btn_preview_pan = self._make_preview_tool_button("pan", "image_edit_preview_tool_pan_tip")
+        self.btn_preview_select.clicked.connect(lambda: self._set_preview_tool_mode("select"))
+        self.btn_preview_pan.clicked.connect(lambda: self._set_preview_tool_mode("pan"))
+        self._set_preview_tool_mode("select")
         self.btn_rotate_mode = QPushButton(self._tr("image_edit_rotate_off"))
         self.btn_rotate_mode.setCheckable(True)
         self.btn_rotate_mode.toggled.connect(self._toggle_rotation_mode)
@@ -84,6 +190,32 @@ class ImageEditDialogSetupMixin:
         self.chk_gray.toggled.connect(self._toggle_gray)
         self.chk_contrast = QCheckBox(self._tr("image_edit_contrast"))
         self.chk_contrast.toggled.connect(self._toggle_contrast)
+        self.contrast_controls_widget = QWidget()
+        contrast_controls_layout = QHBoxLayout(self.contrast_controls_widget)
+        contrast_controls_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_controls_layout.setSpacing(8)
+        self.lbl_contrast_strength = QLabel()
+        self.lbl_contrast_strength.setMinimumWidth(150)
+        self.contrast_slider = QSlider(Qt.Horizontal)
+        self.contrast_slider.setRange(0, 100)
+        self.contrast_slider.setValue(40)
+        self.contrast_slider.setMinimumWidth(260)
+        self.contrast_slider.setMaximumWidth(520)
+        self.contrast_slider.setFixedHeight(22)
+        self.contrast_slider.valueChanged.connect(self._on_contrast_slider_changed)
+        self.contrast_slider.sliderPressed.connect(self._on_contrast_slider_pressed)
+        self.contrast_slider.sliderReleased.connect(self._on_contrast_slider_released)
+        self._contrast_preview_pending = False
+        self._contrast_preview_timer = QTimer(self)
+        self._contrast_preview_timer.setSingleShot(True)
+        self._contrast_preview_timer.setInterval(140)
+        self._contrast_preview_timer.timeout.connect(self._apply_pending_contrast_preview)
+        contrast_controls_layout.addStretch(1)
+        contrast_controls_layout.addWidget(self.lbl_contrast_strength)
+        contrast_controls_layout.addWidget(self.contrast_slider, 0)
+        contrast_controls_layout.addStretch(1)
+        self.contrast_controls_widget.setVisible(False)
+        self._update_contrast_slider_ui()
         self.btn_erase_rect = QPushButton(self._tr("image_edit_erase_rect"))
         self.btn_erase_rect.setCheckable(True)
         self.btn_erase_rect.toggled.connect(
@@ -116,7 +248,7 @@ class ImageEditDialogSetupMixin:
         self.btn_apply_all = QPushButton(self._tr("image_edit_apply_all"))
         self.btn_apply_all.clicked.connect(self._apply_all)
         top = QHBoxLayout()
-        for widget in (self.btn_grid, self.btn_rotate_mode, btn_rot_left, btn_rot_right, btn_rot_reset):
+        for widget in (self.btn_preview_select, self.btn_preview_pan, self.btn_grid, self.btn_rotate_mode, btn_rot_left, btn_rot_right, btn_rot_reset):
             top.addWidget(widget)
         top.addSpacing(16)
         for widget in (
@@ -147,6 +279,7 @@ class ImageEditDialogSetupMixin:
         erase_row.addWidget(self.btn_erase_clear)
         erase_row.addStretch(1)
         center.addLayout(grid_row)
+        center.addWidget(self.contrast_controls_widget)
         center.addLayout(erase_row)
         lay.addLayout(center, 1)
         bottom = QHBoxLayout()
@@ -170,9 +303,11 @@ class ImageEditDialogSetupMixin:
         if self.color_mode == "GRAY":
             out = ImageOps.grayscale(out).convert("RGB")
         if self.contrast_enabled:
+            level = max(1.0, min(4.0, float(getattr(self, "contrast_level", 2.2))))
+            sharpness_level = max(1.0, min(2.0, 1.0 + ((level - 1.0) / 3.0)))
             out = ImageOps.autocontrast(out, cutoff=1)
-            out = ImageEnhance.Contrast(out).enhance(2.2)
-            out = ImageEnhance.Sharpness(out).enhance(1.4)
+            out = ImageEnhance.Contrast(out).enhance(level)
+            out = ImageEnhance.Sharpness(out).enhance(sharpness_level)
         if abs(self.rotation_angle) > 0.01:
             out = out.rotate(
                 -self.rotation_angle,

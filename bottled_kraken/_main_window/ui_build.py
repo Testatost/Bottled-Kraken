@@ -4,8 +4,178 @@ from ..ui_components import *
 from ..workers import *
 from ..dialogs import *
 from ..image_edit import *
+from PySide6.QtWidgets import QSplitterHandle
+from PySide6.QtGui import QPainterPath
+
+
+class BKPreviewSplitterHandle(QSplitterHandle):
+    """Größerer, kontrastreicher Griff für den Haupt-Splitter."""
+
+    def _owner_theme(self) -> str:
+        try:
+            splitter = self.splitter()
+            owner = getattr(splitter, "_bk_owner", None)
+            return getattr(owner, "current_theme", "bright")
+        except Exception:
+            return "bright"
+
+    def event(self, event):
+        try:
+            if event.type() in (QEvent.PaletteChange, QEvent.StyleChange, QEvent.ApplicationPaletteChange):
+                self.update()
+        except Exception:
+            pass
+        return super().event(event)
+
+    def paintEvent(self, event):
+        theme = self._owner_theme()
+        if theme == "dark":
+            bg = QColor("#2b2b2b")
+            line = QColor("#4b5563")
+            dot = QColor("#ffffff")
+        else:
+            bg = QColor("#f0f0f0")
+            line = QColor("#c8c8c8")
+            dot = QColor("#000000")
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), bg)
+
+        rect = self.rect()
+        cx = rect.center().x()
+        cy = rect.center().y()
+
+        painter.setPen(QPen(line, 1))
+        if self.orientation() == Qt.Horizontal:
+            painter.drawLine(cx, rect.top(), cx, rect.bottom())
+            positions = [(cx, cy - 8), (cx, cy), (cx, cy + 8)]
+        else:
+            painter.drawLine(rect.left(), cy, rect.right(), cy)
+            positions = [(cx - 8, cy), (cx, cy), (cx + 8, cy)]
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(dot)
+        radius = 2.4
+        for x, y in positions:
+            painter.drawEllipse(QPointF(float(x), float(y)), radius, radius)
+        painter.end()
+
+
+class BKPreviewSplitter(QSplitter):
+    def __init__(self, orientation, owner=None, parent=None):
+        super().__init__(orientation, parent)
+        self._bk_owner = owner
+        self.setHandleWidth(12)
+
+    def createHandle(self):
+        return BKPreviewSplitterHandle(self.orientation(), self)
 
 class MainWindowUiBuildMixin:
+    def set_preview_tool_mode(self, mode: str):
+        mode = "pan" if str(mode or "").lower() == "pan" else "select"
+        if hasattr(self, "canvas"):
+            self.canvas.set_tool_mode(mode)
+        if hasattr(self, "btn_preview_select"):
+            self.btn_preview_select.setChecked(mode == "select")
+        if hasattr(self, "btn_preview_pan"):
+            self.btn_preview_pan.setChecked(mode == "pan")
+
+    def _preview_tool_icon_color(self) -> QColor:
+        return QColor("#f8fafc" if getattr(self, "current_theme", "bright") == "dark" else "#111827")
+
+    def _build_preview_tool_icon(self, tool: str) -> QIcon:
+        """Erzeugt kleine Vorschau-Werkzeugicons ohne Font-/Emoji-Abhängigkeit."""
+        ink = self._preview_tool_icon_color()
+        pix = QPixmap(24, 24)
+        pix.fill(Qt.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(ink, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+
+        if tool == "pan":
+            hand = QPainterPath()
+            hand.moveTo(7.2, 16.2)
+            hand.lineTo(6.2, 14.9)
+            hand.cubicTo(5.4, 13.8, 6.7, 12.8, 7.8, 13.8)
+            hand.lineTo(9.0, 15.0)
+            hand.lineTo(9.0, 7.1)
+            hand.cubicTo(9.0, 5.6, 11.0, 5.6, 11.0, 7.1)
+            hand.lineTo(11.0, 12.0)
+            hand.lineTo(11.0, 6.1)
+            hand.cubicTo(11.0, 4.7, 13.0, 4.7, 13.0, 6.1)
+            hand.lineTo(13.0, 12.1)
+            hand.lineTo(13.0, 7.0)
+            hand.cubicTo(13.0, 5.7, 15.0, 5.7, 15.0, 7.0)
+            hand.lineTo(15.0, 12.3)
+            hand.lineTo(15.0, 8.7)
+            hand.cubicTo(15.0, 7.5, 16.9, 7.5, 16.9, 8.7)
+            hand.lineTo(16.9, 14.0)
+            hand.cubicTo(16.9, 18.3, 14.4, 20.5, 11.4, 20.5)
+            hand.cubicTo(9.4, 20.5, 8.2, 18.3, 7.2, 16.2)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(hand)
+        else:
+            cursor = QPainterPath()
+            cursor.moveTo(5.4, 3.4)
+            cursor.lineTo(5.4, 19.1)
+            cursor.lineTo(9.4, 14.8)
+            cursor.lineTo(12.3, 21.0)
+            cursor.lineTo(15.2, 19.7)
+            cursor.lineTo(12.3, 13.6)
+            cursor.lineTo(18.6, 13.6)
+            cursor.closeSubpath()
+            painter.setBrush(QBrush(ink))
+            painter.drawPath(cursor)
+
+        painter.end()
+        icon = QIcon()
+        icon.addPixmap(pix, QIcon.Normal, QIcon.Off)
+        icon.addPixmap(pix, QIcon.Normal, QIcon.On)
+        return icon
+
+    def _refresh_preview_tool_button_icons(self):
+        if hasattr(self, "btn_preview_select"):
+            self.btn_preview_select.setIcon(self._build_preview_tool_icon("select"))
+        if hasattr(self, "btn_preview_pan"):
+            self.btn_preview_pan.setIcon(self._build_preview_tool_icon("pan"))
+
+    def _preview_tool_button_qss(self) -> str:
+        return """
+            QToolButton {
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 2px;
+                background: transparent;
+            }
+            QToolButton:hover {
+                background: rgba(59, 130, 246, 0.16);
+                border: 1px solid rgba(59, 130, 246, 0.35);
+            }
+            QToolButton:checked {
+                background: rgba(59, 130, 246, 0.34);
+                border: 1px solid rgba(59, 130, 246, 0.95);
+            }
+            QToolButton:pressed {
+                background: rgba(59, 130, 246, 0.44);
+            }
+        """
+
+    def _make_preview_tool_button(self, tool: str, tooltip_key: str) -> QToolButton:
+        btn = QToolButton(self)
+        btn.setText("")
+        btn.setIcon(self._build_preview_tool_icon(tool))
+        btn.setIconSize(QSize(22, 22))
+        btn.setToolTip(self._tr(tooltip_key))
+        btn.setCheckable(True)
+        btn.setAutoRaise(False)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        btn.setFixedSize(30, 28)
+        btn.setStyleSheet(self._preview_tool_button_qss())
+        return btn
+
     def _init_ui(self):
         self.toolbar = QToolBar(self._tr("toolbar_main"))
         self.addToolBar(self.toolbar)
@@ -13,6 +183,15 @@ class MainWindowUiBuildMixin:
         self.toolbar.setFloatable(False)
         self.toolbar.setIconSize(QSize(20, 20))
         self.toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_preview_select = self._make_preview_tool_button("select", "preview_tool_select_tip")
+        self.btn_preview_select.setObjectName("btn_preview_select")
+        self.btn_preview_pan = self._make_preview_tool_button("pan", "preview_tool_pan_tip")
+        self.btn_preview_pan.setObjectName("btn_preview_pan")
+        self.btn_preview_select.clicked.connect(lambda: self.set_preview_tool_mode("select"))
+        self.btn_preview_pan.clicked.connect(lambda: self.set_preview_tool_mode("pan"))
+        self.set_preview_tool_mode("select")
+        self.toolbar.addWidget(self.btn_preview_select)
+        self.toolbar.addWidget(self.btn_preview_pan)
         self.toolbar.addAction(self.act_add)
         self.toolbar.addAction(self.act_project_load_toolbar)
         self.toolbar.addSeparator()
@@ -129,7 +308,7 @@ class MainWindowUiBuildMixin:
         left_layout.addWidget(self.canvas)
         left_widget = QWidget()
         left_widget.setLayout(left_layout)
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter = BKPreviewSplitter(Qt.Horizontal, owner=self)
         self.splitter.addWidget(left_widget)
         self.splitter.addWidget(right_widget)
         self.splitter.setSizes([1000, 500])

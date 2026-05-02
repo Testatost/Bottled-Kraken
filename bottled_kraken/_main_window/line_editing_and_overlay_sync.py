@@ -231,6 +231,8 @@ class MainWindowLineEditingAndOverlaySyncMixin:
         if not task:
             return
         _, _, im, recs = task.results
+        if im is None:
+            im = self._task_geometry_image(task)
         if not im:
             return
         if not (0 <= idx < len(recs)):
@@ -301,6 +303,8 @@ class MainWindowLineEditingAndOverlaySyncMixin:
         if not task:
             return
         text, kr_records, im, recs = task.results
+        if im is None:
+            im = self._task_geometry_image(task)
         x0 = _safe_int(rect.left())
         y0 = _safe_int(rect.top())
         x1 = _safe_int(rect.right())
@@ -349,6 +353,8 @@ class MainWindowLineEditingAndOverlaySyncMixin:
         if not task:
             return
         text, kr_records, im, recs = task.results
+        if im is None:
+            im = self._task_geometry_image(task)
         if not (0 <= idx < len(recs)):
             return
         new_bbox = self._scene_rect_to_bbox(scene_rect, im)
@@ -363,7 +369,7 @@ class MainWindowLineEditingAndOverlaySyncMixin:
         task.results = (
             "\n".join(r.text for r in recs).strip(),
             kr_records,
-            im,
+            None,
             recs
         )
         self._update_task_preset_bboxes(task)
@@ -384,6 +390,10 @@ class MainWindowLineEditingAndOverlaySyncMixin:
             self._update_queue_row(task.path)
 
     def export_flow(self, fmt: str):
+        if fmt == "pdf":
+            self._export_pdf_flow()
+            return
+
         checked_tasks = self._checked_queue_tasks()
         selected_tasks = self._selected_queue_tasks()
         # Priorität: Checkmarks vor Auswahl

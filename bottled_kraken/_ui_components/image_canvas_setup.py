@@ -50,6 +50,8 @@ class ImageCanvasSetupMixin:
         self._brush_selection = QBrush(QColor(10, 132, 255, 40))
         # Nur aktiv, nachdem die OCR abgeschlossen ist
         self._overlay_enabled = False
+        # Vorschau-Werkzeug: "select" = Overlay-/Zeilenbearbeitung, "pan" = Sichtbereich verschieben.
+        self._tool_mode = "select"
         # Split-Modus für bestehende Boxen
         self._split_mode = False
         self._split_target_idx: Optional[int] = None
@@ -95,6 +97,62 @@ class ImageCanvasSetupMixin:
 
     def set_overlay_enabled(self, enabled: bool):
         self._overlay_enabled = bool(enabled)
+
+    def set_tool_mode(self, mode: str):
+        mode = "pan" if str(mode or "").lower() == "pan" else "select"
+        if getattr(self, "_tool_mode", "select") == mode:
+            self._apply_overlay_item_interactivity()
+            self._update_tool_cursor()
+            return
+        self.stop_draw_box_mode()
+        self.stop_selection_mode()
+        self.stop_split_box_mode()
+        self._mouse_panning = False
+        self._tool_mode = mode
+        self.setDragMode(QGraphicsView.NoDrag)
+        self._apply_overlay_item_interactivity()
+        self._update_tool_cursor()
+
+    def tool_mode(self) -> str:
+        return getattr(self, "_tool_mode", "select")
+
+    def _pan_tool_active(self) -> bool:
+        return self.tool_mode() == "pan"
+
+    def _event_requests_pan(self, event) -> bool:
+        try:
+            if self._pan_tool_active():
+                return True
+            return bool(event.modifiers() & Qt.AltModifier)
+        except Exception:
+            return self._pan_tool_active()
+
+    def _can_pan_view(self) -> bool:
+        try:
+            return self._pixmap_item is not None and self._zoom > (self._fit_zoom * 1.01)
+        except Exception:
+            return self._pixmap_item is not None
+
+    def _apply_overlay_item_interactivity(self):
+        locked = self._pan_tool_active()
+        for rect in getattr(self, "_rects", {}).values():
+            try:
+                if not isValid(rect):
+                    continue
+                rect.setAcceptHoverEvents(not locked)
+                rect.setAcceptedMouseButtons(Qt.NoButton if locked else Qt.LeftButton)
+                rect.setFlag(QGraphicsRectItem.ItemIsMovable, not locked)
+                rect.setFlag(QGraphicsRectItem.ItemIsSelectable, not locked)
+            except Exception:
+                pass
+
+    def _update_tool_cursor(self):
+        if self._pan_tool_active():
+            self.viewport().setCursor(Qt.OpenHandCursor)
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.viewport().unsetCursor()
+            self.unsetCursor()
 
     def set_theme(self, theme: str):
         if theme == "dark":

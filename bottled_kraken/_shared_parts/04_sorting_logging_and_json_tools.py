@@ -20,6 +20,39 @@ def clamp_bbox(bb: Tuple[int, int, int, int], w: int, h: int) -> Optional[Tuple[
     return (max(0, min(w - 1, x0)), max(0, min(h - 1, y0)),
             max(0, min(w, x1)), max(0, min(h, y1)))
 
+def expand_segmentation_bbox(
+        bb: Optional[Tuple[int, int, int, int]],
+        image_width: int,
+        image_height: int,
+        *,
+        pad_x: Optional[int] = None,
+        pad_y: Optional[int] = None
+) -> Optional[Tuple[int, int, int, int]]:
+    """Make automatically generated Kraken line boxes slightly larger for overlay/OCR use.
+
+    The padding is intentionally applied only after recognition/sorting, when the
+    RecordView objects for the GUI are created. Sorting therefore still uses the
+    original Kraken geometry, while the visible/croppable segmentation boxes get
+    a small amount of breathing room around the text.
+    """
+    if not bb:
+        return None
+    try:
+        x0, y0, x1, y1 = [int(round(float(v))) for v in bb]
+    except Exception:
+        return None
+    if x1 <= x0 or y1 <= y0:
+        return None
+
+    bh = max(1, y1 - y0)
+    if pad_x is None:
+        pad_x = max(2, int(round(bh * 0.10)))
+    if pad_y is None:
+        pad_y = max(1, int(round(bh * 0.08)))
+
+    return clamp_bbox((x0 - pad_x, y0 - pad_y, x1 + pad_x, y1 + pad_y),
+                      int(image_width), int(image_height))
+
 def _safe_int(v, default=0):
     try:
         return int(v)
@@ -33,8 +66,18 @@ def _force_text(value):
         return value.decode("utf-8", errors="replace")
     return str(value)
 
+def _bk_log_dir() -> str:
+    base = os.environ.get("BOTTLED_KRAKEN_LOG_DIR")
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".bottled_kraken")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        base = os.getcwd()
+    return base
+
 def _error_log_path() -> str:
-    return os.path.join(os.getcwd(), "bottled_kraken_error.log")
+    return os.path.join(_bk_log_dir(), "bottled_kraken_error.log")
 
 def _cleanup_old_error_log(max_age_days: int = 20):
     log_path = _error_log_path()

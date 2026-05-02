@@ -5,10 +5,25 @@ def _bk_lm_any_job_running(self) -> bool:
         or (getattr(self, "_bk_local_json_worker", None) and self._bk_local_json_worker.isRunning())
     )
 
+def _bk_lm_task_has_revisable_results(task) -> bool:
+    if not task or not getattr(task, "results", None):
+        return False
+    try:
+        _text, _kr_records, _im, recs = task.results
+    except Exception:
+        return False
+    return bool(recs)
+
 def _bk_lm_get_current_done_task(self):
     task = self._current_task()
-    self._persist_live_canvas_bboxes(task)
-    if not task or task.status != STATUS_DONE or not task.results:
+    try:
+        if task is not None:
+            self._persist_live_canvas_bboxes(task)
+    except Exception:
+        pass
+    # Der Status darf die LM-Überarbeitung nicht blockieren: Nach Teilfehlern können
+    # OCR-Zeilen vorhanden sein, obwohl der Queue-Status „Fehler“ zeigt.
+    if not _bk_lm_task_has_revisable_results(task):
         return None
     return task
 
@@ -35,6 +50,35 @@ def _bk_lm_run_selected_lines(self):
     self.run_ai_revision_for_selected_lines()
 
 def _bk_lm_run_all_lines_current_task(self):
+    # Neuer Queue-Pfad: Haken im Wartebereich > Tabellen-Auswahl > aktuelle Vorschau.
+    target_tasks = []
+    try:
+        if hasattr(self, "_ai_revision_queue_targets"):
+            target_tasks = self._ai_revision_queue_targets()
+        else:
+            checked = self._checked_queue_tasks() if hasattr(self, "_checked_queue_tasks") else []
+            selected = self._selected_queue_tasks() if hasattr(self, "_selected_queue_tasks") else []
+            target_tasks = checked if checked else selected
+    except Exception:
+        target_tasks = []
+
+    if target_tasks:
+        if _bk_lm_any_job_running(self):
+            return
+        if hasattr(self, "_ai_revision_ready_tasks"):
+            items = self._ai_revision_ready_tasks(target_tasks)
+        else:
+            items = [task for task in target_tasks if _bk_lm_task_has_revisable_results(task)]
+        if not items:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
+        # Einmal Skriptmodus wählen, dann alle gewählten Dateien seriell abarbeiten.
+        script_mode = self._choose_ai_script_mode()
+        if not script_mode:
+            return
+        self._run_ai_revision_batch(items, script_mode=script_mode)
+        return
+
     task = _bk_lm_get_current_done_task(self)
     if not task:
         QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
@@ -54,6 +98,11 @@ def _bk_lm_run_all_lines_current_task(self):
         return
     task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs_for_ai]
     self.act_ai_revise.setEnabled(False)
+    try:
+        if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
+            self.btn_ai_revise_bottom.setEnabled(False)
+    except Exception:
+        pass
     self.status_bar.showMessage(self._tr("msg_ai_started"))
     self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
     self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_title"), self._tr, self)
@@ -67,7 +116,7 @@ def _bk_lm_run_all_lines_current_task(self):
         endpoint=self.ai_endpoint,
         enable_thinking=self.ai_enable_thinking,
         source_kind=task.source_kind,
-        script_mode=AI_SCRIPT_PRINT,
+        script_mode=script_mode,
         temperature=self.ai_temperature,
         top_p=self.ai_top_p,
         top_k=self.ai_top_k,
@@ -221,15 +270,26 @@ def _bk_lm_update_dropdown_state(self):
     if not hasattr(self, "act_ai_menu_current_line"):
         return
     task = _bk_lm_get_current_done_task(self)
-    has_task = bool(task)
+    has_current_task = bool(task)
+    queue_targets = []
+    try:
+        if hasattr(self, "_ai_revision_queue_targets"):
+            queue_targets = self._ai_revision_queue_targets()
+        else:
+            checked = self._checked_queue_tasks() if hasattr(self, "_checked_queue_tasks") else []
+            selected = self._selected_queue_tasks() if hasattr(self, "_selected_queue_tasks") else []
+            queue_targets = checked if checked else selected
+    except Exception:
+        queue_targets = []
+    has_queue_targets = any(_bk_lm_task_has_revisable_results(t) for t in queue_targets)
     row = self.list_lines.currentRow() if hasattr(self, "list_lines") else -1
     selected_rows = self._selected_line_rows() if hasattr(self, "_selected_line_rows") else []
     busy = _bk_lm_any_job_running(self)
-    self.act_ai_menu_current_line.setEnabled(has_task and row >= 0 and not busy)
-    self.act_ai_menu_selected_lines.setEnabled(has_task and len(selected_rows) > 0 and not busy)
-    self.act_ai_menu_all_lines.setEnabled(has_task and not busy)
-    self.act_ai_menu_postgres.setEnabled(has_task and not busy)
-    self.act_ai_menu_neo4j.setEnabled(has_task and not busy)
+    self.act_ai_menu_current_line.setEnabled(has_current_task and row >= 0 and not busy)
+    self.act_ai_menu_selected_lines.setEnabled(has_current_task and len(selected_rows) > 0 and not busy)
+    self.act_ai_menu_all_lines.setEnabled((has_current_task or has_queue_targets) and not busy)
+    self.act_ai_menu_postgres.setEnabled(has_current_task and not busy)
+    self.act_ai_menu_neo4j.setEnabled(has_current_task and not busy)
 
 def _bk_lm_install_dropdown_menu(self):
     if getattr(self, "_bk_lm_dropdown_installed", False):

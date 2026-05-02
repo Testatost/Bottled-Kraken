@@ -29,6 +29,8 @@ from ._translation_data.bk_patch12_translations import BK_PATCH12_TRANSLATIONS
 from ._translation_data.bk_unified_translations import BK_UNIFIED_TRANSLATIONS
 from ._translation_data.bk_patch24b_translations import BK_PATCH24B_TRANSLATIONS
 from ._translation_data.bk_lm_ocr_translations import BK_LM_OCR_TRANSLATIONS
+from ._translation_data.bk_lm_options_translations import BK_LM_OPTIONS_TRANSLATIONS
+from ._translation_data.bk_gedcom_translations import BK_GEDCOM_TRANSLATIONS
 from ._translation_data.merge_order import MERGE_ORDER
 
 
@@ -73,6 +75,8 @@ class translation:
     BK_UNIFIED_TRANSLATIONS = BK_UNIFIED_TRANSLATIONS
     BK_PATCH24B_TRANSLATIONS = BK_PATCH24B_TRANSLATIONS
     BK_LM_OCR_TRANSLATIONS = BK_LM_OCR_TRANSLATIONS
+    BK_LM_OPTIONS_TRANSLATIONS = BK_LM_OPTIONS_TRANSLATIONS
+    BK_GEDCOM_TRANSLATIONS = BK_GEDCOM_TRANSLATIONS
     MERGE_ORDER = MERGE_ORDER
 
     @classmethod

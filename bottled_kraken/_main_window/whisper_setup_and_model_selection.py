@@ -283,14 +283,7 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             self.choose_seg_model()
 
     def export_default_shortcut(self):
-        items = [
-            ("Text (.txt)", "txt"),
-            ("CSV (.csv)", "csv"),
-            ("JSON (.json)", "json"),
-            ("ALTO (.xml)", "alto"),
-            ("hOCR (.html)", "hocr"),
-            ("PDF (.pdf)", "pdf"),
-        ]
+        items = self._export_format_items()
         names = [x[0] for x in items]
         choice, ok = QInputDialog.getItem(
             self,

@@ -148,6 +148,8 @@ class ImageCanvasRenderingMixin:
             lab.setAcceptedMouseButtons(Qt.NoButton)
             self.scene.addItem(lab)
             self._labels[rv.idx] = lab
+        self._apply_overlay_item_interactivity()
+        self._update_tool_cursor()
 
     def select_idx(self, idx: Optional[int], center: bool = True):
         if idx is None:
@@ -156,10 +158,31 @@ class ImageCanvasRenderingMixin:
             self.select_indices([idx], center=center)
 
     def wheelEvent(self, event):
-        if event.angleDelta().y() > 0:
+        # Mausrad bleibt immer Zoom, auch im Handmodus und bei gedrückter Alt-Taste.
+        # Unter KDE/Wayland kann Alt+Wheel den vertikalen Radimpuls als X-Delta
+        # liefern; deshalb wird für Alt ohne Shift notfalls das X-Delta als
+        # Zoom-Richtung verwendet.
+        dy = self._wheel_zoom_delta(event)
+        if dy > 0:
             self._apply_zoom(1.25)
-        else:
+        elif dy < 0:
             self._apply_zoom(0.8)
+        event.accept()
+
+    def _wheel_zoom_delta(self, event) -> int:
+        angle_delta = event.angleDelta()
+        dy = int(angle_delta.y())
+        if dy != 0:
+            return dy
+        try:
+            mods = event.modifiers()
+        except Exception:
+            mods = QApplication.keyboardModifiers()
+        if (mods & Qt.AltModifier) and not (mods & Qt.ShiftModifier):
+            dx = int(angle_delta.x())
+            if dx != 0:
+                return dx
+        return 0
 
     def _apply_zoom(self, factor: float):
         new_zoom = self._zoom * factor
@@ -167,4 +190,4 @@ class ImageCanvasRenderingMixin:
             self.scale(factor, factor)
             self._zoom = new_zoom
         if not self._draw_mode and not self._mouse_panning:
-            self.unsetCursor()
+            self._update_tool_cursor()

@@ -5,6 +5,26 @@ from ..workers import *
 from ..dialogs import *
 from ..image_edit import *
 
+def _no_console_kwargs() -> dict:
+    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
+    if not sys.platform.startswith("win"):
+        return {}
+
+    kwargs = {}
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    except Exception:
+        pass
+
+    return kwargs
+
 class MainWindowThemeLanguageAndReadingDirectionMixin:
     def set_reading_direction(self, mode):
         self.reading_direction = mode
@@ -17,6 +37,12 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
         self.options_menu.setTitle(self._tr("menu_options"))
         self.hw_menu.setTitle(self._tr("menu_hw"))
         self.export_menu.setTitle(self._tr("menu_export"))
+        if hasattr(self, "export_format_actions"):
+            self.formats = self._export_format_items()
+            for name, fmt in self.formats:
+                act = self.export_format_actions.get(fmt)
+                if act is not None:
+                    act.setText(name)
         self.reading_menu.setTitle(self._tr("menu_reading"))
         if hasattr(self, "revision_models_menu"):
             self.revision_models_menu.setTitle(self._tr("menu_lm_options"))
@@ -61,6 +87,10 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
         if hasattr(self, "btn_line_search"):
             self.btn_line_search.setText(self._tr("btn_line_search"))
             self.btn_line_search.setToolTip(self._tr("btn_line_search_tooltip"))
+        if hasattr(self, "btn_preview_select"):
+            self.btn_preview_select.setToolTip(self._tr("preview_tool_select_tip"))
+        if hasattr(self, "btn_preview_pan"):
+            self.btn_preview_pan.setToolTip(self._tr("preview_tool_pan_tip"))
         if hasattr(self, "line_search_popup_edit"):
             self.line_search_popup_edit.setPlaceholderText(self._tr("line_search_placeholder"))
             self.line_search_popup_edit.setToolTip(self._tr("line_search_tooltip"))
@@ -104,6 +134,10 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
         for dev, key in mapping.items():
             if dev in self.hw_actions:
                 self.hw_actions[dev].setText(self._tr(key))
+        if hasattr(self, "act_install_cuda_backend"):
+            self.act_install_cuda_backend.setText(self._tr("hw_install_cuda_backend"))
+        if hasattr(self, "act_install_rocm_backend"):
+            self.act_install_rocm_backend.setText(self._tr("hw_install_rocm_backend"))
         read_keys = ["reading_tb_lr", "reading_tb_rl", "reading_bt_lr", "reading_bt_rl"]
         for act, key in zip(self.read_actions, read_keys):
             act.setText(self._tr(key))
@@ -167,32 +201,57 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
         for it in self.queue_items:
             self._update_queue_row(it.path)
 
-    def _gpu_capabilities(self) -> Dict[str, Tuple[bool, str]]:
+    def _gpu_capabilities(self, *, refresh: bool = False) -> Dict[str, Tuple[bool, str]]:
         caps: Dict[str, Tuple[bool, str]] = {"cpu": (True, "CPU")}
-        cuda_avail = torch.cuda.is_available() and torch.cuda.device_count() > 0
+
+        # 1) Internes Torch der Onefile-App prüfen. Bei der CPU-Release-Version
+        # ist das normalerweise torch==...+cpu und damit ohne CUDA/ROCm.
+        cuda_avail = False
         cuda_name = ""
-        if cuda_avail:
-            try:
+        try:
+            cuda_avail = torch.cuda.is_available() and torch.cuda.device_count() > 0
+            if cuda_avail:
                 cuda_name = torch.cuda.get_device_name(0)
-            except Exception:
-                cuda_name = "GPU"
+        except Exception:
+            cuda_avail = False
+            cuda_name = ""
+
         hip_ver = getattr(torch.version, "hip", None)
         cuda_ver = getattr(torch.version, "cuda", None)
-        # Verfügbarkeit von ROCm (HIP)
-        rocm_avail = cuda_avail and (hip_ver is not None)
-        rocm_details = ""
-        if rocm_avail:
-            rocm_details = f"{cuda_name} (HIP {hip_ver})" if cuda_name else f"HIP {hip_ver}"
-        # Verfügbarkeit von CUDA (echter CUDA-Build)
-        cuda_true = cuda_avail and (cuda_ver is not None)
-        cuda_true_details = ""
-        if cuda_true:
-            cuda_true_details = f"{cuda_name} (CUDA {cuda_ver})" if cuda_name else f"CUDA {cuda_ver}"
-        mps_avail = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        mps_details = "Apple MPS" if mps_avail else ""
-        caps["cuda"] = (cuda_true, cuda_true_details if cuda_true_details else "CUDA")
-        caps["rocm"] = (rocm_avail, rocm_details if rocm_details else "ROCm")
-        caps["mps"] = (mps_avail, mps_details if mps_details else "MPS")
+
+        rocm_avail = bool(cuda_avail and hip_ver is not None)
+        rocm_details = f"{cuda_name} (HIP {hip_ver})" if rocm_avail and cuda_name else (f"HIP {hip_ver}" if rocm_avail else "ROCm")
+
+        cuda_true = bool(cuda_avail and cuda_ver is not None)
+        cuda_true_details = f"{cuda_name} (CUDA {cuda_ver})" if cuda_true and cuda_name else (f"CUDA {cuda_ver}" if cuda_true else "CUDA")
+
+        # 2) Externe Backend-Installer prüfen. Diese sind für die CPU-Onefile-App
+        # relevant, weil die GPU-fähige Torch-Umgebung getrennt liegt.
+        try:
+            ext_cuda = get_external_ocr_backend("nvidia-cuda", refresh=refresh)
+            if ext_cuda and ext_cuda.ok:
+                cuda_true = True
+                cuda_true_details = ext_cuda.detail or "NVIDIA CUDA Backend"
+        except Exception:
+            pass
+
+        try:
+            ext_rocm = get_external_ocr_backend("amd-rocm", refresh=refresh)
+            if ext_rocm and ext_rocm.ok:
+                rocm_avail = True
+                rocm_details = ext_rocm.detail or "AMD ROCm Backend"
+        except Exception:
+            pass
+
+        try:
+            mps_avail = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        except Exception:
+            mps_avail = False
+        mps_details = "Apple MPS" if mps_avail else "MPS"
+
+        caps["cuda"] = (cuda_true, cuda_true_details)
+        caps["rocm"] = (rocm_avail, rocm_details)
+        caps["mps"] = (mps_avail, mps_details)
         return caps
 
     def _total_ram_bytes(self) -> int:
@@ -253,7 +312,8 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
                     ["wmic", "cpu", "get", "name"],
                     text=True,
                     encoding="utf-8",
-                    errors="ignore"
+                    errors="ignore",
+                    **_no_console_kwargs(),
                 )
                 lines = [x.strip() for x in out.splitlines() if x.strip() and x.strip().lower() != "name"]
                 if lines:
@@ -266,7 +326,8 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
                     ["sysctl", "-n", "machdep.cpu.brand_string"],
                     text=True,
                     encoding="utf-8",
-                    errors="ignore"
+                    errors="ignore",
+                    **_no_console_kwargs(),
                 ).strip()
                 if out:
                     return out, logical
@@ -292,14 +353,51 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
             name = "CPU"
         return name, logical
 
-    def _gpu_summary(self) -> Dict[str, object]:
-        caps = self._gpu_capabilities()
+    def _gpu_summary(self, *, refresh_backends: bool = False) -> Dict[str, object]:
+        caps = self._gpu_capabilities(refresh=refresh_backends)
         info = {
             "gpu_ok": False,
             "gpu_label": self._tr("help_hw_gpu_none"),
             "gpu_vram_gb": 0.0,
             "gpu_vram_text": self._tr("help_hw_vram_unknown"),
         }
+
+        def _apply_vram_from_bytes(total_memory) -> bool:
+            try:
+                total_memory = int(total_memory or 0)
+            except Exception:
+                total_memory = 0
+            if total_memory <= 0:
+                return False
+            vram_gb = round(total_memory / (1024 ** 3), 1)
+            info["gpu_vram_gb"] = vram_gb
+            info["gpu_vram_text"] = self._tr("help_hw_fmt_gb", vram_gb)
+            return True
+
+        def _apply_vram_from_external_backend(kind: str) -> bool:
+            try:
+                backend = get_external_ocr_backend(kind, refresh=False)
+                data = getattr(backend, "self_test", None) if backend else None
+                if not isinstance(data, dict):
+                    return False
+
+                total_memory = data.get("cuda_device_total_memory") or data.get("vram_bytes")
+                if _apply_vram_from_bytes(total_memory):
+                    return True
+
+                total_gb = data.get("cuda_device_total_memory_gb") or data.get("vram_gb")
+                try:
+                    total_gb = float(total_gb or 0.0)
+                except Exception:
+                    total_gb = 0.0
+                if total_gb > 0:
+                    info["gpu_vram_gb"] = round(total_gb, 1)
+                    info["gpu_vram_text"] = self._tr("help_hw_fmt_gb", info["gpu_vram_gb"])
+                    return True
+            except Exception:
+                pass
+            return False
+
         for key in ("cuda", "rocm", "mps"):
             ok, detail = caps.get(key, (False, ""))
             if not ok:
@@ -307,26 +405,33 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
             info["gpu_ok"] = True
             info["gpu_label"] = detail if detail else key.upper()
             if key in ("cuda", "rocm"):
+                got_vram = False
+
+                # Interner Torch-Check: funktioniert nur, wenn die Haupt-App selbst
+                # ein CUDA/ROCm-fähiges Torch enthält.
                 try:
-                    props = torch.cuda.get_device_properties(0)
-                    total_memory = int(getattr(props, "total_memory", 0) or 0)
-                    if total_memory > 0:
-                        vram_gb = round(total_memory / (1024 ** 3), 1)
-                        info["gpu_vram_gb"] = vram_gb
-                        info["gpu_vram_text"] = self._tr("help_hw_fmt_gb", vram_gb)
-                    else:
-                        info["gpu_vram_text"] = self._tr("help_hw_vram_unknown")
+                    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                        props = torch.cuda.get_device_properties(0)
+                        got_vram = _apply_vram_from_bytes(getattr(props, "total_memory", 0))
                 except Exception:
+                    got_vram = False
+
+                # CPU-Onefile-Fall: GPU-Torch liegt im externen Backend.
+                if not got_vram:
+                    backend_kind = "nvidia-cuda" if key == "cuda" else "amd-rocm"
+                    got_vram = _apply_vram_from_external_backend(backend_kind)
+
+                if not got_vram:
                     info["gpu_vram_text"] = self._tr("help_hw_vram_unknown")
             else:
                 info["gpu_vram_text"] = self._tr("help_hw_vram_shared")
             break
         return info
 
-    def _hardware_snapshot(self) -> Dict[str, object]:
+    def _hardware_snapshot(self, *, refresh_backends: bool = False) -> Dict[str, object]:
         cpu_name, cpu_threads = self._cpu_summary()
         ram_gb = self._total_ram_gb()
-        gpu = self._gpu_summary()
+        gpu = self._gpu_summary(refresh_backends=refresh_backends)
         return {
             "cpu_name": cpu_name,
             "cpu_threads": cpu_threads,

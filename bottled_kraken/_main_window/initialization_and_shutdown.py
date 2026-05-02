@@ -18,6 +18,29 @@ class MainWindowInitializationAndShutdownMixin:
             self.ai_progress_dialog.close()
             self.ai_progress_dialog = None
 
+    def _task_geometry_image(self, task: Optional[TaskItem]) -> Optional[Image.Image]:
+        """Liefert ein Bildobjekt nur temporär für Geometrie/Clamping.
+
+        Nach dem Speicherfix werden große Batch-Ergebnisse ohne PIL-Bild in
+        task.results gehalten. Funktionen, die nur Breite/Höhe benötigen,
+        laden die Bilddatei deshalb bei Bedarf kurz vom Pfad.
+        """
+        if not task:
+            return None
+        try:
+            if task.results:
+                _text, _kr_records, im, _recs = task.results
+                if im is not None:
+                    return im
+        except Exception:
+            pass
+        try:
+            if task.path and os.path.exists(task.path):
+                return _load_image_gray(task.path)
+        except Exception:
+            return None
+        return None
+
     def _scene_rect_to_bbox(self, scene_rect: QRectF, im: Optional[Image.Image]) -> Optional[BBox]:
         if im is None:
             return None
@@ -37,6 +60,8 @@ class MainWindowInitializationAndShutdownMixin:
         if not task or not task.results:
             return
         text, kr_records, im, recs = task.results
+        if im is None:
+            im = self._task_geometry_image(task)
         changed = False
         for idx, rv in enumerate(recs):
             rect_item = self.canvas._rects.get(idx)
@@ -51,7 +76,7 @@ class MainWindowInitializationAndShutdownMixin:
             task.results = (
                 "\n".join(r.text for r in recs).strip(),
                 kr_records,
-                im,
+                None,
                 recs
             )
         self._update_task_preset_bboxes(task)

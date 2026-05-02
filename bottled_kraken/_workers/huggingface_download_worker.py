@@ -1,6 +1,27 @@
 """Worker-Klassen für Bottled Kraken."""
 from ..shared import *
 
+def _no_console_kwargs() -> dict:
+    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
+    if not sys.platform.startswith("win"):
+        return {}
+
+    kwargs = {}
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    except Exception:
+        pass
+
+    return kwargs
+
+
 class HFDownloadWorker(QThread):
     progress_changed = Signal(int)
     status_changed = Signal(str)
@@ -64,9 +85,6 @@ class HFDownloadWorker(QThread):
             pass
     def _run_simple_command(self, cmd: List[str], status_text: str):
         self.status_changed.emit(status_text)
-        creationflags = 0
-        if sys.platform.startswith("win"):
-            creationflags = subprocess.CREATE_NO_WINDOW
         self._proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -77,7 +95,7 @@ class HFDownloadWorker(QThread):
             errors="replace",
             bufsize=1,
             universal_newlines=True,
-            creationflags=creationflags
+            **_no_console_kwargs(),
         )
         output_queue = queue.Queue()
         reader_thread = threading.Thread(
@@ -210,9 +228,6 @@ class HFDownloadWorker(QThread):
             total_bytes = self._repo_total_bytes()
             total_files = len(self._repo_files)
             start_time = time.time()
-            creationflags = 0
-            if sys.platform.startswith("win"):
-                creationflags = subprocess.CREATE_NO_WINDOW
             # 1) Vorbereitende Befehle (z. B. venv) ausführen
             for cmd in self.prepare_cmds:
                 cmd_text = " ".join(cmd).lower()
@@ -243,7 +258,7 @@ class HFDownloadWorker(QThread):
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=creationflags
+                **_no_console_kwargs(),
             )
             output_queue = queue.Queue()
             reader_thread = threading.Thread(

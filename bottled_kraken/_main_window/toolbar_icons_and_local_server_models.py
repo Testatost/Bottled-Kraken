@@ -7,14 +7,18 @@ from ..image_edit import *
 
 class MainWindowToolbarIconsAndLocalServerModelsMixin:
     def _set_secondary_button_icons(self):
-        def themed_or_standard(theme_name: str, std_icon):
+        # Einfache Button-Symbole werden themeabhängig eingefärbt.
+        # LM-Überarbeitung bleibt ausdrücklich beim unveränderten Theme-/Standard-Icon
+        # aus der Archiv-Version, damit kein gefülltes Quadrat entsteht.
+        def plain_theme_or_standard(theme_name: str, std_icon):
             icon = QIcon.fromTheme(theme_name)
             if icon.isNull():
                 icon = self.style().standardIcon(std_icon)
             return icon
+
         if hasattr(self, "btn_import_lines"):
             self.btn_import_lines.setIcon(
-                themed_or_standard("document-import", QStyle.SP_DialogOpenButton)
+                self.style().standardIcon(QStyle.SP_DialogOpenButton)
             )
         if hasattr(self, "btn_voice_fill"):
             self.btn_voice_fill.setIcon(
@@ -22,7 +26,7 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             )
         if hasattr(self, "btn_ai_revise_bottom"):
             self.btn_ai_revise_bottom.setIcon(
-                themed_or_standard("preferences-system", QStyle.SP_ComputerIcon)
+                plain_theme_or_standard("preferences-system", QStyle.SP_ComputerIcon)
             )
         if hasattr(self, "btn_line_search"):
             self.btn_line_search.setIcon(
@@ -34,7 +38,7 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             )
         if hasattr(self, "btn_toggle_log"):
             self.btn_toggle_log.setIcon(
-                themed_or_standard("text-x-log", QStyle.SP_FileDialogDetailedView)
+                self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
             )
 
     def _scan_kraken_models(self):
@@ -93,7 +97,7 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         """
         # 1) Primär: echtes Kraken-Metadatum lesen
         try:
-            nn = vgsl.TorchVGSLModel.load_model(model_path)
+            nn = load_kraken_segmentation_model(model_path)
             model_type = self._model_type_to_text(getattr(nn, "model_type", ""))
             if "recognition" in model_type:
                 return "rec"
@@ -338,18 +342,25 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         self.delete_selected_queue_items(reset_preview=True)
 
     def run_ai_revision_for_selected(self):
-        selected = self._selected_queue_tasks()
-        if selected:
-            items = [it for it in selected if it.status == STATUS_DONE and it.results]
+        checked = self._checked_queue_tasks() if hasattr(self, "_checked_queue_tasks") else []
+        selected = self._selected_queue_tasks() if hasattr(self, "_selected_queue_tasks") else []
+        targets = checked if checked else selected
+        if not targets:
+            targets = list(self.queue_items)
+        if hasattr(self, "_ai_revision_ready_tasks"):
+            items = self._ai_revision_ready_tasks(targets)
         else:
-            items = [it for it in self.queue_items if it.status == STATUS_DONE and it.results]
+            items = [it for it in targets if it.results]
         if not items:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         self._run_ai_revision_batch(items)
 
     def run_ai_revision_for_all(self):
-        items = [it for it in self.queue_items if it.status == STATUS_DONE and it.results]
+        if hasattr(self, "_ai_revision_ready_tasks"):
+            items = self._ai_revision_ready_tasks(list(self.queue_items))
+        else:
+            items = [it for it in self.queue_items if it.results]
         if not items:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return

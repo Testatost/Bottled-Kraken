@@ -5,6 +5,25 @@ from ..workers import *
 from ..dialogs import *
 from ..image_edit import *
 
+class HardwareHelpHtmlWorker(QThread):
+    finished_html = Signal(str)
+    failed_text = Signal(str)
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+
+    def run(self):
+        try:
+            try:
+                clear_external_ocr_backend_cache()
+            except Exception:
+                pass
+            html_part = self.main_window._build_hardware_requirements_help_html(refresh_backends=True)
+            self.finished_html.emit(html_part)
+        except Exception as exc:
+            self.failed_text.emit(repr(exc))
+
 class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
     def _whisper_system_hint(self, platform_name: str) -> str:
         name = (platform_name or "").strip().lower()
@@ -203,7 +222,8 @@ class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
         nav_list.setFixedWidth(180)
         nav_list.setSpacing(4)
         stack = QStackedWidget()
-        quick_html = self._tr("help_html_quick") + self._build_hardware_requirements_help_html()
+        quick_base_html = self._tr("help_html_quick")
+        quick_loading_html = quick_base_html + self._build_hardware_requirements_loading_html()
         kraken_html = self._tr("help_html_kraken")
         lm_server_html = self._tr("help_html_lm_server")
         ssh_html = self._tr("help_html_ssh")
@@ -270,7 +290,8 @@ class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
         shortcuts_html = self._tr("help_html_shortcuts")
         data_protection_html = self._tr("help_html_data_protection")
         legal_html = self._tr("help_html_legal")
-        stack.addWidget(make_page(quick_html))
+        quick_browser = make_page(quick_loading_html)
+        stack.addWidget(quick_browser)
         stack.addWidget(make_page(kraken_html))
         stack.addWidget(make_page(lm_server_html))
         stack.addWidget(make_page(ssh_html))
@@ -302,6 +323,39 @@ class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
         buttons.button(QDialogButtonBox.Ok).setText(self._tr("btn_ok"))
         buttons.accepted.connect(dlg.accept)
         layout.addWidget(buttons)
+
+        def _start_hardware_refresh():
+            worker = HardwareHelpHtmlWorker(self)
+            self._help_hardware_worker = worker
+
+            def _apply_hardware_html(hw_html: str):
+                try:
+                    if not isValid(dlg) or not isValid(quick_browser):
+                        return
+                    quick_browser.setHtml(_help_html(self.current_theme, quick_base_html + hw_html))
+                except Exception:
+                    pass
+
+            def _apply_hardware_error(message: str):
+                try:
+                    if not isValid(dlg) or not isValid(quick_browser):
+                        return
+                    fallback = quick_base_html + self._build_hardware_requirements_help_html(refresh_backends=False)
+                    quick_browser.setHtml(_help_html(self.current_theme, fallback))
+                except Exception:
+                    pass
+
+            worker.finished_html.connect(_apply_hardware_html)
+            worker.failed_text.connect(_apply_hardware_error)
+            worker.finished.connect(worker.deleteLater)
+            worker.finished.connect(lambda: setattr(self, "_help_hardware_worker", None))
+            try:
+                dlg.destroyed.connect(worker.requestInterruption)
+            except Exception:
+                pass
+            worker.start()
+
+        QTimer.singleShot(0, _start_hardware_refresh)
         dlg.exec()
 
     def _edited_images_output_dir(self, source_task: TaskItem) -> str:
@@ -314,22 +368,54 @@ class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
         os.makedirs(out_dir, exist_ok=True)
         return out_dir
 
+    def _normalized_edited_image_base_name(self, source_task: TaskItem) -> str:
+        """
+        Liefert den stabilen Basisnamen für bearbeitete Bilder.
+
+        Zielschema:
+            originalname_edit_X_Y.png
+
+        Dabei ist X die Bearbeitungs-/Versionsnummer für dieselbe Ursprungsdatei
+        und Y die laufende Nummer innerhalb derselben Bearbeitungsrunde.
+        """
+        stem = os.path.splitext(os.path.basename(source_task.path))[0]
+        # Neues Schema: originalname_edit_2_1 -> originalname
+        stem = re.sub(r'_edit_\d+_\d+$', '', stem)
+        # Altes Schema: original__edit_irgendwas -> original
+        stem = re.sub(r'__edit_.*$', '', stem)
+        return re.sub(r'[^A-Za-z0-9._-]+', '_', stem).strip('._') or "bild"
+
+    def _next_edited_image_version(self, source_task: TaskItem) -> int:
+        """
+        Ermittelt die nächste freie Versionsnummer X für Dateien nach dem Schema
+        originalname_edit_X_Y.png im Bearbeitungsordner.
+        """
+        edit_dir = self._edited_images_output_dir(source_task)
+        base_name = self._normalized_edited_image_base_name(source_task)
+        pattern = re.compile(rf'^{re.escape(base_name)}_edit_(\d+)_(\d+)\.png$', re.IGNORECASE)
+        max_version = 0
+        try:
+            for entry in os.listdir(edit_dir):
+                match = pattern.match(entry)
+                if not match:
+                    continue
+                try:
+                    max_version = max(max_version, int(match.group(1)))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return max_version + 1
+
     def _save_edited_image_under_original(
             self,
             source_task: TaskItem,
             pil_image: Image.Image,
-            suggested_name: str
+            file_stem: str
     ) -> str:
         edit_dir = self._edited_images_output_dir(source_task)
-        src_stem = os.path.splitext(os.path.basename(source_task.path))[0]
-        safe_src_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', src_stem).strip('._') or "bild"
-        safe_suggested = re.sub(r'[^A-Za-z0-9._-]+', '_', suggested_name).strip('._') or "edit"
-        safe_base = f"{safe_src_stem}__{safe_suggested}"
-        out_path = os.path.join(edit_dir, f"{safe_base}.png")
-        counter = 2
-        while os.path.exists(out_path):
-            out_path = os.path.join(edit_dir, f"{safe_base}_{counter}.png")
-            counter += 1
+        safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', file_stem).strip('._') or "bild_edit_1_1"
+        out_path = os.path.join(edit_dir, f"{safe_stem}.png")
         pil_image.convert("RGB").save(out_path, format="PNG")
         return out_path
 
@@ -363,16 +449,24 @@ class MainWindowWhisperDownloadHelpAndImageEditQueueMixin:
             result_images: List[Image.Image]
     ) -> List[TaskItem]:
         created = []
-        original_name = source_task.display_name or os.path.basename(source_task.path)
-        original_stem = os.path.splitext(original_name)[0]
-        safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', original_stem).strip('._') or "bild"
         total = max(1, len(result_images))
+        base_name = self._normalized_edited_image_base_name(source_task)
+        version = self._next_edited_image_version(source_task)
+        edit_dir = self._edited_images_output_dir(source_task)
+        while True:
+            candidate_paths = [
+                os.path.join(edit_dir, f"{base_name}_edit_{version}_{idx}.png")
+                for idx in range(1, total + 1)
+            ]
+            if not any(os.path.exists(p) for p in candidate_paths):
+                break
+            version += 1
         for idx, img in enumerate(result_images, start=1):
-            label_name = f"edit_{safe_stem}_{idx}_{total}"
+            file_stem = f"{base_name}_edit_{version}_{idx}"
             out_path = self._save_edited_image_under_original(
                 source_task=source_task,
                 pil_image=img,
-                suggested_name=label_name
+                file_stem=file_stem
             )
             new_task = TaskItem(
                 path=out_path,

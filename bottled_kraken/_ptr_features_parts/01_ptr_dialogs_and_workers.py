@@ -78,15 +78,9 @@ class PtrMultiOCRWorker(QThread):
         except Exception:
             pass
     def _load_rec_model(self, path: str, device):
-        try:
-            return models.load_any(path, device=device)
-        except TypeError:
-            return models.load_any(path)
+        return load_kraken_recognition_model(path, device=device)
     def _load_seg_model(self, path: str, device):
-        try:
-            return vgsl.TorchVGSLModel.load_model(path, device=device)
-        except TypeError:
-            return vgsl.TorchVGSLModel.load_model(path)
+        return load_kraken_segmentation_model(path, device=device)
     def _normalize_recognition_paths(self) -> List[str]:
         cleaned = []
         seen = set()
@@ -123,9 +117,9 @@ class PtrMultiOCRWorker(QThread):
         overall = (file_idx + frac) / float(total_files)
         self.progress.emit(int(overall * 100))
     def _ocr_one_run(self, im: Image.Image, rec_model: Any) -> Tuple[str, list, List[RecordView]]:
-        seg = blla.segment(im, model=self._seg_model)
+        seg = segment_with_kraken(im, model=self._seg_model, device=self._device)
         kr_records: List[Any] = []
-        for rec in rpred.rpred(rec_model, im, seg):
+        for rec in recognize_with_kraken(rec_model, im, seg):
             kr_records.append(rec)
             if self.isInterruptionRequested():
                 break
@@ -142,7 +136,7 @@ class PtrMultiOCRWorker(QThread):
             if pred is None:
                 continue
             txt = str(pred)
-            bb = record_bbox(r)
+            bb = expand_segmentation_bbox(record_bbox(r), page_w, page_h)
             if bb:
                 x0, y0, x1, y1 = bb
                 w = x1 - x0

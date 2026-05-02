@@ -8,17 +8,14 @@ class ImageEditCanvasInteractionMixin:
             return
         wp = event.position()
         p = self._widget_to_image(wp)
-        if (
-            event.button() == Qt.LeftButton
-            and (event.modifiers() & Qt.AltModifier)
-            and self._can_pan_with_alt()
-        ):
-            self.drag_mode = "pan"
-            self._pan_active = True
-            self._pan_start_widget = QPointF(wp)
-            self._pan_start_x = float(self._pan_x)
-            self._pan_start_y = float(self._pan_y)
-            self.setCursor(Qt.ClosedHandCursor)
+        if event.button() == Qt.LeftButton and self._event_requests_pan(event):
+            if self._can_pan_with_alt():
+                self.drag_mode = "pan"
+                self._pan_active = True
+                self._pan_start_widget = QPointF(wp)
+                self._pan_start_x = float(self._pan_x)
+                self._pan_start_y = float(self._pan_y)
+                self.setCursor(Qt.ClosedHandCursor)
             return
         if not self._image_rect_in_widget().contains(wp) and not self.rotation_mode:
             return
@@ -39,10 +36,11 @@ class ImageEditCanvasInteractionMixin:
             # Wenn Crop, Trennbalken oder Entfernen aktiv sind, zuerst Hinweis statt Rotation
             if sep_hit is not None or crop_hit or self.show_crop or erase_hit:
                 tr = getattr(self.parent(), "_tr", None)
+                _t = tr if callable(tr) else (lambda key, *args: key.format(*args) if args else key)
                 QMessageBox.information(
                     self,
-                    tr("image_edit_notice_title") if callable(tr) else "Notice",
-                    tr("image_edit_turn_off_rotation_first") if callable(tr) else "Rotation is still active."
+                    _t("image_edit_notice_title"),
+                    _t("image_edit_turn_off_rotation_first")
                 )
                 return
             self.drag_mode = "img_rotate"
@@ -218,9 +216,17 @@ class ImageEditCanvasInteractionMixin:
     def wheelEvent(self, event):
         if self.base_image is None:
             return
+        # Mausrad bleibt immer Zoom, auch im Handmodus und bei gedrückter Alt-Taste.
+        # Unter KDE/Wayland kann Alt+Wheel den vertikalen Radimpuls als X-Delta
+        # liefern; deshalb wird für Alt ohne Shift notfalls das X-Delta als
+        # Zoom-Richtung verwendet.
+        dy = self._wheel_zoom_delta(event)
+        if dy == 0:
+            event.accept()
+            return
         old_crop = self.get_crop_orig()
         old_erase = self.get_erase_orig() if self.show_erase else None
-        self.zoom = max(0.2, min(6.0, self.zoom * (1.1 if event.angleDelta().y() > 0 else 0.9)))
+        self.zoom = max(0.2, min(6.0, self.zoom * (1.1 if dy > 0 else 0.9)))
         self._update_view_image()
         self._clamp_pan()
         self._update_image_offset()
@@ -230,6 +236,22 @@ class ImageEditCanvasInteractionMixin:
         self._ensure_separator_inside()
         self.update()
         self.changed.emit()
+        event.accept()
+
+    def _wheel_zoom_delta(self, event) -> int:
+        angle_delta = event.angleDelta()
+        dy = int(angle_delta.y())
+        if dy != 0:
+            return dy
+        try:
+            mods = event.modifiers()
+        except Exception:
+            mods = QApplication.keyboardModifiers()
+        if (mods & Qt.AltModifier) and not (mods & Qt.ShiftModifier):
+            dx = int(angle_delta.x())
+            if dx != 0:
+                return dx
+        return 0
 
     def resizeEvent(self, event):
         old_crop = self.get_crop_orig()
@@ -259,7 +281,7 @@ class ImageEditCanvasInteractionMixin:
         if self._pan_active:
             self.setCursor(Qt.ClosedHandCursor)
             return
-        if self._can_pan_with_alt() and (QApplication.keyboardModifiers() & Qt.AltModifier):
+        if self._pan_tool_active() or (self._can_pan_with_alt() and (QApplication.keyboardModifiers() & Qt.AltModifier)):
             self.setCursor(Qt.OpenHandCursor)
             return
         if self.show_separator and self.separator is not None:

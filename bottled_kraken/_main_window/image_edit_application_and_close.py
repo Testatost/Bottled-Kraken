@@ -30,9 +30,15 @@ class MainWindowImageEditApplicationAndCloseMixin:
         dlg.chk_gray.blockSignals(True)
         dlg.chk_gray.setChecked(False)
         dlg.chk_gray.blockSignals(False)
+        dlg.contrast_enabled = False
+        dlg.contrast_level = 2.2
+        if hasattr(dlg, "contrast_slider"):
+            dlg._set_contrast_slider_from_level(dlg.contrast_level)
         dlg.chk_contrast.blockSignals(True)
         dlg.chk_contrast.setChecked(False)
         dlg.chk_contrast.blockSignals(False)
+        if hasattr(dlg, "contrast_controls_widget"):
+            dlg._update_contrast_slider_ui()
         dlg.btn_erase_rect.blockSignals(True)
         dlg.btn_erase_ellipse.blockSignals(True)
         dlg.btn_erase_rect.setChecked(False)

@@ -5,6 +5,7 @@ from .ui_components import *
 from .workers import *
 from .dialogs import *
 from .image_edit import *
+import math
 
 from ._main_window.initialization_and_shutdown import MainWindowInitializationAndShutdownMixin
 from ._main_window.whisper_setup_and_model_selection import MainWindowWhisperSetupAndModelSelectionMixin
@@ -348,11 +349,13 @@ class MainWindow(
         self.btn_theme_toggle = QToolButton()
         self.btn_theme_toggle.setCheckable(True)
         self.btn_theme_toggle.setCursor(Qt.PointingHandCursor)
-        self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.btn_theme_toggle.clicked.connect(self.toggle_theme)
+
         self.btn_lang_menu = QToolButton()
         self.btn_lang_menu.setPopupMode(QToolButton.InstantPopup)
         self.btn_lang_menu.setCursor(Qt.PointingHandCursor)
+        self.btn_lang_menu.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self._pending_box_for_row: Optional[int] = None
         self._pending_new_line_box: bool = False
         self._auto_select_best_device()

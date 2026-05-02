@@ -113,27 +113,52 @@ class MainWindowQueueContextPreviewAndModelLoadingMixin:
         self._cleanup_temp_dirs()
         self._log(self._tr_log("log_queue_cleared"))
 
-    def preview_image(self, path: str):
+    def _task_by_path(self, path: Optional[str]) -> Optional[TaskItem]:
+        if not path:
+            return None
+        return next((i for i in self.queue_items if i.path == path), None)
+
+    def _loaded_preview_task(self) -> Optional[TaskItem]:
+        return self._task_by_path(getattr(self, "_loaded_preview_path", None))
+
+    def _persist_loaded_preview_bboxes(self):
+        """Speichert die gerade sichtbaren Overlay-Boxen, bevor die Canvas geleert wird.
+
+        Beim Queue-Seitenwechsel zeigt currentRow bereits auf die neue Seite, während
+        die Canvas noch die vorherige Seite enthält. Deshalb wird der zuletzt geladene
+        Preview-Pfad statt _current_task() verwendet.
+        """
+        task = self._loaded_preview_task()
+        if task and task.results:
+            self._persist_live_canvas_bboxes(task)
+
+    def preview_image(self, path: str, persist_current: bool = False):
         try:
+            if persist_current:
+                self._persist_loaded_preview_bboxes()
             im = Image.open(path)
             self.canvas.load_pil_image(im)
+            self._loaded_preview_path = path
             self.list_lines.clear()
             item = next((i for i in self.queue_items if i.path == path), None)
-            if item and item.status == STATUS_DONE and item.results:
-                self.load_results(path)
+            if item and item.results:
+                self.load_results(path, persist_current=False)
             else:
                 self.canvas.set_overlay_enabled(False)
         except Exception as e:
             QMessageBox.warning(self, self._tr("err_title"), self._tr("err_load", str(e)))
 
-    def load_results(self, path: str):
+    def load_results(self, path: str, persist_current: bool = False):
+        if persist_current:
+            self._persist_loaded_preview_bboxes()
         item = next((i for i in self.queue_items if i.path == path), None)
         if not item or not item.results:
             return
         text, kr_records, im, recs = item.results
         preview_im = _load_image_color(path)
         self.canvas.load_pil_image(preview_im)
-        self.canvas.set_overlay_enabled(item.status == STATUS_DONE)
+        self._loaded_preview_path = path
+        self.canvas.set_overlay_enabled(bool(item.results))
         if self.show_overlay:
             self.canvas.draw_overlays(recs)
         self._populate_lines_list(recs)
@@ -178,10 +203,12 @@ class MainWindowQueueContextPreviewAndModelLoadingMixin:
         if self.queue_table.currentRow() >= 0:
             path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
             item = next((i for i in self.queue_items if i.path == path), None)
-            if item and item.status == STATUS_DONE:
-                self.load_results(path)
+            # refresh_preview lädt dieselbe sichtbare Seite neu (z. B. Overlay an/aus).
+            # Deshalb vor dem Neuaufbau die aktuellen Canvas-Boxen sichern.
+            if item and item.results:
+                self.load_results(path, persist_current=True)
             else:
-                self.preview_image(path)
+                self.preview_image(path, persist_current=True)
 
     def on_queue_double_click(self, row, col):
         path = self.queue_table.item(row, QUEUE_COL_FILE).data(Qt.UserRole)
@@ -399,11 +426,11 @@ class MainWindowQueueContextPreviewAndModelLoadingMixin:
                 im = old_im
                 kr = old_kr
             else:
-                im = _load_image_gray(task.path)
+                im = None
                 kr = []
                 recs = [RecordView(i, entry["text"], entry["bbox"]) for i, entry in enumerate(entries)]
         else:
-            im = _load_image_gray(task.path)
+            im = None
             kr = []
             recs = [RecordView(i, entry["text"], entry["bbox"]) for i, entry in enumerate(entries)]
         text = "\n".join(entry["text"] for entry in entries).strip()

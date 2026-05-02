@@ -18,7 +18,7 @@ class TaskItem:
     path: str
     display_name: str
     status: int = STATUS_WAITING
-    results: Optional[Tuple[str, list, Image.Image, List[RecordView]]] = None
+    results: Optional[Tuple[str, list, Optional[Image.Image], List[RecordView]]] = None
     edited: bool = False
     undo_stack: List[UndoSnapshot] = field(default_factory=list)
     redo_stack: List[UndoSnapshot] = field(default_factory=list)

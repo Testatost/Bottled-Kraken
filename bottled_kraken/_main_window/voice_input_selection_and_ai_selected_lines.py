@@ -134,7 +134,11 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
     def run_ai_revision_for_selected_lines(self):
         task = self._current_task()
         self._persist_live_canvas_bboxes(task)
-        if not task or task.status != STATUS_DONE or not task.results:
+        if hasattr(self, "_ai_revision_task_has_revisable_results"):
+            has_revisable = self._ai_revision_task_has_revisable_results(task)
+        else:
+            has_revisable = bool(task and task.results)
+        if not has_revisable:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         text, kr_records, im, recs = task.results
@@ -191,7 +195,7 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             presence_penalty=self.ai_presence_penalty,
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
+            max_tokens=(self._lm_token_limit("selected_lines") if hasattr(self, "_lm_token_limit") else self.ai_max_tokens),
             tr_func=self._tr,
             parent=self
         )
@@ -212,6 +216,7 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
                 self.ai_progress_dialog.close()
                 self.ai_progress_dialog = None
             return
+        task.status = STATUS_DONE
         rows = list(ctx.get("rows", []))
         text, kr_records, im, recs = task.results
         if not rows:

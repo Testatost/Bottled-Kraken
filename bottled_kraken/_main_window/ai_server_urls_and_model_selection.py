@@ -395,16 +395,16 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         if results:
             recs = [self._recordview_from_dict(x) for x in results.get("records", [])]
             text = str(results.get("text", "\n".join(rv.text for rv in recs).strip()))
-            gray_im = None
-            if os.path.exists(task.path):
-                try:
-                    gray_im = _load_image_gray(task.path)
-                except Exception:
-                    gray_im = None
-            task.results = (text, [], gray_im, recs)
+            # Große Projekte/PDFs nicht beim Laden komplett in den Speicher ziehen.
+            # Preview/Export laden die Bilddatei bei Bedarf über task.path.
+            task.results = (text, [], None, recs)
         return task
 
     def _project_to_dict(self) -> dict:
+        try:
+            self._persist_loaded_preview_bboxes()
+        except Exception:
+            pass
         current_row = self.queue_table.currentRow()
         return {
             "version": 2,

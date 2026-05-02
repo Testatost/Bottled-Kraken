@@ -89,6 +89,7 @@ class ImageEditSettings:
     rotation_angle: float = 0.0
     color_mode: str = "RGB"
     contrast_enabled: bool = False
+    contrast_level: float = 2.2
     crop_enabled: bool = False
     crop_orig: Optional[Tuple[int, int, int, int]] = None
     split_enabled: bool = False

@@ -95,7 +95,28 @@ class MainWindowImportLinesAndOcrBatchMixin:
             export_dir=self.current_export_dir,
             preset_bboxes_by_path={},  # normales Re-OCR ohne alte Split-Boxen
         )
-        self.worker = OCRWorker(job)
+        # CPU-Release: CUDA/ROCm laufen optional über externe Backend-Installer.
+        # Wenn ein externes Backend installiert und funktionsfähig ist, wird der
+        # Kraken-OCR-Lauf an dessen Worker-Prozess delegiert. Sonst bleibt der
+        # interne CPU-OCRWorker aktiv.
+        external_backend = None
+        if self.device_str == "cuda":
+            external_backend = get_external_ocr_backend("nvidia-cuda", refresh=True)
+        elif self.device_str == "rocm":
+            external_backend = get_external_ocr_backend("amd-rocm", refresh=True)
+
+        if external_backend and external_backend.ok:
+            self.worker = ExternalBackendOCRWorker(job, external_backend)
+            self._log(self._tr_log("log_ocr_started", len(paths), f"{self.device_str} ({external_backend.detail})", self.reading_direction))
+        else:
+            if self.device_str in ("cuda", "rocm"):
+                self._log(self._tr_log("log_external_backend_fallback_cpu", self.device_str))
+                self.device_str = "cpu"
+                job.device = "cpu"
+                if "cpu" in self.hw_actions:
+                    self.hw_actions["cpu"].setChecked(True)
+            self.worker = OCRWorker(job)
+
         self.worker.file_started.connect(self.on_file_started)
         self.worker.file_done.connect(self.on_file_done)
         self.worker.file_error.connect(self.on_file_error)
@@ -104,7 +125,8 @@ class MainWindowImportLinesAndOcrBatchMixin:
         self.worker.failed.connect(self.on_failed)
         self.worker.device_resolved.connect(self.on_device_resolved)
         self.worker.gpu_info.connect(self.on_gpu_info)
-        self._log(self._tr_log("log_ocr_started", len(paths), self.device_str, self.reading_direction))
+        if not isinstance(self.worker, ExternalBackendOCRWorker):
+            self._log(self._tr_log("log_ocr_started", len(paths), self.device_str, self.reading_direction))
         self.worker.start()
 
     def on_device_resolved(self, dev_str: str):
@@ -132,7 +154,9 @@ class MainWindowImportLinesAndOcrBatchMixin:
             # Normales OCR-Ergebnis direkt übernehmen
             text = "\n".join(rv.text for rv in recs).strip()
             item.status = STATUS_DONE
-            item.results = (text, kr_records, im, recs)
+            # Speicherfix für große Batches: keine komplette PIL-Seite und keine rohen Kraken-Records
+            # pro Queue-Eintrag behalten. Bilddaten werden bei Preview/Export aus item.path nachgeladen.
+            item.results = (text, [], None, recs)
             item.edited = False
             item.undo_stack.clear()
             item.redo_stack.clear()

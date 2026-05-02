@@ -6,8 +6,31 @@ from ..dialogs import *
 from ..image_edit import *
 
 class MainWindowHardwareStatusAndFileDropMixin:
-    def _build_hardware_requirements_help_html(self) -> str:
-        hw = self._hardware_snapshot()
+    def _build_hardware_requirements_loading_html(self) -> str:
+        return (
+            '            <div class="card">\n'
+            f'                <div class="h2">{self._tr("help_hw_card_title")}</div>\n'
+            f'                <span class="badge">{self._tr("help_hw_badge")}</span>\n'
+            f'                <div class="small">{self._tr("help_hw_check_running")}</div>\n'
+            '                <br>\n'
+            '                <table class="table">\n'
+            f'                    <tr><td><b>CPU</b></td><td>{self._tr("help_hw_check_wait")}</td></tr>\n'
+            f'                    <tr><td><b>GPU</b></td><td>{self._tr("help_hw_check_wait")}</td></tr>\n'
+            f'                    <tr><td><b>RAM</b></td><td>{self._tr("help_hw_check_wait")}</td></tr>\n'
+            '                </table>\n'
+            f'                <div class="small" style="margin-top:8px;">{self._tr("help_hw_check_background")}</div>\n'
+            '            </div>\n'
+        )
+
+    def _build_hardware_requirements_help_html(self, *, refresh_backends: bool = True) -> str:
+        # Hinweise-Dialog immer frisch prüfen, damit nach einer CUDA/ROCm-Backend-
+        # Installation nicht der alte CPU-Zustand aus dem Cache angezeigt wird.
+        try:
+            if refresh_backends:
+                clear_external_ocr_backend_cache()
+        except Exception:
+            pass
+        hw = self._hardware_snapshot(refresh_backends=refresh_backends)
         kraken_level, kraken_key = self._hardware_feature_status(hw, "kraken")
         lm_level, lm_key = self._hardware_feature_status(hw, "lm")
         whisper_level, whisper_key = self._hardware_feature_status(hw, "whisper")
@@ -213,17 +236,16 @@ class MainWindowHardwareStatusAndFileDropMixin:
             return
         self._pending_pdf_path = pdf_path
         self._set_progress_busy()
-        # Dialog
-        dlg = QProgressDialog(self)
-        dlg.setWindowTitle(self._tr("pdf_render_title"))
-        dlg.setCancelButtonText(self._tr("btn_cancel"))
-        dlg.setMinimum(0)
-        dlg.setMaximum(0)  # wird gesetzt, sobald wir total kennen
-        dlg.setValue(0)
-        dlg.setAutoClose(True)
-        dlg.setAutoReset(True)
-        dlg.setWindowModality(Qt.ApplicationModal)
-        dlg.canceled.connect(self._cancel_pdf_render)
+        base_name = os.path.basename(pdf_path)
+        # Freundlicher Warte-Dialog mit animiertem Kreis statt statischem ProgressDialog.
+        # Die eigentlichen Seitenfortschritte bleiben zusätzlich in Statusleiste und Haupt-Fortschrittsbalken sichtbar.
+        dlg = BusyStatusDialog(
+            self._tr("pdf_render_title"),
+            self._tr("pdf_render_busy_message", base_name),
+            self._tr,
+            self,
+        )
+        dlg.cancel_requested.connect(self._cancel_pdf_render)
         dlg.show()
         self.pdf_progress_dlg = dlg
         # Worker
@@ -240,22 +262,46 @@ class MainWindowHardwareStatusAndFileDropMixin:
 
     def _on_pdf_render_progress(self, cur: int, total: int, pdf_path: str):
         dlg = self.pdf_progress_dlg
+        base_name = os.path.basename(pdf_path)
         if dlg:
-            if dlg.maximum() != max(1, total):
-                dlg.setMaximum(max(1, total))
+            # Kompatibel zu altem QProgressDialog und neuem BusyStatusDialog.
+            if hasattr(dlg, "setMaximum") and hasattr(dlg, "maximum"):
+                try:
+                    if dlg.maximum() != max(1, total):
+                        dlg.setMaximum(max(1, total))
+                except Exception:
+                    pass
             try:
-                dlg.setLabelText(self._tr("pdf_render_label", cur, total, os.path.basename(pdf_path)))
+                status_text = self._tr("pdf_render_label", cur, total, base_name)
             except Exception:
-                dlg.setLabelText(f"Rendering pages… ({cur}/{total}): {os.path.basename(pdf_path)}")
-            dlg.setValue(cur)
+                status_text = f"Rendering pages… ({cur}/{total}): {base_name}"
+            if hasattr(dlg, "setLabelText"):
+                try:
+                    dlg.setLabelText(status_text)
+                except Exception:
+                    pass
+            elif hasattr(dlg, "set_status"):
+                try:
+                    dlg.set_status(status_text)
+                except Exception:
+                    pass
+            if hasattr(dlg, "setValue"):
+                try:
+                    dlg.setValue(cur)
+                except Exception:
+                    pass
         self.progress_bar.setRange(0, max(1, total))
         self.progress_bar.setValue(cur)
-        self.status_bar.showMessage(self._tr("pdf_render_label", cur, total, os.path.basename(pdf_path)))
+        self.status_bar.showMessage(self._tr("pdf_render_label", cur, total, base_name))
 
     def _on_pdf_render_finished(self, pdf_path: str, out_paths: list):
         # Dialog schließen
         if self.pdf_progress_dlg:
-            self.pdf_progress_dlg.setValue(self.pdf_progress_dlg.maximum())
+            try:
+                if hasattr(self.pdf_progress_dlg, "setValue") and hasattr(self.pdf_progress_dlg, "maximum"):
+                    self.pdf_progress_dlg.setValue(self.pdf_progress_dlg.maximum())
+            except Exception:
+                pass
             self.pdf_progress_dlg.close()
             self.pdf_progress_dlg = None
         self._set_progress_idle(100)

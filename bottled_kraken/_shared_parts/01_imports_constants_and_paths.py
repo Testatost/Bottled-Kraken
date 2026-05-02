@@ -15,6 +15,9 @@ import sys
 import locale
 
 import platform
+from kraken import blla, rpred, serialization, containers
+from kraken.lib import models, vgsl
+import torch
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -102,7 +105,7 @@ from PySide6.QtCore import (Qt, QThread, Signal, QRectF, QUrl, QTimer,
 from PySide6.QtGui import (
     QPixmap, QPen, QBrush, QColor, QFont, QDragEnterEvent, QDropEvent, QAction,
     QKeySequence, QActionGroup, QIcon, QPalette, QShortcut, QDesktopServices,
-    QPainter, QDrag, QFontMetricsF
+    QPainter, QDrag, QFontMetricsF, QCursor
 )
 
 from PySide6.QtWidgets import (
@@ -124,6 +127,19 @@ from shiboken6 import isValid
 
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 
+# Große, legitime Scan-PDFs/Bilddateien können die Pillow-Standardgrenze
+# von ca. 89 Megapixeln überschreiten. Die Grenze wird bewusst nur angehoben,
+# nicht deaktiviert: normale Archivscans laufen ohne PyCharm-Warnung, extrem
+# große/verdächtige Dateien werden weiterhin von Pillow abgefangen.
+try:
+    _BK_PIL_MAX_IMAGE_PIXELS = int(os.environ.get("BOTTLED_KRAKEN_PIL_MAX_IMAGE_PIXELS", "250000000"))
+except Exception:
+    _BK_PIL_MAX_IMAGE_PIXELS = 250_000_000
+try:
+    Image.MAX_IMAGE_PIXELS = max(int(Image.MAX_IMAGE_PIXELS or 0), _BK_PIL_MAX_IMAGE_PIXELS)
+except Exception:
+    Image.MAX_IMAGE_PIXELS = _BK_PIL_MAX_IMAGE_PIXELS
+
 from PIL.ImageQt import ImageQt
 
 from reportlab.pdfgen import canvas as pdf_canvas
@@ -131,12 +147,68 @@ from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
 
 warnings.filterwarnings("ignore", message="Using legacy polygon extractor*", category=UserWarning)
+# Kraken 7.x keeps the long-standing blla/rpred APIs as legacy shims.
+# Bottled Kraken intentionally uses them through the wrappers below so the
+# existing GUI workflow and result handling stay unchanged while running on 7.0.1.
+warnings.filterwarnings("ignore", message=r"`blla\.segment\(\)` is deprecated.*", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=r"`rpred\..*` is deprecated.*", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=r"`TorchVGSLModel\.load_model` is deprecated.*", category=DeprecationWarning)
 
 from kraken import blla, rpred, serialization, containers
 
 from kraken.lib import models, vgsl
 
 import torch
+
+KRAKEN_TARGET_VERSION = "7.0.1"
+
+def _kraken_device_arg(device: Any = None) -> str:
+    """Return a device value accepted by Kraken 7 legacy APIs."""
+    if device is None:
+        return "cpu"
+    try:
+        if isinstance(device, torch.device):
+            if device.index is not None:
+                return f"{device.type}:{device.index}"
+            return str(device.type or "cpu")
+    except Exception:
+        pass
+    text = str(device or "cpu").strip()
+    return text or "cpu"
+
+def load_kraken_recognition_model(path: str, device: Any = None):
+    """Load a Kraken recognition model with Kraken 7.0.1-compatible arguments."""
+    device_arg = _kraken_device_arg(device)
+    try:
+        return models.load_any(path, device=device_arg)
+    except TypeError:
+        # Older Kraken builds did not always expose the device keyword.
+        return models.load_any(path)
+
+def load_kraken_segmentation_model(path: str, device: Any = None):
+    """Load a Kraken segmentation model. Device is applied at segmentation time."""
+    # Kraken 7.0.1's TorchVGSLModel.load_model no longer takes a device keyword.
+    # blla.segment(..., device=...) moves the model for the actual forward pass.
+    try:
+        return vgsl.TorchVGSLModel.load_model(path)
+    except TypeError:
+        return vgsl.TorchVGSLModel.load_model(path)
+
+def segment_with_kraken(im: Image.Image, model: Any, device: Any = None,
+                        text_direction: str = "horizontal-lr"):
+    """Run Kraken segmentation while preserving compatibility with 4.x and 7.x."""
+    device_arg = _kraken_device_arg(device)
+    try:
+        return blla.segment(im, model=model, device=device_arg, text_direction=text_direction)
+    except TypeError:
+        try:
+            return blla.segment(im, model=model, device=device_arg)
+        except TypeError:
+            return blla.segment(im, model=model)
+
+def recognize_with_kraken(recognition_model: Any, im: Image.Image, segmentation: Any):
+    """Run Kraken line recognition through the currently supported wrapper."""
+    return rpred.rpred(recognition_model, im, segmentation)
 
 READING_MODES = {
     "TB_LR": 0,

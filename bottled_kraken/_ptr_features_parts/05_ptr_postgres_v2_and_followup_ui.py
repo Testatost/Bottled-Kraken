@@ -317,15 +317,67 @@ def _ptr_update_feature_texts_v2(self):
         self.btn_ptr_openrouter_ai_bottom.setText(_ptr_ui_tr(self, "ptr_openrouter_btn"))
         self.btn_ptr_openrouter_ai_bottom.setToolTip(_ptr_ui_tr(self, "ptr_openrouter_btn_tip"))
 
+def _ptr_plain_theme_or_standard_icon(window, theme_name: str, std_icon):
+    icon = QIcon.fromTheme(theme_name)
+    if icon.isNull():
+        icon = window.style().standardIcon(std_icon)
+    return icon
+
+
+def _ptr_is_dark_theme(window) -> bool:
+    """Ermittelt den aktiven Hell-/Dunkelmodus robuster als nur per String."""
+    theme = str(getattr(window, "current_theme", "") or "").strip().lower()
+    if theme in ("dark", "dunkel"):
+        return True
+    if theme in ("bright", "light", "hell"):
+        return False
+    try:
+        return window.palette().color(QPalette.Window).lightness() < 128
+    except Exception:
+        return False
+
+
+def _ptr_make_multi_ocr_icon(window, size: int = 16) -> QIcon:
+    """
+    Multi-OCR als fest gezeichnetes Masken-Icon.
+    Hellmodus = schwarz, Dunkelmodus = weiß.
+    """
+    color = QColor("#ffffff") if _ptr_is_dark_theme(window) else QColor("#000000")
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(color, max(1, int(round(size * 0.11))), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    painter.drawRoundedRect(QRectF(size * 0.12, size * 0.16, size * 0.34, size * 0.22), 1.5, 1.5)
+    painter.drawRoundedRect(QRectF(size * 0.52, size * 0.39, size * 0.34, size * 0.22), 1.5, 1.5)
+    painter.drawRoundedRect(QRectF(size * 0.12, size * 0.66, size * 0.34, size * 0.22), 1.5, 1.5)
+
+    painter.setBrush(color)
+    painter.setPen(Qt.NoPen)
+    r = max(1.1, size * 0.08)
+    painter.drawEllipse(QPointF(size * 0.50, size * 0.27), r, r)
+    painter.drawEllipse(QPointF(size * 0.49, size * 0.77), r, r)
+    painter.end()
+
+    icon = QIcon()
+    for mode in (QIcon.Normal, QIcon.Active, QIcon.Selected, QIcon.Disabled):
+        icon.addPixmap(pix, mode, QIcon.Off)
+        icon.addPixmap(pix, mode, QIcon.On)
+    return icon
+
+
 def _ptr_apply_new_button_icons(window):
     try:
         if hasattr(window, "btn_ptr_multi_ocr_bottom"):
-            window.btn_ptr_multi_ocr_bottom.setIcon(
-                window._themed_or_standard_icon("view-list-tree", QStyle.SP_FileDialogListView)
-            )
+            window.btn_ptr_multi_ocr_bottom.setIcon(_ptr_make_multi_ocr_icon(window, 16))
         if hasattr(window, "btn_ptr_openrouter_ai_bottom"):
             window.btn_ptr_openrouter_ai_bottom.setIcon(
-                window._themed_or_standard_icon("preferences-system", QStyle.SP_ComputerIcon)
+                _ptr_plain_theme_or_standard_icon(window, "preferences-system", QStyle.SP_ComputerIcon)
             )
     except Exception:
         pass
@@ -382,8 +434,8 @@ def _ptr_rebuild_secondary_button_rows(window):
     row1.addWidget(window.btn_voice_fill)
     row1.addWidget(window.btn_line_search)
     row1.addStretch(1)
-    row2.addWidget(window.btn_ptr_multi_ocr_bottom)
     row2.addWidget(window.btn_ai_revise_bottom)
+    row2.addWidget(window.btn_ptr_multi_ocr_bottom)
     row2.addWidget(window.btn_ptr_openrouter_ai_bottom)
     row2.addStretch(1)
     outer.addLayout(row1)
@@ -400,3 +452,21 @@ def _ptr_rebuild_secondary_button_rows(window):
         right_layout.addWidget(container)
     _ptr_update_feature_texts_v2(window)
     _ptr_apply_new_button_icons(window)
+
+
+# Beim Umschalten Hell/Dunkel muss das Multi-OCR-Icon neu erzeugt werden,
+# sonst bleibt die Pixmap-Farbe vom vorherigen Theme erhalten.
+try:
+    _PTR_PREV_APPLY_THEME_MULTI_OCR_ICON_V2
+except NameError:
+    _PTR_PREV_APPLY_THEME_MULTI_OCR_ICON_V2 = MainWindow.apply_theme
+
+    def _ptr_apply_theme_multi_ocr_icon_wrapper_v2(self, theme: str):
+        result = _PTR_PREV_APPLY_THEME_MULTI_OCR_ICON_V2(self, theme)
+        try:
+            _ptr_apply_new_button_icons(self)
+        except Exception:
+            pass
+        return result
+
+    MainWindow.apply_theme = _ptr_apply_theme_multi_ocr_icon_wrapper_v2

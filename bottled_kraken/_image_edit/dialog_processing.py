@@ -1,7 +1,7 @@
 """Mixin-Methoden für den Bildbearbeitungsdialog."""
 from ..shared import *
 from ..dialogs import *
-from .common import ImageEditSettings, WhiteBorderDialog
+from .common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
 from .canvas import ImageEditCanvas
 
 class ImageEditDialogProcessingMixin:
@@ -206,6 +206,7 @@ class ImageEditDialogProcessingMixin:
             rotation_angle=float(self.rotation_angle),
             color_mode=str(self.color_mode),
             contrast_enabled=bool(self.contrast_enabled),
+            contrast_level=float(getattr(self, "contrast_level", 2.2)),
             crop_enabled=bool(self.chk_crop.isChecked()),
             crop_orig=crop_orig,
             split_enabled=bool(self.chk_split.isChecked()),
@@ -222,10 +223,15 @@ class ImageEditDialogProcessingMixin:
         self.rotation_angle = float(settings.rotation_angle)
         self.color_mode = settings.color_mode
         self.contrast_enabled = bool(settings.contrast_enabled)
+        self.contrast_level = float(getattr(settings, "contrast_level", 2.2))
         self.white_border_px = int(settings.white_border_px)
         self.erase_actions = [(shape, tuple(bbox)) for shape, bbox in (settings.erase_actions or [])]
         self.chk_gray.setChecked(self.color_mode == "GRAY")
+        if hasattr(self, "contrast_slider"):
+            self._set_contrast_slider_from_level(self.contrast_level)
         self.chk_contrast.setChecked(self.contrast_enabled)
+        if hasattr(self, "contrast_controls_widget"):
+            self._update_contrast_slider_ui()
         self.chk_crop.setChecked(bool(settings.crop_enabled))
         self.btn_erase_rect.blockSignals(True)
         self.btn_erase_ellipse.blockSignals(True)

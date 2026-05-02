@@ -1,0 +1,48 @@
+# Bottled Kraken v3.1 Windows runtime dependencies
+# Recommended Python: >=3.10,<3.14
+#
+# This requirements file installs the CPU baseline for Windows 10/11.
+# Optional NVIDIA CUDA backends are installed separately from inside Bottled Kraken.
+# AMD ROCm backend installation is currently intended for Linux.
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# -------------------------------------------------
+# Core OCR / HTR
+# -------------------------------------------------
+kraken==7.0.1
+
+# Kraken 7.0.1 supports torch >=2.4.0, <=2.10.
+# Use the official CPU wheels for the standard Bottled Kraken release.
+torch==2.10.0+cpu
+torchvision==0.25.0+cpu
+
+# Kraken runtime dependencies that may be imported directly.
+pyarrow
+coremltools
+
+# -------------------------------------------------
+# GUI / image / document handling
+# -------------------------------------------------
+PySide6
+Pillow
+PyMuPDF
+reportlab
+numpy
+
+# -------------------------------------------------
+# Audio input / microphone support
+# -------------------------------------------------
+sounddevice
+
+# -------------------------------------------------
+# Local Whisper / Hugging Face / language-model support
+# -------------------------------------------------
+huggingface_hub
+faster-whisper
+ctranslate2
+transformers
+accelerate
+safetensors
+tokenizers
+tiktoken

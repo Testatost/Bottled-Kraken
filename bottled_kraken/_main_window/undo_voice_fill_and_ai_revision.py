@@ -172,27 +172,69 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
         self._log(f"Sprachimport Fehler: {os.path.basename(path)} -> {msg}")
         QMessageBox.warning(self, self._tr("warn_title"), msg)
 
-    def run_ai_revision(self):
+    def _ai_revision_task_has_revisable_results(self, task: Optional[TaskItem]) -> bool:
+        """True, wenn ein Queue-Task verwertbare OCR-Zeilen besitzt."""
+        if not task or not getattr(task, "results", None):
+            return False
+        try:
+            _text, _kr_records, _im, recs = task.results
+        except Exception:
+            return False
+        return bool(recs)
+
+    def _ai_revision_unique_tasks(self, tasks: List[TaskItem]) -> List[TaskItem]:
+        out: List[TaskItem] = []
+        seen = set()
+        for task in tasks or []:
+            path = getattr(task, "path", None)
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            out.append(task)
+        return out
+
+    def _ai_revision_queue_targets(self) -> List[TaskItem]:
         checked = self._checked_queue_tasks()
         selected = self._selected_queue_tasks()
-        # Priorität: Checkmarks vor Auswahl
-        target_tasks = checked if checked else selected
-        # Wenn mehrere markiert/selektiert sind -> Batch
-        if len(target_tasks) > 1:
-            items = [it for it in target_tasks if it.status == STATUS_DONE and it.results]
+        # Priorität: Haken im Wartebereich vor normaler Tabellen-Auswahl.
+        return self._ai_revision_unique_tasks(checked if checked else selected)
+
+    def _ai_revision_ready_tasks(self, tasks: List[TaskItem]) -> List[TaskItem]:
+        return [task for task in self._ai_revision_unique_tasks(tasks) if self._ai_revision_task_has_revisable_results(task)]
+
+    def _prepare_task_for_ai_revision(self, task: TaskItem) -> None:
+        if not self._ai_revision_task_has_revisable_results(task):
+            return
+        try:
+            # Nur bei der tatsächlich sichtbaren Seite die aktuell verschobenen Overlay-Boxen sichern.
+            if getattr(self, "_loaded_preview_path", None) == getattr(task, "path", None):
+                self._persist_live_canvas_bboxes(task)
+        except Exception:
+            pass
+        try:
+            _text, _kr_records, _im, recs = task.results
+            boxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs]
+            task.preset_bboxes = list(boxes)
+            task.lm_locked_bboxes = list(boxes)
+        except Exception:
+            pass
+
+    def run_ai_revision(self):
+        target_tasks = self._ai_revision_queue_targets()
+        if target_tasks:
+            items = self._ai_revision_ready_tasks(target_tasks)
             if not items:
                 QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
                 return
+            # Auch eine einzelne im Wartebereich ausgewählte Datei über den Queue-Pfad ausführen.
+            # Dadurch verhalten sich Haken/Mehrfachauswahl immer gleich: Datei für Datei nacheinander.
             self._run_ai_revision_batch(items)
             return
-        # Wenn genau ein markierter/selektierter Eintrag existiert -> diesen nehmen
-        if len(target_tasks) == 1:
-            task = target_tasks[0]
-        else:
-            # Fallback: aktuelles Vorschau-Element
-            task = self._current_task()
-            self._persist_live_canvas_bboxes(task)
-        if not task or task.status != STATUS_DONE or not task.results:
+
+        # Fallback: aktuelle Vorschau-Datei.
+        task = self._current_task()
+        self._persist_live_canvas_bboxes(task)
+        if not self._ai_revision_task_has_revisable_results(task):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         model_id = self._resolve_ai_model_id()
@@ -204,14 +246,19 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
         _, _, _, recs = task.results
         if not recs:
             return
-        task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs]
+        self._prepare_task_for_ai_revision(task)
         recs_for_ai = self._current_recs_for_ai(task)
         if not recs_for_ai:
             return
         script_mode = self._choose_ai_script_mode()
         if not script_mode:
             return
-        self.act_ai_revise.setEnabled(True)
+        self.act_ai_revise.setEnabled(False)
+        try:
+            if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
+                self.btn_ai_revise_bottom.setEnabled(False)
+        except Exception:
+            pass
         self.status_bar.showMessage(self._tr("msg_ai_started"))
         self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
         self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_title"), self._tr, self)
@@ -232,7 +279,7 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
             presence_penalty=self.ai_presence_penalty,
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
+            max_tokens=(self._lm_token_limit("all_lines") if hasattr(self, "_lm_token_limit") else self.ai_max_tokens),
             tr_func=self._tr,
             parent=self
         )
@@ -246,7 +293,7 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
     def run_ai_revision_for_single_line(self, row: int):
         task = self._current_task()
         self._persist_live_canvas_bboxes(task)
-        if not task or task.status != STATUS_DONE or not task.results:
+        if not self._ai_revision_task_has_revisable_results(task):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         text, kr_records, im, recs = task.results
@@ -293,7 +340,7 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
             presence_penalty=self.ai_presence_penalty,
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
+            max_tokens=(self._lm_token_limit("current_line") if hasattr(self, "_lm_token_limit") else self.ai_max_tokens),
             tr_func=self._tr,
             parent=self
         )
@@ -305,17 +352,30 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
         self.ai_worker.start()
 
     def _run_ai_revision_batch(self, items: List[TaskItem], script_mode: Optional[str] = None):
+        items = self._ai_revision_ready_tasks(items)
+        if not items:
+            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
+            return
         model_id = self._resolve_ai_model_id()
         if not model_id:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
             return
         if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
             return
+        if self.ai_worker and self.ai_worker.isRunning():
+            return
         if not script_mode:
             script_mode = self._choose_ai_script_mode()
             if not script_mode:
                 return
-        self.act_ai_revise.setEnabled(True)
+        for task in items:
+            self._prepare_task_for_ai_revision(task)
+        self.act_ai_revise.setEnabled(False)
+        try:
+            if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
+                self.btn_ai_revise_bottom.setEnabled(False)
+        except Exception:
+            pass
         self.ai_batch_dialog = ProgressStatusDialog(self._tr("act_ai_revise_all"), self._tr, self)
         self.ai_batch_dialog.set_status(self._tr("dlg_ai_connecting"))
         self.ai_batch_dialog.cancel_requested.connect(self._cancel_ai_batch_revision)
@@ -332,7 +392,7 @@ class MainWindowUndoVoiceFillAndAiRevisionMixin:
             presence_penalty=self.ai_presence_penalty,
             repetition_penalty=self.ai_repetition_penalty,
             min_p=self.ai_min_p,
-            max_tokens=self.ai_max_tokens,
+            max_tokens=(self._lm_token_limit("all_lines") if hasattr(self, "_lm_token_limit") else self.ai_max_tokens),
             tr_func=self._tr,
             parent=self
         )

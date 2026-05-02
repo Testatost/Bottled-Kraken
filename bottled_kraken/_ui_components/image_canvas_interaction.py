@@ -5,22 +5,25 @@ from .overlay_dialogs import OverlayBoxDialog
 
 class ImageCanvasInteractionMixin:
     def contextMenuEvent(self, event):
+        if self._pan_tool_active():
+            event.accept()
+            return
         pos = event.pos()
         item = self.itemAt(pos)
         menu = QMenu(self)
         tr = self.tr_func
+        _t = tr if callable(tr) else (lambda key, *args: key.format(*args) if args else key)
         if not self._overlay_enabled:
-            disabled = menu.addAction(
-                tr("overlay_only_after_ocr") if tr else "Overlay-Bearbeitung erst nach abgeschlossener OCR möglich.")
+            disabled = menu.addAction(_t("overlay_only_after_ocr"))
             disabled.setEnabled(False)
             menu.exec(event.globalPos())
             return
         if isinstance(item, ResizableRectItem):
             idx = item.idx
-            act_split = menu.addAction(tr("canvas_menu_split_box") if tr else "Split box")
-            act_del = menu.addAction(tr("canvas_menu_delete_box") if tr else "Delete overlay box")
+            act_split = menu.addAction(_t("canvas_menu_split_box"))
+            act_del = menu.addAction(_t("canvas_menu_delete_box"))
             menu.addSeparator()
-            act_add_draw = menu.addAction(tr("canvas_menu_add_box_draw") if tr else "Add overlay box (draw)")
+            act_add_draw = menu.addAction(_t("canvas_menu_add_box_draw"))
             chosen = menu.exec(event.globalPos())
             if not chosen:
                 return
@@ -31,7 +34,7 @@ class ImageCanvasInteractionMixin:
             elif chosen == act_add_draw:
                 self.overlay_add_draw_requested.emit(self.mapToScene(pos))
             return
-        act_add_draw = menu.addAction(tr("canvas_menu_add_box_draw") if tr else "Add overlay box (draw)")
+        act_add_draw = menu.addAction(_t("canvas_menu_add_box_draw"))
         chosen = menu.exec(event.globalPos())
         if not chosen:
             return
@@ -51,6 +54,16 @@ class ImageCanvasInteractionMixin:
             event.accept()
             return
         if event.button() == Qt.LeftButton:
+            if self._pixmap_item is not None and self._event_requests_pan(event):
+                if self._can_pan_view():
+                    self._mouse_panning = True
+                    self._pan_start = self._event_point(event)
+                    self._pan_start_h = self.horizontalScrollBar().value()
+                    self._pan_start_v = self.verticalScrollBar().value()
+                    self.viewport().setCursor(Qt.ClosedHandCursor)
+                    self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
             it = self.itemAt(self._event_point(event))
             # Klick auf Nummernlabel auf die zugehörige Box umlenken
             if isinstance(it, QGraphicsSimpleTextItem):
@@ -102,25 +115,12 @@ class ImageCanvasInteractionMixin:
                 # damit Move/Resize funktioniert.
                 super().mousePressEvent(event)
                 return
-            # Panning nur mit Alt + linker Maustaste
-            if (
-                    self._pixmap_item is not None
-                    and self._zoom > (self._fit_zoom * 1.01)
-                    and (event.modifiers() & Qt.AltModifier)
-            ):
-                self._mouse_panning = True
-                self._pan_start = self._event_point(event)
-                self._pan_start_h = self.horizontalScrollBar().value()
-                self._pan_start_v = self.verticalScrollBar().value()
-                self.setCursor(Qt.ClosedHandCursor)
-                event.accept()
-                return
             # Rechteckauswahl nur wenn NICHT im Zeichenmodus
             if (
                     self._overlay_enabled
                     and self._pixmap_item is not None
                     and not self._draw_mode
-                    and not (event.modifiers() & Qt.AltModifier)
+                    and not self._event_requests_pan(event)
             ):
                 sp = self.mapToScene(self._event_point(event))
                 self.start_selection_mode(sp)
@@ -198,7 +198,7 @@ class ImageCanvasInteractionMixin:
             return
         if event.button() == Qt.LeftButton and self._mouse_panning:
             self._mouse_panning = False
-            self.unsetCursor()
+            self._update_tool_cursor()
             event.accept()
             return
         super().mouseReleaseEvent(event)

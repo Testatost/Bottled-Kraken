@@ -4,6 +4,7 @@ from ..ui_components import *
 from ..workers import *
 from ..dialogs import *
 from ..image_edit import *
+import math
 
 class MainWindowMenuSetupAndQueueHeadersMixin:
     def _update_queue_check_header(self):
@@ -124,6 +125,8 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
         self.canvas.set_theme(theme)
         app.setStyleSheet(_theme_app_qss(theme))
         self._update_toolbar_language_theme_ui()
+        if hasattr(self, "_refresh_preview_tool_button_icons"):
+            self._refresh_preview_tool_button_icons()
         self._set_primary_toolbar_icons()
         self._set_secondary_button_icons()
         self._apply_lines_tree_theme()
@@ -244,23 +247,18 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
 
     def _update_toolbar_language_theme_ui(self):
         if hasattr(self, "btn_theme_toggle"):
-            is_dark = self.current_theme == "dark"
-            self.btn_theme_toggle.setChecked(is_dark)
-            self.btn_theme_toggle.setText("🔅" if is_dark else "💡")
-            self.btn_theme_toggle.setIcon(QIcon())
+            self.btn_theme_toggle.setChecked(self.current_theme == "dark")
+            self.btn_theme_toggle.setText("")
+            self.btn_theme_toggle.setIcon(self._theme_toggle_icon())
+            self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonIconOnly)
             self.btn_theme_toggle.setToolTip(self._tr("toolbar_theme_tooltip"))
+
         if hasattr(self, "btn_lang_menu"):
-            self.btn_lang_menu.setText(self._tr("toolbar_language"))
-            lang_theme_name = "preferences-desktop-locale"
-            if QIcon.fromTheme(lang_theme_name).isNull():
-                lang_theme_name = "accessories-dictionary"
-            self.btn_lang_menu.setIcon(
-                self._tinted_theme_or_standard_icon(
-                    lang_theme_name,
-                    QStyle.SP_FileDialogContentsView
-                )
-            )
+            self.btn_lang_menu.setText("")
+            self.btn_lang_menu.setIcon(self._language_menu_icon())
+            self.btn_lang_menu.setToolButtonStyle(Qt.ToolButtonIconOnly)
             self.btn_lang_menu.setToolTip(self._tr("toolbar_language_tooltip"))
+
         if hasattr(self, "act_lang_de"):
             self.act_lang_de.setText(self._tr("lang_de"))
             self.act_lang_de.setChecked(self.current_lang == "de")
@@ -303,6 +301,26 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
         if hasattr(self, "btn_import_lines"):
             self.btn_import_lines.setCursor(Qt.PointingHandCursor)
 
+    def open_integrated_backend_installer(self, backend_kind: str):
+        dlg = BackendInstallDialog(backend_kind, tr_func=self._tr, parent=self)
+        dlg.install_finished.connect(self._on_integrated_backend_install_finished)
+        dlg.exec()
+
+    def _on_integrated_backend_install_finished(self, ok: bool, backend_kind: str):
+        try:
+            clear_external_ocr_backend_cache()
+        except Exception:
+            pass
+        try:
+            self._refresh_hw_menu_availability()
+        except Exception:
+            pass
+        if ok:
+            try:
+                self._log(self._tr("backend_install_success"))
+            except Exception:
+                pass
+
     def _init_menu(self):
         menubar = self.menuBar()
         self.file_menu = menubar.addMenu(self._tr("menu_file"))
@@ -333,17 +351,12 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
         self.file_menu.addAction(self.act_project_load)
         self.file_menu.addSeparator()
         self.export_menu = self.file_menu.addMenu(self._tr("menu_export"))
-        self.formats = [
-            ("Text (.txt)", "txt"),
-            ("CSV (.csv)", "csv"),
-            ("JSON (.json)", "json"),
-            ("ALTO (.xml)", "alto"),
-            ("hOCR (.html)", "hocr"),
-            ("PDF (.pdf)", "pdf")
-        ]
+        self.formats = self._export_format_items()
+        self.export_format_actions = {}
         for name, fmt in self.formats:
             act = QAction(name, self)
             act.triggered.connect(lambda checked, f=fmt: self.export_flow(f))
+            self.export_format_actions[fmt] = act
             self.export_menu.addAction(act)
         self.file_menu.addSeparator()
         self.act_exit = QAction(self._tr("menu_exit"), self)
@@ -451,6 +464,19 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
             hw_group.addAction(act)
             self.hw_menu.addAction(act)
             self.hw_actions[dev] = act
+
+            if dev == "cuda":
+                self.act_install_cuda_backend = QAction(self._tr("hw_install_cuda_backend"), self)
+                self.act_install_cuda_backend.triggered.connect(
+                    lambda checked=False: self.open_integrated_backend_installer("nvidia-cuda")
+                )
+                self.hw_menu.addAction(self.act_install_cuda_backend)
+            elif dev == "rocm":
+                self.act_install_rocm_backend = QAction(self._tr("hw_install_rocm_backend"), self)
+                self.act_install_rocm_backend.triggered.connect(
+                    lambda checked=False: self.open_integrated_backend_installer("amd-rocm")
+                )
+                self.hw_menu.addAction(self.act_install_rocm_backend)
         # Leserichtung
         self.options_menu.addSeparator()
         self.reading_menu = self.options_menu.addMenu(self._tr("menu_reading"))

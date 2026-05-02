@@ -1,7 +1,7 @@
 """Mixin-Methoden für den Bildbearbeitungsdialog."""
 from ..shared import *
 from ..dialogs import *
-from .common import ImageEditSettings, WhiteBorderDialog
+from .common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
 from .canvas import ImageEditCanvas
 
 class ImageEditDialogActionsMixin:
@@ -161,8 +161,70 @@ class ImageEditDialogActionsMixin:
         self.color_mode = "GRAY" if checked else "RGB"
         self._refresh_preview(reset_zoom=False)
 
+    def _contrast_level_from_slider(self, value: int) -> float:
+        # 0..100 -> 1.0..4.0; Standardwert 40 entspricht 2.2 und damit dem bisherigen festen Wert.
+        return 1.0 + (max(0, min(100, int(value))) / 100.0) * 3.0
+
+    def _set_contrast_slider_from_level(self, level: float):
+        value = int(round(((max(1.0, min(4.0, float(level))) - 1.0) / 3.0) * 100.0))
+        if hasattr(self, "contrast_slider"):
+            self.contrast_slider.blockSignals(True)
+            self.contrast_slider.setValue(max(0, min(100, value)))
+            self.contrast_slider.blockSignals(False)
+
+    def _update_contrast_slider_ui(self):
+        level = max(1.0, min(4.0, float(getattr(self, "contrast_level", 2.2))))
+        if hasattr(self, "lbl_contrast_strength"):
+            self.lbl_contrast_strength.setText(f"{self._tr('image_edit_contrast')}: {level:.2f}×")
+            self.lbl_contrast_strength.setEnabled(bool(getattr(self, "contrast_enabled", False)))
+        if hasattr(self, "contrast_slider"):
+            self.contrast_slider.setEnabled(bool(getattr(self, "contrast_enabled", False)))
+            self.contrast_slider.setToolTip(f"{self._tr('image_edit_contrast')}: {level:.2f}×")
+        if hasattr(self, "contrast_controls_widget"):
+            self.contrast_controls_widget.setVisible(bool(getattr(self, "contrast_enabled", False)))
+
+    def _on_contrast_slider_pressed(self):
+        self._contrast_preview_pending = False
+
+    def _schedule_contrast_preview(self):
+        if not self.contrast_enabled:
+            return
+        self._contrast_preview_pending = True
+        timer = getattr(self, "_contrast_preview_timer", None)
+        if timer is not None:
+            timer.start()
+        else:
+            self._apply_pending_contrast_preview()
+
+    def _apply_pending_contrast_preview(self):
+        if not getattr(self, "_contrast_preview_pending", False):
+            return
+        self._contrast_preview_pending = False
+        if self.contrast_enabled:
+            self._refresh_preview(reset_zoom=False)
+
+    def _on_contrast_slider_released(self):
+        timer = getattr(self, "_contrast_preview_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._contrast_preview_pending = True
+        self._apply_pending_contrast_preview()
+
+    def _on_contrast_slider_changed(self, value: int):
+        self.contrast_level = self._contrast_level_from_slider(value)
+        self._update_contrast_slider_ui()
+        if self.contrast_enabled:
+            self._schedule_contrast_preview()
+
     def _toggle_contrast(self, checked: bool):
         self.contrast_enabled = bool(checked)
+        if self.contrast_enabled and hasattr(self, "contrast_slider"):
+            self.contrast_level = self._contrast_level_from_slider(self.contrast_slider.value())
+        timer = getattr(self, "_contrast_preview_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._contrast_preview_pending = False
+        self._update_contrast_slider_ui()
         self._refresh_preview(reset_zoom=False)
 
     def _rotate_by(self, delta: float):

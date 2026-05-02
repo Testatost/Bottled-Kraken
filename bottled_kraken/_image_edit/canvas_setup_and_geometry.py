@@ -40,6 +40,33 @@ class ImageEditCanvasSetupMixin:
         self._pan_start_widget = QPointF()
         self._pan_start_x = 0.0
         self._pan_start_y = 0.0
+        self._tool_mode = "select"
+
+    def set_tool_mode(self, mode: str):
+        mode = "pan" if str(mode or "").lower() == "pan" else "select"
+        if getattr(self, "_tool_mode", "select") == mode:
+            self._update_cursor(self._widget_to_image(self.mapFromGlobal(QCursor.pos())))
+            return
+        if self.drag_mode == "pan":
+            self._pan_active = False
+        self.drag_mode = None
+        self._tool_mode = mode
+        self._update_cursor(self._widget_to_image(self.mapFromGlobal(QCursor.pos())))
+        self.update()
+
+    def tool_mode(self) -> str:
+        return getattr(self, "_tool_mode", "select")
+
+    def _pan_tool_active(self) -> bool:
+        return self.tool_mode() == "pan"
+
+    def _event_requests_pan(self, event) -> bool:
+        try:
+            if self._pan_tool_active():
+                return True
+            return bool(event.modifiers() & Qt.AltModifier)
+        except Exception:
+            return self._pan_tool_active()
 
     def set_image(self, img: Optional[Image.Image], reset_zoom: bool = True):
         self.base_image = img

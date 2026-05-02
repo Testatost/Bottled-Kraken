@@ -54,7 +54,16 @@ class MainWindowAiBatchCallbacksMixin:
         self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
 
     def on_ai_batch_finished(self):
+        worker = getattr(self, "ai_batch_worker", None)
+        self.ai_batch_worker = None
+        if worker is not None:
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
         self.act_ai_revise.setEnabled(True)
+        if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
+            self.btn_ai_revise_bottom.setEnabled(True)
         if self.ai_batch_dialog:
             self.ai_batch_dialog.close()
             self.ai_batch_dialog = None
