@@ -246,7 +246,6 @@ Bottled Kraken supports export to multiple output formats.
 | plain text | `txt` |
 | structured data | `csv`, `json` |
 | OCR formats | `ALTO XML`, `hOCR` |
-| images | `png`, `jpg`, `bmp` |
 | PDF | searchable PDF with image + invisible text layer |
 
 This makes it possible to use the same OCR pass both for readable end results and for structured downstream processing.
