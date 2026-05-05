@@ -498,10 +498,26 @@ class MainWindowMenuSetupAndQueueHeadersMixin:
             self.read_actions.append(act)
         # Overlay (Boxen)
         self.options_menu.addSeparator()
-        self.act_overlay = QAction(self._tr("act_overlay_show"), self)
-        self.act_overlay.setCheckable(True)
-        self.act_overlay.setChecked(True)
-        self.act_overlay.toggled.connect(self._on_overlay_toggled)
-        self.options_menu.addAction(self.act_overlay)
+        self.overlay_menu = self.options_menu.addMenu(self._tr("act_overlay_show"))
+        self.overlay_display_group = QActionGroup(self)
+        self.overlay_display_group.setExclusive(True)
+        self.overlay_display_actions: Dict[str, QAction] = {}
+
+        for key, mode in [
+            ("overlay_mode_current", "current"),
+            ("overlay_mode_selected", "selected"),
+            ("overlay_mode_all", "all"),
+        ]:
+            act = QAction(self._tr(key), self)
+            act.setCheckable(True)
+            if mode == getattr(self, "overlay_display_mode", "all"):
+                act.setChecked(True)
+            act.triggered.connect(lambda checked=False, m=mode: self._set_overlay_display_mode(m))
+            self.overlay_display_group.addAction(act)
+            self.overlay_menu.addAction(act)
+            self.overlay_display_actions[mode] = act
+
+        # Kompatibilitäts-Alias für ältere Runtime-Patches, die noch self.act_overlay erwarten.
+        self.act_overlay = self.overlay_menu.menuAction()
         if self.device_str in self.hw_actions:
             self.hw_actions[self.device_str].setChecked(True)

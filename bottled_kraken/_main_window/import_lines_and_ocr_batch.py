@@ -282,6 +282,8 @@ class MainWindowImportLinesAndOcrBatchMixin:
         task = self._current_task()
         if not task or not task.results:
             return
+        _, _, _, recs = task.results
+        self._refresh_overlay_display(recs)
         rows = self._selected_line_rows()
         if rows:
             self.canvas.select_indices(rows, center=False)
@@ -289,7 +291,6 @@ class MainWindowImportLinesAndOcrBatchMixin:
         if row < 0:
             self.canvas.select_indices([], center=False)
             return
-        _, _, _, recs = task.results
         if 0 <= row < len(recs):
             self.canvas.select_idx(row)
 
@@ -297,6 +298,8 @@ class MainWindowImportLinesAndOcrBatchMixin:
         task = self._current_task()
         if not task or not task.results:
             return
+        _, _, _, recs = task.results
+        self._refresh_overlay_display(recs)
         rows = self._selected_line_rows()
         if not rows:
             self.canvas.select_indices([], center=False)
@@ -438,8 +441,7 @@ class MainWindowImportLinesAndOcrBatchMixin:
             preview_im = _load_image_color(task.path)
             self.canvas.load_pil_image(preview_im, preserve_view=True)
             self.canvas.set_overlay_enabled(task.status == STATUS_DONE)
-            if self.show_overlay:
-                self.canvas.draw_overlays(recs)
+            self._refresh_overlay_display(recs)
         else:
             self.canvas.clear_all()
             self.canvas.set_overlay_enabled(False)

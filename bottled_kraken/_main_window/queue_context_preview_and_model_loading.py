@@ -159,9 +159,8 @@ class MainWindowQueueContextPreviewAndModelLoadingMixin:
         self.canvas.load_pil_image(preview_im)
         self._loaded_preview_path = path
         self.canvas.set_overlay_enabled(bool(item.results))
-        if self.show_overlay:
-            self.canvas.draw_overlays(recs)
         self._populate_lines_list(recs)
+        self._refresh_overlay_display(recs)
         rows = self._selected_line_rows()
         if rows:
             self.canvas.select_indices(rows, center=False)

@@ -106,7 +106,20 @@ class MainWindowThemeLanguageAndReadingDirectionMixin:
         self.act_add_files.setText(self._tr("act_add_files"))
         self.act_exit.setText(self._tr("menu_exit"))
         self.act_download.setText(self._tr("act_download_model"))
-        self.act_overlay.setText(self._tr("act_overlay_show"))
+        if hasattr(self, "overlay_menu"):
+            self.overlay_menu.setTitle(self._tr("act_overlay_show"))
+        elif hasattr(self, "act_overlay"):
+            self.act_overlay.setText(self._tr("act_overlay_show"))
+        if hasattr(self, "overlay_display_actions"):
+            labels = {
+                "current": "overlay_mode_current",
+                "selected": "overlay_mode_selected",
+                "all": "overlay_mode_all",
+            }
+            for mode, key in labels.items():
+                act = self.overlay_display_actions.get(mode)
+                if act is not None:
+                    act.setText(self._tr(key))
         self.act_add.setText(self._tr("act_add_files"))
         self.act_clear.setText(self._tr("act_clear_queue"))
         self.act_play.setText(self._tr("act_start_ocr"))

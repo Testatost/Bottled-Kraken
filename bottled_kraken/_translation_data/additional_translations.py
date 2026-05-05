@@ -7,9 +7,6 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_card_title': 'Hardwarevoraussetzungen',
         'help_hw_badge': 'System-Check',
         'help_hw_intro': 'Schnelle Einschätzung für Kraken, LM-Überarbeitung und Whisper auf diesem Rechner.',
-        'help_hw_check_running': 'Hardware-Überprüfung läuft …',
-        'help_hw_check_wait': 'wird geprüft …',
-        'help_hw_check_background': 'Die Hardwaredaten werden im Hintergrund aktualisiert. Das Fenster bleibt währenddessen bedienbar.',
         'help_hw_h2_detected': 'Erkannte Hardware',
         'help_hw_h2_usage': 'Status: Verwendbarkeit',
         'help_hw_h2_components': 'Komponentencheck',
@@ -46,8 +43,49 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_req_all_rec': '8+ CPU-Threads, 16+ GB RAM, 8+ bis 12+ GB VRAM',
         'help_hw_req_note': 'Hinweis: Vor allem die LM-Überarbeitung hängt stark vom geladenen Modell und dessen '
                             'Quantisierung ab.',
-        'help_hw_note': 'Die Einschätzung ist eine interne Bottled-Kraken-Heuristik und keine harte technische '
-                        'Sperre.'},
+        'help_hw_note': 'Die Einschätzung ist eine interne Bottled-Kraken-Heuristik und keine harte technische Sperre.',
+        'help_nav_uninstall_delete': 'Deinstallation / Löschen',
+        'uninstall_delete_title': 'Deinstallation / Löschen',
+        'uninstall_delete_intro': 'Dieser Bereich entfernt die von Bottled Kraken im Benutzerprofil installierten oder '
+                                  'angelegten Daten. Verwende diese Funktion nur, wenn du Bottled Kraken auf diesem '
+                                  'Rechner wirklich zurücksetzen oder entfernen möchtest.',
+        'uninstall_delete_scope_title': 'Gelöscht werden können:',
+        'uninstall_delete_scope_backends': 'externe GPU-Backends wie NVIDIA CUDA und AMD ROCm inklusive eigener '
+                                           'Python-Umgebungen',
+        'uninstall_delete_scope_whisper': 'heruntergeladene Faster-Whisper-Modelle und der '
+                                          'Bottled-Kraken-Whisper-Ordner',
+        'uninstall_delete_scope_settings': 'Programmeinstellungen, gespeicherte Pfade, Sprache, Theme und zuletzt '
+                                           'verwendete Optionen',
+        'uninstall_delete_scope_cache': 'Bottled-Kraken-Datenordner, Cache-Ordner, Konfigurationsordner und '
+                                        'der versteckte Log-Ordner .bottled_kraken im Benutzerprofil',
+        'uninstall_delete_warning_title': 'Wichtig:',
+        'uninstall_delete_warning_irreversible': 'Der Vorgang ist nicht rückgängig zu machen.',
+        'uninstall_delete_warning_user_files': 'Normale Bilddateien, PDFs, Projektdateien und Exporte außerhalb der '
+                                               'BottledKraken-Datenordner werden nicht gelöscht.',
+        'uninstall_delete_warning_running_app': 'Der Ordner der gerade laufenden Programmdatei bzw. der '
+                                                'Quellcode-Ordner wird während des laufenden Programms bewusst nicht '
+                                                'entfernt.',
+        'uninstall_delete_click_hint': 'Klicke auf den roten Button, wenn du die installierten Bottled-Kraken-Daten '
+                                       'löschen möchtest.',
+        'btn_uninstall_delete': 'Deinstallation / Löschen',
+        'uninstall_delete_confirm_title': 'Bottled Kraken löschen?',
+        'uninstall_delete_confirm_text': 'Dadurch werden installierte Bottled-Kraken-Daten im Benutzerprofil gelöscht, '
+                                         'darunter externe Backends, Whisper-Modelle und Programmeinstellungen. '
+                                         'Fortfahren?',
+        'uninstall_delete_confirm_phrase': 'LÖSCHEN',
+        'uninstall_delete_confirm_prompt': 'Zur Bestätigung bitte genau „{}“ eingeben:',
+        'uninstall_delete_cancelled': 'Deinstallation / Löschen wurde abgebrochen.',
+        'uninstall_delete_settings_cleared': 'Programmeinstellungen gelöscht.',
+        'uninstall_delete_settings_failed': 'Programmeinstellungen konnten nicht gelöscht werden: {}',
+        'uninstall_delete_deleted_path': 'Gelöscht: {}',
+        'uninstall_delete_failed_path': 'Nicht gelöscht: {} — {}',
+        'uninstall_delete_skipped_missing': 'Nicht vorhanden: {}',
+        'uninstall_delete_skipped_unsafe': 'Aus Sicherheitsgründen übersprungen: {}',
+        'uninstall_delete_summary': 'Fertig. Erfolgreiche Schritte: {}. Fehlgeschlagene Schritte: {}.',
+        'uninstall_delete_done_title': 'Deinstallation / Löschen abgeschlossen',
+        'uninstall_delete_restart_note': 'Bottled Kraken wird jetzt beendet. Wenn du auch die ausführbare Datei selbst '
+                                         'entfernen möchtest, lösche sie danach manuell aus dem Download- oder '
+                                         'Programmordner.'},
  'en': {'btn_line_search': 'Search',
         'btn_line_search_tooltip': 'Search in recognized lines',
         'line_search_placeholder': 'Enter word or text...',
@@ -55,9 +93,6 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_card_title': 'Hardware requirements',
         'help_hw_badge': 'System check',
         'help_hw_intro': 'Quick estimate for Kraken, LM revision, and Whisper on this computer.',
-        'help_hw_check_running': 'Hardware check is running …',
-        'help_hw_check_wait': 'checking …',
-        'help_hw_check_background': 'The hardware data is being updated in the background. This window remains responsive.',
         'help_hw_h2_detected': 'Detected hardware',
         'help_hw_h2_usage': 'Status: usability',
         'help_hw_h2_components': 'Component check',
@@ -93,7 +128,44 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_req_all_min': '4+ CPU threads, 8+ GB RAM, 6+ GB VRAM if LM/Whisper should run on GPU',
         'help_hw_req_all_rec': '8+ CPU threads, 16+ GB RAM, 8+ to 12+ GB VRAM',
         'help_hw_req_note': 'Note: LM revision especially depends heavily on the loaded model and its quantization.',
-        'help_hw_note': 'This estimate is an internal Bottled Kraken heuristic and not a hard technical lock.'},
+        'help_hw_note': 'This estimate is an internal Bottled Kraken heuristic and not a hard technical lock.',
+        'help_nav_uninstall_delete': 'Uninstall / Delete',
+        'uninstall_delete_title': 'Uninstall / Delete',
+        'uninstall_delete_intro': 'This section removes data installed or created by Bottled Kraken in the user '
+                                  'profile. Use this only if you really want to reset or remove Bottled Kraken on this '
+                                  'computer.',
+        'uninstall_delete_scope_title': 'The following can be deleted:',
+        'uninstall_delete_scope_backends': 'external GPU backends such as NVIDIA CUDA and AMD ROCm, including their '
+                                           'separate Python environments',
+        'uninstall_delete_scope_whisper': 'downloaded Faster-Whisper models and the Bottled Kraken Whisper folder',
+        'uninstall_delete_scope_settings': 'application settings, saved paths, language, theme, and last-used options',
+        'uninstall_delete_scope_cache': 'Bottled Kraken data folders, cache folders, configuration folders, and the '
+                                        'hidden .bottled_kraken log folder in the user profile',
+        'uninstall_delete_warning_title': 'Important:',
+        'uninstall_delete_warning_irreversible': 'This operation cannot be undone.',
+        'uninstall_delete_warning_user_files': 'Regular image files, PDFs, project files, and exports outside the '
+                                               'BottledKraken data folders are not deleted.',
+        'uninstall_delete_warning_running_app': 'The folder of the currently running application file or source-code '
+                                                'folder is intentionally not removed while the program is running.',
+        'uninstall_delete_click_hint': 'Click the red button if you want to delete the installed Bottled Kraken data.',
+        'btn_uninstall_delete': 'Uninstall / Delete',
+        'uninstall_delete_confirm_title': 'Delete Bottled Kraken?',
+        'uninstall_delete_confirm_text': 'This deletes installed Bottled Kraken data in the user profile, including '
+                                         'external backends, Whisper models, and application settings. Continue?',
+        'uninstall_delete_confirm_phrase': 'DELETE',
+        'uninstall_delete_confirm_prompt': 'To confirm, type exactly “{}”: ',
+        'uninstall_delete_cancelled': 'Uninstall / Delete was cancelled.',
+        'uninstall_delete_settings_cleared': 'Application settings deleted.',
+        'uninstall_delete_settings_failed': 'Application settings could not be deleted: {}',
+        'uninstall_delete_deleted_path': 'Deleted: {}',
+        'uninstall_delete_failed_path': 'Not deleted: {} — {}',
+        'uninstall_delete_skipped_missing': 'Not present: {}',
+        'uninstall_delete_skipped_unsafe': 'Skipped for safety: {}',
+        'uninstall_delete_summary': 'Done. Successful steps: {}. Failed steps: {}.',
+        'uninstall_delete_done_title': 'Uninstall / Delete completed',
+        'uninstall_delete_restart_note': 'Bottled Kraken will now close. If you also want to remove the executable '
+                                         'itself, delete it manually from the download or application folder '
+                                         'afterwards.'},
  'fr': {'btn_line_search': 'Recherche',
         'btn_line_search_tooltip': 'Rechercher dans les lignes reconnues',
         'line_search_placeholder': 'Saisir un mot ou un texte...',
@@ -101,9 +173,6 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_card_title': 'Configuration matérielle',
         'help_hw_badge': 'Vérification système',
         'help_hw_intro': 'Estimation rapide pour Kraken, la révision LM et Whisper sur cet ordinateur.',
-        'help_hw_check_running': 'Vérification du matériel en cours …',
-        'help_hw_check_wait': 'vérification …',
-        'help_hw_check_background': 'Les données matérielles sont mises à jour en arrière-plan. Cette fenêtre reste utilisable.',
         'help_hw_h2_detected': 'Matériel détecté',
         'help_hw_h2_usage': 'Statut : utilisabilité',
         'help_hw_h2_components': 'Vérification des composants',
@@ -140,4 +209,46 @@ ADDITIONAL_TRANSLATIONS = {'de': {'btn_line_search': 'Suche',
         'help_hw_req_all_rec': '8+ threads CPU, 16+ GB RAM, 8+ à 12+ GB VRAM',
         'help_hw_req_note': 'Remarque : la révision LM dépend fortement du modèle chargé et de sa quantification.',
         'help_hw_note': 'Cette estimation est une heuristique interne de Bottled Kraken et non un blocage technique '
-                        'strict.'}}
+                        'strict.',
+        'help_nav_uninstall_delete': 'Désinstallation / suppression',
+        'uninstall_delete_title': 'Désinstallation / suppression',
+        'uninstall_delete_intro': 'Cette section supprime les données installées ou créées par Bottled Kraken dans le '
+                                  'profil utilisateur. Utilisez cette fonction uniquement si vous voulez vraiment '
+                                  'réinitialiser ou supprimer Bottled Kraken sur cet ordinateur.',
+        'uninstall_delete_scope_title': 'Les éléments suivants peuvent être supprimés :',
+        'uninstall_delete_scope_backends': 'les backends GPU externes comme NVIDIA CUDA et AMD ROCm, avec leurs '
+                                           'environnements Python séparés',
+        'uninstall_delete_scope_whisper': 'les modèles Faster-Whisper téléchargés et le dossier Whisper de Bottled '
+                                          'Kraken',
+        'uninstall_delete_scope_settings': 'les paramètres du programme, chemins enregistrés, langue, thème et '
+                                           'dernières options utilisées',
+        'uninstall_delete_scope_cache': 'les dossiers de données, de cache et de configuration Bottled Kraken ainsi que '
+                                        'le dossier journal caché .bottled_kraken dans le profil utilisateur',
+        'uninstall_delete_warning_title': 'Important :',
+        'uninstall_delete_warning_irreversible': 'Cette opération est irréversible.',
+        'uninstall_delete_warning_user_files': 'Les images, PDF, fichiers de projet et exports ordinaires situés hors '
+                                               'des dossiers de données BottledKraken ne sont pas supprimés.',
+        'uninstall_delete_warning_running_app': 'Le dossier du programme actuellement lancé ou le dossier du code '
+                                                'source n’est volontairement pas supprimé pendant l’exécution du '
+                                                'programme.',
+        'uninstall_delete_click_hint': 'Cliquez sur le bouton rouge si vous voulez supprimer les données Bottled '
+                                       'Kraken installées.',
+        'btn_uninstall_delete': 'Désinstallation / suppression',
+        'uninstall_delete_confirm_title': 'Supprimer Bottled Kraken ?',
+        'uninstall_delete_confirm_text': 'Cela supprime les données Bottled Kraken installées dans le profil '
+                                         'utilisateur, y compris les backends externes, les modèles Whisper et les '
+                                         'paramètres du programme. Continuer ?',
+        'uninstall_delete_confirm_phrase': 'SUPPRIMER',
+        'uninstall_delete_confirm_prompt': 'Pour confirmer, saisissez exactement « {} » :',
+        'uninstall_delete_cancelled': 'La désinstallation / suppression a été annulée.',
+        'uninstall_delete_settings_cleared': 'Paramètres du programme supprimés.',
+        'uninstall_delete_settings_failed': 'Les paramètres du programme n’ont pas pu être supprimés : {}',
+        'uninstall_delete_deleted_path': 'Supprimé : {}',
+        'uninstall_delete_failed_path': 'Non supprimé : {} — {}',
+        'uninstall_delete_skipped_missing': 'Absent : {}',
+        'uninstall_delete_skipped_unsafe': 'Ignoré pour des raisons de sécurité : {}',
+        'uninstall_delete_summary': 'Terminé. Étapes réussies : {}. Étapes échouées : {}.',
+        'uninstall_delete_done_title': 'Désinstallation / suppression terminée',
+        'uninstall_delete_restart_note': 'Bottled Kraken va maintenant se fermer. Si vous voulez aussi supprimer '
+                                         'l’exécutable lui-même, supprimez-le ensuite manuellement depuis le dossier '
+                                         'de téléchargement ou d’application.'}}

@@ -1,0 +1,210 @@
+Bottled Kraken v3.1 - Windows 10/11 Installationshinweise
+=========================================================
+
+Diese Anleitung ist für Windows 10 und Windows 11 gedacht.
+Die Befehle werden Schritt für Schritt in PowerShell eingegeben.
+
+Voraussetzungen:
+- Python 3.11, 3.12 oder 3.13, 64-bit
+- Der Bottled-Kraken-Quellcode liegt entpackt in einem Projektordner
+- Empfohlen: PowerShell oder Windows Terminal
+
+---------------------------------------------------------
+1. PowerShell öffnen und in den Projektordner wechseln
+---------------------------------------------------------
+
+Beispiel:
+
+    cd "$env:USERPROFILE\Download\Bottled Kraken"
+
+Falls dein Ordner woanders liegt, passe den Pfad entsprechend an.
+
+---------------------------------------------------------
+2. Virtuelle Python-Umgebung erstellen
+---------------------------------------------------------
+
+Für Python 3.13:
+
+    py -3.13 -m venv .venv
+
+Falls Python 3.13 nicht installiert ist, nimm Python 3.12:
+
+    py -3.12 -m venv .venv
+
+Oder Python 3.11:
+
+    py -3.11 -m venv .venv
+
+---------------------------------------------------------
+3. Virtuelle Umgebung aktivieren
+---------------------------------------------------------
+
+    .\.venv\Scripts\Activate.ps1
+
+Falls PowerShell die Aktivierung blockiert:
+
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+Danach erneut aktivieren:
+
+    .\.venv\Scripts\Activate.ps1
+
+Wenn die Aktivierung funktioniert hat, steht links im Terminal ungefähr:
+
+    (.venv)
+
+---------------------------------------------------------
+4. pip, setuptools und wheel aktualisieren
+---------------------------------------------------------
+
+    python -m pip install --upgrade pip setuptools wheel
+
+---------------------------------------------------------
+5. Abhängigkeiten installieren
+---------------------------------------------------------
+
+    python -m pip install -r requirements.txt
+
+Das kann einige Zeit dauern.
+
+---------------------------------------------------------
+6. Programm aus dem Quellcode starten
+---------------------------------------------------------
+
+    python main.py
+
+---------------------------------------------------------
+7. Optional: PyInstaller installieren
+---------------------------------------------------------
+
+Falls PyInstaller noch nicht über requirements.txt installiert wurde:
+
+    python -m pip install pyinstaller pyinstaller-hooks-contrib
+
+---------------------------------------------------------
+8. Programm als ausführbare Datei bauen
+---------------------------------------------------------
+
+    python -m PyInstaller --clean --noconfirm main.spec
+
+Die fertige Windows-EXE liegt danach im Ordner:
+
+    dist
+
+---------------------------------------------------------
+9. Fertige EXE starten
+---------------------------------------------------------
+
+    .\dist\"Bottled Kraken.exe"
+
+Falls der Dateiname anders ist, öffne den dist-Ordner und starte die dort erzeugte EXE-Datei.
+
+---------------------------------------------------------
+10. Installierte Versionen prüfen
+---------------------------------------------------------
+
+    python - <<'PY'
+    import sys
+    import torch
+    import torchvision
+    import kraken
+
+    print("python:", sys.version)
+    print("torch:", torch.__version__)
+    print("torchvision:", torchvision.__version__)
+    print("kraken:", getattr(kraken, "__version__", "unknown"))
+    print("torch CUDA:", torch.version.cuda)
+    print("CUDA available:", torch.cuda.is_available())
+    PY
+
+Für die normale CPU-Version ist es in Ordnung, wenn dort steht:
+
+    torch CUDA: None
+    CUDA available: False
+
+---------------------------------------------------------
+Hinweis zur CPU-Version
+---------------------------------------------------------
+
+Die Standard-App ist als CPU-Onefile-Version gedacht.
+Kraken OCR ist trotzdem direkt enthalten, weil Kraken das Kernfeature von Bottled Kraken ist.
+
+CUDA wird nicht direkt in die Haupt-App eingebettet.
+Das hält die EXE kleiner und vermeidet viele Installationsprobleme.
+
+---------------------------------------------------------
+Hinweis zu NVIDIA CUDA
+---------------------------------------------------------
+
+NVIDIA CUDA kann direkt aus Bottled Kraken heraus als externes Backend installiert werden:
+
+    Optionen -> CPU/GPU -> GPU - CUDA (NVIDIA) -> CUDA (NVIDIA) installieren
+
+Das CUDA-Backend wird separat im Benutzerprofil installiert:
+
+    %LOCALAPPDATA%\BottledKraken\backends\nvidia-cuda
+
+Die CPU-Onefile-App wird dadurch nicht verändert.
+
+Wichtig:
+- Ein funktionierender NVIDIA-Treiber muss installiert sein.
+- Die Backend-Installation verändert keine systemweiten CUDA-Installationen.
+- Die Backend-Installation deinstalliert keine systemweiten NVIDIA-Treiber.
+- Wenn kein CUDA-Backend vorhanden ist, verwendet Bottled Kraken automatisch CPU-OCR.
+
+---------------------------------------------------------
+Optionaler CUDA-Backend-Selbsttest
+---------------------------------------------------------
+
+Nach der CUDA-Backend-Installation kann der Selbsttest so ausgeführt werden:
+
+    & "$env:LOCALAPPDATA\BottledKraken\backends\nvidia-cuda\.venv\Scripts\python.exe" "$env:LOCALAPPDATA\BottledKraken\backends\nvidia-cuda\worker_kraken_backend.py" --self-test --backend-kind nvidia-cuda
+
+Wenn alles funktioniert, sollte dort unter anderem stehen:
+
+    "ok": true
+    "cuda_available": true
+    "device_name": "..."
+
+---------------------------------------------------------
+Typische Problembehebung
+---------------------------------------------------------
+
+1. PowerShell blockiert die Aktivierung der venv:
+
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\.venv\Scripts\Activate.ps1
+
+2. requirements.txt schlägt fehl:
+
+    python -m pip install --upgrade pip setuptools wheel
+    python -m pip install -r requirements.txt
+
+3. PyInstaller-Build soll sauber neu gestartet werden:
+
+    Remove-Item -Recurse -Force build, dist
+    python -m PyInstaller --clean --noconfirm main.spec
+
+4. CUDA-Backend soll komplett neu installiert werden:
+
+    Remove-Item -Recurse -Force "$env:LOCALAPPDATA\BottledKraken\backends\nvidia-cuda"
+
+Danach Bottled Kraken neu starten und CUDA erneut über das Menü installieren.
+
+---------------------------------------------------------
+Kurzfassung
+---------------------------------------------------------
+
+Diese Befehle reichen für den normalen Start aus dem Quellcode meistens aus:
+
+    cd "$env:USERPROFILE\PycharmProjects\Bottled Kraken"
+    py -3.13 -m venv .venv
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install --upgrade pip setuptools wheel
+    python -m pip install -r requirements.txt
+    python main.py
+
+Für den Build:
+
+    python -m PyInstaller --clean --noconfirm main.spec

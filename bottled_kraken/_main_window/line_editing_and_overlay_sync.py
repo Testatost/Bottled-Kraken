@@ -379,9 +379,81 @@ class MainWindowLineEditingAndOverlaySyncMixin:
             x0, y0, x1, y1 = new_bbox
             lab.setPos(x0, max(0, y0 - 16))
 
+    def _overlay_visible_rows_for_mode(self, recs: List[RecordView]) -> List[int]:
+        if not getattr(self, "show_overlay", True):
+            return []
+
+        mode = getattr(self, "overlay_display_mode", "all")
+        max_idx = len(recs) - 1
+
+        if mode == "all":
+            return [int(rv.idx) for rv in recs if rv.bbox]
+
+        if mode == "current":
+            row = self.list_lines.currentRow() if hasattr(self, "list_lines") else -1
+            if 0 <= row <= max_idx:
+                return [int(recs[row].idx)]
+            return []
+
+        if mode == "selected":
+            rows = self._selected_line_rows() if hasattr(self, "_selected_line_rows") else []
+            clean = []
+            for row in rows:
+                if 0 <= row <= max_idx:
+                    clean.append(int(recs[row].idx))
+            return sorted(set(clean))
+
+        return [int(rv.idx) for rv in recs if rv.bbox]
+
+    def _refresh_overlay_display(self, recs: Optional[List[RecordView]] = None):
+        if recs is None:
+            task = self._current_task() if hasattr(self, "_current_task") else None
+            if not task or not task.results:
+                return
+            _, _, _, recs = task.results
+
+        if not hasattr(self, "canvas"):
+            return
+
+        rows = self._overlay_visible_rows_for_mode(recs)
+        self.canvas.draw_overlays(recs, visible_indices=rows)
+
+    def _set_overlay_display_mode(self, mode: str):
+        mode = str(mode or "all").lower()
+        if mode not in {"current", "selected", "all"}:
+            mode = "all"
+
+        self.overlay_display_mode = mode
+        self.show_overlay = True
+
+        if hasattr(self, "overlay_display_actions"):
+            act = self.overlay_display_actions.get(mode)
+            if act is not None and not act.isChecked():
+                act.setChecked(True)
+
+        try:
+            self.settings.setValue("ui/overlay_display_mode", mode)
+        except Exception:
+            pass
+
+        self._refresh_overlay_display()
+
+        # Auswahlfarbe nach dem Neuaufbau der sichtbaren Overlay-Boxen wiederherstellen.
+        rows = self._selected_line_rows() if hasattr(self, "_selected_line_rows") else []
+        if rows:
+            self.canvas.select_indices(rows, center=False)
+        else:
+            row = self.list_lines.currentRow() if hasattr(self, "list_lines") else -1
+            if row >= 0:
+                self.canvas.select_idx(row, center=False)
+            else:
+                self.canvas.select_indices([], center=False)
+
     def _on_overlay_toggled(self, checked):
-        self.show_overlay = checked
-        self.refresh_preview()
+        # Legacy-Kompatibilität für alte Patches/Settings. Das neue Menü nutzt
+        # _set_overlay_display_mode() und hat keine Checkbox mehr am Hauptpunkt.
+        self.show_overlay = bool(checked)
+        self._refresh_overlay_display()
 
     def on_export_file_started(self, display_name: str, current: int, total: int):
         task = next((i for i in self.queue_items if i.display_name == display_name), None)
