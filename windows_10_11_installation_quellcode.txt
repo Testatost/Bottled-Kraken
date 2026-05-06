@@ -5,7 +5,7 @@ Diese Anleitung ist für Windows 10 und Windows 11 gedacht.
 Die Befehle werden Schritt für Schritt in PowerShell eingegeben.
 
 Voraussetzungen:
-- Python 3.11, 3.12 oder 3.13, 64-bit
+- Python 3.11 64-bit
 - Der Bottled-Kraken-Quellcode liegt entpackt in einem Projektordner
 - Empfohlen: PowerShell oder Windows Terminal
 
@@ -23,7 +23,7 @@ Falls dein Ordner woanders liegt, passe den Pfad entsprechend an.
 2. Virtuelle Python-Umgebung erstellen
 ---------------------------------------------------------
 
-Oder Python 3.11:
+Python 3.11:
 
     py -3.11 -m venv .venv
 
