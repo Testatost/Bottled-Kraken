@@ -111,6 +111,9 @@ class MainWindow(
         self.reading_direction = READING_MODES["TB_LR"]
         self.device_str = "cpu"
         self.show_overlay = True
+        self.overlay_display_mode = self.settings.value("ui/overlay_display_mode", "all", str)
+        if self.overlay_display_mode not in {"current", "selected", "all"}:
+            self.overlay_display_mode = "all"
         self.model_path = ""
         self.seg_model_path = ""
         self.kraken_rec_models: List[str] = []

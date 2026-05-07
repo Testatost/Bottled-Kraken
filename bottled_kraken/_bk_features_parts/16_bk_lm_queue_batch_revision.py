@@ -931,8 +931,7 @@ def _bk_lm_load_results_patched(self, path: str, persist_current: bool = False):
     self._loaded_preview_path = path
     # Overlay-Boxen auch bei STATUS_ERROR anzeigen, wenn echte OCR-/Import-Ergebnisse vorhanden sind.
     self.canvas.set_overlay_enabled(True)
-    if self.show_overlay:
-        self.canvas.draw_overlays(recs)
+    self._refresh_overlay_display(recs)
     self._populate_lines_list(recs)
     rows = self._selected_line_rows()
     if rows:

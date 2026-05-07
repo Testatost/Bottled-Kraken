@@ -5,6 +5,27 @@ from ..workers import *
 from ..dialogs import *
 from ..image_edit import *
 
+
+class HardwareSnapshotWorker(QThread):
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+
+    def run(self):
+        try:
+            try:
+                clear_external_ocr_backend_cache()
+            except Exception:
+                pass
+            snapshot = self.owner._hardware_snapshot(refresh_backends=True)
+            self.done.emit(snapshot)
+        except Exception as exc:
+            self.failed.emit(repr(exc))
+
+
 class MainWindowHardwareStatusAndFileDropMixin:
     def _build_hardware_requirements_loading_html(self) -> str:
         return (
@@ -22,15 +43,16 @@ class MainWindowHardwareStatusAndFileDropMixin:
             '            </div>\n'
         )
 
-    def _build_hardware_requirements_help_html(self, *, refresh_backends: bool = True) -> str:
-        # Hinweise-Dialog immer frisch prüfen, damit nach einer CUDA/ROCm-Backend-
-        # Installation nicht der alte CPU-Zustand aus dem Cache angezeigt wird.
-        try:
-            if refresh_backends:
-                clear_external_ocr_backend_cache()
-        except Exception:
-            pass
-        hw = self._hardware_snapshot(refresh_backends=refresh_backends)
+    def _build_hardware_requirements_help_html(self, hw: Optional[Dict[str, object]] = None, *, refresh_backends: bool = False) -> str:
+        # Wenn hw bereits übergeben wird, wurde die Hardwareprüfung schon im
+        # Hintergrund erledigt. Dadurch blockiert der Hinweise-Dialog nicht.
+        if hw is None:
+            try:
+                if refresh_backends:
+                    clear_external_ocr_backend_cache()
+            except Exception:
+                pass
+            hw = self._hardware_snapshot(refresh_backends=refresh_backends)
         kraken_level, kraken_key = self._hardware_feature_status(hw, "kraken")
         lm_level, lm_key = self._hardware_feature_status(hw, "lm")
         whisper_level, whisper_key = self._hardware_feature_status(hw, "whisper")
@@ -97,6 +119,54 @@ class MainWindowHardwareStatusAndFileDropMixin:
             f'                <div class="small" style="margin-top:4px;">{self._tr("help_hw_note")}</div>\n'
             '            </div>\n'
         )
+
+    def _start_help_hardware_refresh(self, quick_browser: QTextBrowser):
+        """Startet die Hardwareprüfung für den Hinweise-Dialog verzögert im Hintergrund."""
+        worker = HardwareSnapshotWorker(self)
+        self._help_hardware_worker = worker
+
+        def _browser_alive() -> bool:
+            try:
+                return bool(quick_browser is not None and isValid(quick_browser))
+            except Exception:
+                return False
+
+        def _cleanup():
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            if getattr(self, "_help_hardware_worker", None) is worker:
+                self._help_hardware_worker = None
+
+        def _finish(hw: Dict[str, object]):
+            try:
+                if _browser_alive():
+                    html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(
+                        hw,
+                        refresh_backends=False,
+                    )
+                    quick_browser.setHtml(_help_html(self.current_theme, html_text))
+            except Exception:
+                pass
+            _cleanup()
+
+        def _failed(_msg: str):
+            try:
+                if _browser_alive():
+                    # Leichter Fallback ohne externe Backend-Aktualisierung, damit auch Fehlerfälle nicht blockieren.
+                    html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(
+                        refresh_backends=False,
+                    )
+                    quick_browser.setHtml(_help_html(self.current_theme, html_text))
+            except Exception:
+                pass
+            _cleanup()
+
+        worker.done.connect(_finish)
+        worker.failed.connect(_failed)
+        QTimer.singleShot(120, worker.start)
+
 
     def _refresh_hw_menu_availability(self):
         caps = self._gpu_capabilities()

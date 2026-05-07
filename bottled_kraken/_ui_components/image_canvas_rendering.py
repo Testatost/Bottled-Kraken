@@ -91,23 +91,26 @@ class ImageCanvasRenderingMixin:
                 self._zoom = 1.0
                 self._fit_zoom = 1.0
 
+    def _clear_overlay_items(self):
+        for r in list(self._rects.values()):
+            try:
+                if isValid(r) and r.scene() is self.scene:
+                    self.scene.removeItem(r)
+            except RuntimeError:
+                pass
+        for l in list(self._labels.values()):
+            try:
+                if isValid(l) and l.scene() is self.scene:
+                    self.scene.removeItem(l)
+            except RuntimeError:
+                pass
+        self._rects.clear()
+        self._labels.clear()
+
     def refresh_overlays(self):
         if self._pixmap_item and hasattr(self, "_last_recs"):
-            for r in list(self._rects.values()):
-                try:
-                    if isValid(r) and r.scene() is self.scene:
-                        self.scene.removeItem(r)
-                except RuntimeError:
-                    pass
-            for l in list(self._labels.values()):
-                try:
-                    if isValid(l) and l.scene() is self.scene:
-                        self.scene.removeItem(l)
-                except RuntimeError:
-                    pass
-            self._rects.clear()
-            self._labels.clear()
-            self.draw_overlays(self._last_recs)
+            visible = getattr(self, "_last_overlay_visible_indices", None)
+            self.draw_overlays(self._last_recs, visible_indices=visible)
 
     def _on_rect_item_changed(self, idx: int, scene_rect: QRectF):
         self.rect_changed.emit(idx, scene_rect)
@@ -118,12 +121,23 @@ class ImageCanvasRenderingMixin:
     def _on_rect_item_double_clicked(self, idx: int):
         self.rect_clicked.emit(idx)
 
-    def draw_overlays(self, recs: List[RecordView]):
+    def draw_overlays(self, recs: List[RecordView], visible_indices: Optional[List[int]] = None):
         self._last_recs = recs
+        if visible_indices is None:
+            visible_set = None
+            self._last_overlay_visible_indices = None
+        else:
+            visible_set = {int(i) for i in visible_indices if i is not None}
+            self._last_overlay_visible_indices = sorted(visible_set)
+
+        self._clear_overlay_items()
+
         font = QFont()
         font.setPointSize(10)
         font.setBold(True)
         for rv in recs:
+            if visible_set is not None and int(rv.idx) not in visible_set:
+                continue
             if not rv.bbox:
                 continue
             x0, y0, x1, y1 = rv.bbox

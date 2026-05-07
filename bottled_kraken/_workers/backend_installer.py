@@ -58,6 +58,12 @@ BACKEND_DEFS: Dict[str, Dict[str, str]] = {
 }
 
 
+# Kraken 7.x depends on python-bidi. On Windows, pip must not try to build
+# python-bidi from source during backend installation, because that would require
+# Rust/MSVC build tooling. Install it first and force a binary wheel.
+PYTHON_BIDI_REQUIREMENT = "python-bidi>=0.6.7,<0.7"
+KRAKEN_REQUIREMENT = "kraken==7.0.1"
+
 def _fallback_tr(key: str, *args) -> str:
     fallback = {
         "backend_install_title_nvidia": "Install NVIDIA CUDA backend",
@@ -392,6 +398,26 @@ class BackendInstallerWorker(QThread):
             self._emit("Upgrading pip tooling...")
             self._run_cmd(pip_cmd + ["install", "--upgrade", "pip", "setuptools", "wheel"])
 
+            self._emit("Installing binary wheel prerequisite: python-bidi...")
+            try:
+                self._run_cmd(
+                    pip_cmd + [
+                        "install",
+                        "--no-cache-dir",
+                        "--prefer-binary",
+                        "--only-binary=:all:",
+                        PYTHON_BIDI_REQUIREMENT,
+                    ]
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "python-bidi could not be installed as a prebuilt wheel. "
+                    "Please use Python 3.10-3.13 64-bit and upgrade pip first. "
+                    "The backend installer intentionally does not build python-bidi from source, "
+                    "because that would require Rust/MSVC build tools on Windows.\n\n"
+                    f"Original error: {exc}"
+                ) from exc
+
             torch_index = meta["torch_index"]
             if self.kind == "nvidia-cuda":
                 torch_index = os.environ.get("BK_CUDA_INDEX", torch_index).strip() or torch_index
@@ -416,14 +442,15 @@ class BackendInstallerWorker(QThread):
             )
 
             self._emit("Installing Kraken runtime dependencies...")
-            deps = ["kraken==7.0.1", "pyarrow", "Pillow", "numpy"]
-            # Kraken imports coremltools in its VGSL layer stack on current builds.
-            # It is safe on Linux; on Windows it may be unavailable, so try it separately below.
-            self._run_cmd(pip_cmd + ["install", "--no-cache-dir", "--upgrade"] + deps)
+            deps = [KRAKEN_REQUIREMENT, PYTHON_BIDI_REQUIREMENT, "pyarrow", "Pillow", "numpy"]
+            # Do not use --upgrade here. The PyTorch GPU wheel was installed in the previous
+            # step and already satisfies Kraken's torch requirement. A broad upgrade can make
+            # pip try unnecessary rebuilds or swap packages unexpectedly.
+            self._run_cmd(pip_cmd + ["install", "--no-cache-dir", "--prefer-binary"] + deps)
 
             self._emit("Installing optional coremltools dependency...")
             try:
-                self._run_cmd(pip_cmd + ["install", "--no-cache-dir", "--upgrade", "coremltools"])
+                self._run_cmd(pip_cmd + ["install", "--no-cache-dir", "--prefer-binary", "coremltools"])
             except Exception as exc:
                 self._emit(f"[!] coremltools could not be installed: {exc}")
                 self._emit("[!] Continuing; the backend self-test will show whether Kraken can import successfully.")
