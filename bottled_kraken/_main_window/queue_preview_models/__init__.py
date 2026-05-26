@@ -1,0 +1,9 @@
+from .queue_context_actions import MainWindowQueueContextActionsMixin
+from .preview_and_results import MainWindowPreviewAndResultsMixin
+from .model_selection_and_logs import MainWindowModelSelectionAndLogsMixin
+from .line_import_matching import MainWindowLineImportMatchingMixin
+
+class MainWindowQueueContextPreviewAndModelLoadingMixin(MainWindowQueueContextActionsMixin, MainWindowPreviewAndResultsMixin, MainWindowModelSelectionAndLogsMixin, MainWindowLineImportMatchingMixin):
+    pass
+
+__all__ = ['MainWindowQueueContextPreviewAndModelLoadingMixin', 'MainWindowQueueContextActionsMixin', 'MainWindowPreviewAndResultsMixin', 'MainWindowModelSelectionAndLogsMixin', 'MainWindowLineImportMatchingMixin']

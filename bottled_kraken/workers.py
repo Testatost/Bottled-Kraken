@@ -1,4 +1,3 @@
-
 """Öffentliche Worker-Schnittstelle."""
 
 from ._workers.pdf_ocr_workers import PDFRenderWorker, OCRWorker

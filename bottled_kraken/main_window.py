@@ -26,7 +26,6 @@ from ._main_window.export_rendering_and_paths import MainWindowExportRenderingAn
 from ._main_window.whisper_download_help_and_image_edit_queue import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
 from ._main_window.image_edit_application_and_close import MainWindowImageEditApplicationAndCloseMixin
 
-
 class MainWindow(
     MainWindowInitializationAndShutdownMixin,
     MainWindowWhisperSetupAndModelSelectionMixin,
@@ -68,7 +67,8 @@ class MainWindow(
             self._detect_system_lang(),
             str
         )
-        self.log_lang = self._detect_system_lang()
+        # Log-Ausgaben folgen der aktuell eingestellten UI-Sprache.
+        self.log_lang = translation.normalize_language_code(self.current_lang)
         self.temp_dirs_created = set()
         QApplication.instance().installEventFilter(self)
         self.ai_worker: Optional[AIRevisionWorker] = None
@@ -112,8 +112,14 @@ class MainWindow(
         self.device_str = "cpu"
         self.show_overlay = True
         self.overlay_display_mode = self.settings.value("ui/overlay_display_mode", "all", str)
-        if self.overlay_display_mode not in {"current", "selected", "all"}:
+        if self.overlay_display_mode not in {"none", "current", "selected", "all"}:
             self.overlay_display_mode = "all"
+        self.kraken_auto_revision_enabled = str(self.settings.value("ocr/auto_revision_enabled", "false", str)).strip().lower() in {"1", "true", "yes", "on"}
+        try:
+            default_repls = _serialize_ocr_auto_revision_replacements()
+        except Exception:
+            default_repls = "ſ=s\n⸗=-\n±=+/-"
+        self.kraken_auto_revision_replacements = str(self.settings.value("ocr/auto_revision_replacements", default_repls, str))
         self.model_path = ""
         self.seg_model_path = ""
         self.kraken_rec_models: List[str] = []
@@ -257,13 +263,17 @@ class MainWindow(
         self.act_toggle_log.toggled.connect(self.toggle_log_area)
         # Undo-/Redo-Aktionen
         self.act_undo = QAction(self._tr("act_undo"), self)
-        self.act_undo.setShortcut(QKeySequence("Ctrl+Z"))
         self.act_undo.triggered.connect(self.undo)
         self.act_redo = QAction(self._tr("act_redo"), self)
-        self.act_redo.setShortcut(QKeySequence("Ctrl+Y"))
         self.act_redo.triggered.connect(self.redo)
-        self.addAction(self.act_undo)
-        self.addAction(self.act_redo)
+        self.act_undo_sc = QAction(self)
+        self.act_undo_sc.setShortcut(QKeySequence("Ctrl+Z"))
+        self.act_undo_sc.triggered.connect(self.undo)
+        self.act_redo_sc = QAction(self)
+        self.act_redo_sc.setShortcut(QKeySequence("Ctrl+Y"))
+        self.act_redo_sc.triggered.connect(self.redo)
+        self.addAction(self.act_undo_sc)
+        self.addAction(self.act_redo_sc)
         # -----------------------------
         # Globale Shortcuts
         # -----------------------------

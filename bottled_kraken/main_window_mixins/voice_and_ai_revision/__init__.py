@@ -1,0 +1,9 @@
+from .voice_model_and_device import MainWindowVoiceModelAndDeviceMixin
+from .voice_line_fill import MainWindowVoiceLineFillMixin
+from .ai_revision_targets import MainWindowAiRevisionTargetsMixin
+from .ai_revision_execution import MainWindowAiRevisionExecutionMixin
+
+class MainWindowUndoVoiceFillAndAiRevisionMixin(MainWindowVoiceModelAndDeviceMixin, MainWindowVoiceLineFillMixin, MainWindowAiRevisionTargetsMixin, MainWindowAiRevisionExecutionMixin):
+    pass
+
+__all__ = ['MainWindowUndoVoiceFillAndAiRevisionMixin', 'MainWindowVoiceModelAndDeviceMixin', 'MainWindowVoiceLineFillMixin', 'MainWindowAiRevisionTargetsMixin', 'MainWindowAiRevisionExecutionMixin']

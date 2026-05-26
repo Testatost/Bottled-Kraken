@@ -1,0 +1,9 @@
+MainWindow._bk_lm_run_overlay_lm_ocr_current_task = _bk_lm_run_overlay_lm_ocr_current_task
+
+MainWindow.on_ai_overlay_lm_ocr_done = _bk_on_ai_overlay_lm_ocr_done
+
+MainWindow.on_ai_overlay_lm_ocr_failed = _bk_on_ai_overlay_lm_ocr_failed
+
+MainWindow._bk_lm_install_dropdown_menu = _bk_lm_install_dropdown_menu
+
+MainWindow._bk_lm_retranslate_dropdown = _bk_lm_retranslate_dropdown

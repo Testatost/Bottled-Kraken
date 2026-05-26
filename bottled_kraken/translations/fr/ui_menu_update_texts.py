@@ -1,0 +1,111 @@
+"""UI- und Menü-Überschreibungen für aktuelle Menü-/Multi-OCR-Anpassungen."""
+
+FR_UI_MENU_UPDATE_TEXTS = {'act_overlay_show': 'Visibilité des boîtes overlay',
+ 'overlay_mode_none': 'Ne rien afficher',
+ 'overlay_mode_current': 'Ligne actuelle',
+ 'overlay_mode_selected': 'Lignes sélectionnées',
+ 'overlay_mode_all': 'Toutes les lignes',
+ 'overlay_resize_menu': 'Redimensionner les boîtes overlay',
+ 'act_load_rec_model': 'Charger le Rec-Model...',
+ 'act_load_seg_model': 'Charger le Seg-Model...',
+ 'act_clear_rec': 'Supprimer le Rec-Model',
+ 'act_clear_seg': 'Supprimer le Seg-Model',
+ 'status_rec_model': 'Rec-Model : {}',
+ 'status_seg_model': 'Seg-Model : {}',
+ 'btn_rec_model_empty': 'Rec-Model : -',
+ 'btn_rec_model_value': 'Rec-Model : {}',
+ 'btn_seg_model_empty': 'Seg-Model : -',
+ 'btn_seg_model_value': 'Seg-Model : {}',
+ 'lm_menu_current_line': 'Ligne actuelle',
+ 'lm_menu_selected_lines': 'Lignes sélectionnées',
+ 'lm_menu_all_lines': 'Toutes les lignes',
+ 'lm_menu_lm_ocr': 'OCR de page LM (sans boîtes overlay)',
+ 'lm_menu_lm_ocr_boxes': 'OCR de page LM avec boîtes overlay',
+ 'lm_menu_generate_postgres': 'PostgreSQL-json',
+ 'lm_menu_generate_neo4j': 'Neo4j-json',
+ 'lm_menu_generate_sqlite': 'SQLite-json',
+ 'lm_menu_show_canonical_graph': 'Affichage du graphe',
+ 'lm_menu_generate_canonical': 'Affichage du graphe',
+ 'act_lm_generate_gedcom': 'Fichier GEDCOM',
+ 'msg_sqlite_export_done': 'SQLite-json exporté : {}',
+ 'dlg_sqlite_json_title': 'Enregistrer SQLite-json',
+ 'filter_json_files': 'JSON (*.json);;Tous les fichiers (*)',
+ 'ptr_multi_ocr_models_label': 'Quels Rec-Models utiliser ? (activer/désactiver avec les coches)',
+ 'multi_ocr_rec_models_label': 'Quels Rec-Models utiliser ? (activer/désactiver avec les coches)',
+ 'multi_ocr_runs_label': 'Répétitions OCR par Rec-Model sélectionné :',
+ 'multi_ocr_use_seg': 'Utiliser le Seg-Model',
+ 'multi_ocr_variants_tabs_title': 'Onglets OCR / variantes',
+ 'multi_ocr_variant_tab': 'Onglet ({})',
+ 'multi_ocr_variant_tooltip': 'Onglet ({}), Rec-Model : {}',
+ 'multi_ocr_variant_add_tooltip': 'Ajouter un nouvel onglet OCR',
+ 'multi_ocr_variant_delete_tab': 'Supprimer l’onglet OCR',
+ 'multi_ocr_variant_rename_label': 'Nouveau nom de l’onglet :',
+ 'multi_ocr_variant_rename_title': 'Renommer l’onglet OCR',
+ 'multi_ocr_variant_rename_action': 'Renommer l’onglet OCR',
+ 'multi_ocr_no_text': '<aucun texte>',
+ 'act_delete_checked_queue': 'Supprimer la sélection',
+ 'act_delete_checked_queue_tip': 'Supprimer uniquement les fichiers cochés dans la file d’attente',
+ 'ptr_warn_select_recognition_model': 'Veuillez activer au moins un Rec-Model avec une coche.',
+ 'multi_ocr_models_section': '1) Rec-Models',
+ 'multi_ocr_variants_section': '2) Variantes d’image',
+ 'multi_ocr_variants_label': 'Quelles variantes d’image utiliser ? (activer/désactiver avec les '
+                             'coches)',
+ 'multi_ocr_runs_section': '3) Répétitions OCR',
+ 'multi_ocr_seg_model_fixed': 'Le Seg-Model actuellement chargé est utilisé sans changement pour '
+                              'tous les Rec-Models sélectionnés.',
+ 'multi_ocr_variant_original': 'Original',
+ 'multi_ocr_variant_autocontrast': 'Contraste automatique',
+ 'multi_ocr_variant_contrast': 'Contraste +25 %',
+ 'multi_ocr_variant_sharp': 'Netteté +60 %',
+ 'multi_ocr_variant_gray_autocontrast': 'Contraste automatique en niveaux de gris',
+ 'multi_ocr_variant_binary_otsu': 'Binaire/Otsu',
+ 'multi_ocr_variant_contrast_sharp': 'Contraste + netteté',
+ 'multi_ocr_variant_equalize': 'Égalisation d’histogramme',
+ 'multi_ocr_variant_slightly_bright': 'Luminosité +5 %',
+ 'multi_ocr_variants_help_button_tooltip': 'Expliquer les variantes d’image',
+ 'multi_ocr_variants_help_title': 'Explication des variantes d’image',
+ 'multi_ocr_variants_help_intro': 'Les variantes d’image ne modifient ni les boîtes overlay ni le '
+                                  'Seg-Model. Elles créent seulement différentes versions en '
+                                  'pixels de la même page afin que le même Rec-Model puisse '
+                                  'produire plusieurs candidats OCR utiles pour les passages '
+                                  'difficiles.',
+ 'multi_ocr_variants_help_footer': 'Recommandation : Original, contraste automatique, contraste '
+                                   '+25 %, netteté +60 % et contraste automatique en niveaux de '
+                                   'gris forment un bon réglage par défaut. Binaire/Otsu, '
+                                   'contraste + netteté, égalisation d’histogramme et luminosité '
+                                   '+5 % sont des variantes supplémentaires pour les scans '
+                                   'problématiques.',
+ 'multi_ocr_variant_original_help': 'Utilise l’image sans modification après la normalisation '
+                                    'interne. Cette variante sert de référence et devrait '
+                                    'généralement rester activée.',
+ 'multi_ocr_variant_autocontrast_help': 'Étire automatiquement les valeurs de luminosité '
+                                        'existantes. Cela aide souvent pour les scans ternes, '
+                                        'grisâtres ou mal éclairés sans supprimer fondamentalement '
+                                        'la couleur.',
+ 'multi_ocr_variant_contrast_help': 'Augmente modérément le contraste de 25 %. Les zones claires '
+                                    'et sombres sont mieux séparées, ce qui peut rendre une encre '
+                                    'pâle ou une impression faible plus reconnaissable.',
+ 'multi_ocr_variant_sharp_help': 'Augmente la netteté des contours de 60 %. Cela peut aider pour '
+                                 'des lignes légèrement floues, mais peut aussi renforcer le bruit '
+                                 'sur des scans très dégradés.',
+ 'multi_ocr_variant_gray_autocontrast_help': 'Convertit l’image en niveaux de gris puis applique '
+                                             'un contraste automatique. Utile lorsque la couleur '
+                                             'n’est pas importante pour l’écriture ou lorsque des '
+                                             'dominantes de couleur perturbent la reconnaissance.',
+ 'multi_ocr_variant_binary_otsu_help': 'Convertit l’image en noir et blanc avec un seuil d’Otsu '
+                                       'calculé automatiquement. Bon pour les scans nets avec un '
+                                       'fort contraste avant-plan/arrière-plan ; souvent trop '
+                                       'brutal avec des taches, des ombres ou du parchemin.',
+ 'multi_ocr_variant_contrast_sharp_help': 'Combine une légère augmentation du contraste avec une '
+                                          'netteté supplémentaire. Utile pour des originaux un peu '
+                                          'délavés mais pas trop bruités.',
+ 'multi_ocr_variant_equalize_help': 'Égalise l’histogramme afin de répartir plus uniformément les '
+                                    'plages de luminosité. Cela peut aider avec un éclairage '
+                                    'irrégulier, mais peut créer des contrastes peu naturels sur '
+                                    'certains scans.',
+ 'multi_ocr_variant_slightly_bright_help': 'Augmente légèrement la luminosité de 5 %. Utile pour '
+                                           'les scans globalement trop sombres ou lorsqu’un '
+                                           'arrière-plan sombre absorbe des parties de l’écriture.'}
+
+# PATCH17_LM_PAGE_OCR_MENU_UPDATE_FR
+FR_UI_MENU_UPDATE_TEXTS.update({'lm_menu_lm_ocr': 'OCR de page LM (sans boîtes overlay)', 'lm_menu_lm_ocr_boxes': 'OCR de page LM avec boîtes overlay'})

@@ -8,14 +8,14 @@ from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QImage
 from PySide6.QtCore import QCoreApplication, Qt, QTimer, QEventLoop, QRect
 
+from .translation import translation
+
 try:
     import pyi_splash as _pyi_splash  # type: ignore[import]
 except Exception:
     _pyi_splash = None
 
-
 _CRASH_LOG_FILE = None
-
 
 def _app_log_dir() -> str:
     """Writable log directory, also in PyInstaller builds."""
@@ -27,7 +27,6 @@ def _app_log_dir() -> str:
     except Exception:
         base = os.getcwd()
     return base
-
 
 def _install_crash_log() -> None:
     """
@@ -56,7 +55,6 @@ def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base_path, relative_path)
 
-
 def _pick_existing_resource(*names: str) -> str:
     for name in names:
         path = resource_path(name)
@@ -64,12 +62,17 @@ def _pick_existing_resource(*names: str) -> str:
             return path
     return ""
 
-
 def _install_early_exception_hook() -> None:
     def handle_exception(exc_type, exc_value, exc_tb):
+        try:
+            if exc_type is KeyboardInterrupt or issubclass(exc_type, KeyboardInterrupt):
+                print("KeyboardInterrupt ignored by GUI exception hook.")
+                return
+        except Exception:
+            pass
         msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         try:
-            QMessageBox.critical(None, "Fehler", msg)
+            QMessageBox.critical(None, translation.translate(translation.DEFAULT_LANGUAGE, "error_title"), msg)
         except Exception:
             try:
                 print(msg, file=sys.stderr)
@@ -77,7 +80,6 @@ def _install_early_exception_hook() -> None:
                 pass
 
     sys.excepthook = handle_exception
-
 
 class _SplashWidget(QWidget):
     """Ein leichtgewichtiges Splash-Fenster für Wayland/KDE."""
@@ -104,8 +106,6 @@ class _SplashWidget(QWidget):
         painter = QPainter(self)
         painter.drawPixmap(0, 0, self._pixmap)
 
-
-
 def _load_pixmap(path: str) -> "QPixmap | None":
     try:
         from PIL import Image
@@ -122,20 +122,14 @@ def _load_pixmap(path: str) -> "QPixmap | None":
         pix = QPixmap(path)
         return pix if not pix.isNull() else None
 
-
-
 def _compositor_sync(ms: int = 220) -> None:
     loop = QEventLoop()
     QTimer.singleShot(ms, loop.quit)
     loop.exec()
 
-
-
 def _flush_gui(rounds: int = 3) -> None:
     for _ in range(rounds):
         QCoreApplication.processEvents()
-
-
 
 def main():
     _install_crash_log()

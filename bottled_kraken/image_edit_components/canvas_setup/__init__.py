@@ -1,0 +1,10 @@
+from .lifecycle_and_image import ImageEditCanvasLifecycleMixin
+from .geometry_transform_state import ImageEditCanvasGeometryTransformStateMixin
+from .crop_erase_selection_state import ImageEditCanvasCropEraseSelectionStateMixin
+from .coordinate_projection import ImageEditCanvasCoordinateProjectionMixin
+from .painting_and_hit_testing import ImageEditCanvasPaintingAndHitTestingMixin
+
+class ImageEditCanvasSetupMixin(ImageEditCanvasLifecycleMixin, ImageEditCanvasGeometryTransformStateMixin, ImageEditCanvasCropEraseSelectionStateMixin, ImageEditCanvasCoordinateProjectionMixin, ImageEditCanvasPaintingAndHitTestingMixin):
+    pass
+
+__all__ = ['ImageEditCanvasSetupMixin', 'ImageEditCanvasLifecycleMixin', 'ImageEditCanvasGeometryTransformStateMixin', 'ImageEditCanvasCropEraseSelectionStateMixin', 'ImageEditCanvasCoordinateProjectionMixin', 'ImageEditCanvasPaintingAndHitTestingMixin']

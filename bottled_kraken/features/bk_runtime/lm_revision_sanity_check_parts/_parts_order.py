@@ -1,0 +1,1 @@
+PARTS = ['merge_base.py', 'page_ocr_merge.py', 'numeric_age_corrections.py', 'worker_run_patch.py', 'force_rich_age_candidate.py', 'final_row_identity_and_rich_guard.py', 'aggressive_page_line_completion.py', 'ditto_guard.py', 'lm_revision_merge_modes.py']

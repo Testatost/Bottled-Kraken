@@ -1,0 +1,10 @@
+from .keyboard_and_press_events import ImageEditCanvasKeyboardAndPressMixin
+from .mouse_move_events import ImageEditCanvasMouseMoveMixin
+from .mouse_release_context import ImageEditCanvasMouseReleaseContextMixin
+from .crop_zoom_resize import ImageEditCanvasCropZoomResizeMixin
+from .cursor_and_rect_helpers import ImageEditCanvasCursorAndRectHelpersMixin
+
+class ImageEditCanvasInteractionMixin(ImageEditCanvasKeyboardAndPressMixin, ImageEditCanvasMouseMoveMixin, ImageEditCanvasMouseReleaseContextMixin, ImageEditCanvasCropZoomResizeMixin, ImageEditCanvasCursorAndRectHelpersMixin):
+    pass
+
+__all__ = ['ImageEditCanvasInteractionMixin', 'ImageEditCanvasKeyboardAndPressMixin', 'ImageEditCanvasMouseMoveMixin', 'ImageEditCanvasMouseReleaseContextMixin', 'ImageEditCanvasCropZoomResizeMixin', 'ImageEditCanvasCursorAndRectHelpersMixin']

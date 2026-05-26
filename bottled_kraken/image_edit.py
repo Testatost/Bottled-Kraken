@@ -1,4 +1,3 @@
-
 """Öffentliche Bildbearbeitungskomponenten."""
 
 from ._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog

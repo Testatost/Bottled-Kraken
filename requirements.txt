@@ -1,4 +1,4 @@
-# Bottled Kraken v3.1 Windows runtime dependencies
+# Bottled Kraken v3.3 Windows runtime dependencies
 # Recommended Python: >=3.10,<3.14
 #
 # This requirements file installs the CPU baseline for Windows 10/11.
@@ -10,9 +10,9 @@
 # -------------------------------------------------
 # Core OCR / HTR
 # -------------------------------------------------
-kraken==7.0.1
+kraken==7.0.2
 
-# Kraken 7.0.1 supports torch >=2.4.0, <=2.10.
+# Kraken 7.0.2 supports torch >=2.4.0, <=2.10.
 # Use the official CPU wheels for the standard Bottled Kraken release.
 torch==2.10.0+cpu
 torchvision==0.25.0+cpu
@@ -46,3 +46,9 @@ accelerate
 safetensors
 tokenizers
 tiktoken
+
+# -------------------------------------------------
+# DOCX / XML export support
+# -------------------------------------------------
+python-docx
+lxml

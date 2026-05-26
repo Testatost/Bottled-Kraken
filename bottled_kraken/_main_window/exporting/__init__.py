@@ -1,0 +1,8 @@
+from .dialogs_and_batch_flow import MainWindowExportDialogsAndBatchFlowMixin
+from .renderers import MainWindowExportRenderersMixin
+from .whisper_paths import MainWindowWhisperPathHelpersMixin
+
+class MainWindowExportRenderingAndPathsMixin(MainWindowExportDialogsAndBatchFlowMixin, MainWindowExportRenderersMixin, MainWindowWhisperPathHelpersMixin):
+    pass
+
+__all__ = ['MainWindowExportRenderingAndPathsMixin', 'MainWindowExportDialogsAndBatchFlowMixin', 'MainWindowExportRenderersMixin', 'MainWindowWhisperPathHelpersMixin']

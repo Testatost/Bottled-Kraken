@@ -1,0 +1,101 @@
+"""UI- und Menü-Überschreibungen für aktuelle Menü-/Multi-OCR-Anpassungen."""
+
+DE_UI_MENU_UPDATE_TEXTS = {'act_overlay_show': 'Sichtbarkeit Overlay-Boxen',
+ 'overlay_mode_none': 'Keine anzeigen',
+ 'overlay_mode_current': 'Aktuelle Zeile',
+ 'overlay_mode_selected': 'Markierte Zeilen',
+ 'overlay_mode_all': 'Alle Zeilen',
+ 'overlay_resize_menu': 'Overlay-Boxen skalieren',
+ 'lm_menu_current_line': 'Aktuelle Zeile',
+ 'lm_menu_selected_lines': 'Markierte Zeilen',
+ 'lm_menu_all_lines': 'Alle Zeilen',
+ 'lm_menu_lm_ocr': 'LM Seiten OCR (ohne Overlay-Boxen)',
+ 'lm_menu_lm_ocr_boxes': 'LM Seiten OCR mit Overlay-Boxen',
+ 'lm_menu_generate_postgres': 'PostgreSQL-json',
+ 'lm_menu_generate_neo4j': 'Neo4j-json',
+ 'lm_menu_generate_sqlite': 'SQLite-json',
+ 'lm_menu_show_canonical_graph': 'Graph-Darstellung',
+ 'lm_menu_generate_canonical': 'Graph-Darstellung',
+ 'act_lm_generate_gedcom': 'GEDCOM-Datei',
+ 'msg_sqlite_export_done': 'SQLite-json exportiert: {}',
+ 'dlg_sqlite_json_title': 'SQLite-json speichern',
+ 'filter_json_files': 'JSON (*.json);;Alle Dateien (*)',
+ 'ptr_multi_ocr_models_label': 'Welche Rec-Modelle verwenden? (mit Häkchen '
+                               'aktivieren/deaktivieren)',
+ 'multi_ocr_rec_models_label': 'Welche Rec-Modelle verwenden? (mit Häkchen '
+                               'aktivieren/deaktivieren)',
+ 'multi_ocr_runs_label': 'OCR-Wiederholungen je ausgewähltem Rec-Modell:',
+ 'multi_ocr_use_seg': 'Seg-Modell verwenden',
+ 'multi_ocr_variants_tabs_title': 'OCR-Tabs / Varianten',
+ 'multi_ocr_variant_tab': 'Tab ({})',
+ 'multi_ocr_variant_tooltip': 'Tab ({}), Rec-Modell: {}',
+ 'multi_ocr_variant_add_tooltip': 'Neuen OCR-Tab hinzufügen',
+ 'multi_ocr_variant_delete_tab': 'OCR-Tab löschen',
+ 'multi_ocr_variant_rename_label': 'Neuer Tab-Name:',
+ 'multi_ocr_variant_rename_title': 'OCR-Tab umbenennen',
+ 'multi_ocr_variant_rename_action': 'OCR-Tab umbenennen',
+ 'multi_ocr_no_text': '<kein Text>',
+ 'act_delete_checked_queue': 'Ausgewählte löschen',
+ 'act_delete_checked_queue_tip': 'Nur die im Wartebereich angehakten Dateien löschen',
+ 'ptr_warn_select_recognition_model': 'Bitte mindestens ein Rec-Modell mit Häkchen aktivieren.',
+ 'multi_ocr_models_section': '1) Rec-Modelle',
+ 'multi_ocr_variants_section': '2) Bildvarianten',
+ 'multi_ocr_variants_label': 'Welche Bildvarianten verwenden? (mit Häkchen '
+                             'aktivieren/deaktivieren)',
+ 'multi_ocr_runs_section': '3) OCR-Wiederholungen',
+ 'multi_ocr_seg_model_fixed': 'Das aktuell geladene Seg-Modell wird für alle ausgewählten '
+                              'Rec-Modelle unverändert verwendet.',
+ 'multi_ocr_variant_original': 'Original',
+ 'multi_ocr_variant_autocontrast': 'Auto-Kontrast',
+ 'multi_ocr_variant_contrast': 'Kontrast +25%',
+ 'multi_ocr_variant_sharp': 'Schärfe +60%',
+ 'multi_ocr_variant_gray_autocontrast': 'Graustufen-Autokontrast',
+ 'multi_ocr_variant_binary_otsu': 'Binär/Otsu',
+ 'multi_ocr_variant_contrast_sharp': 'Kontrast + Schärfe',
+ 'multi_ocr_variant_equalize': 'Histogramm-Ausgleich',
+ 'multi_ocr_variant_slightly_bright': 'Helligkeit +5%',
+ 'multi_ocr_variants_help_button_tooltip': 'Bildvarianten erklären',
+ 'multi_ocr_variants_help_title': 'Bildvarianten erklärt',
+ 'multi_ocr_variants_help_intro': 'Bildvarianten verändern nicht die Overlay-Boxen und nicht das '
+                                  'Seg-Modell. Sie erzeugen nur unterschiedliche Pixelversionen '
+                                  'derselben Seite, damit das gleiche Rec-Modell bei schwierigen '
+                                  'Stellen mehrere sinnvolle OCR-Kandidaten liefern kann.',
+ 'multi_ocr_variants_help_footer': 'Empfehlung: Original, Auto-Kontrast, Kontrast +25%, Schärfe '
+                                   '+60% und Graustufen-Autokontrast sind ein guter Standard. '
+                                   'Binär/Otsu, Kontrast + Schärfe, Histogramm-Ausgleich und '
+                                   'Helligkeit +5% sind zusätzliche Varianten für problematische '
+                                   'Scans.',
+ 'multi_ocr_variant_original_help': 'Verwendet das Bild unverändert nach der internen '
+                                    'Normalisierung. Diese Variante ist die Referenz und sollte '
+                                    'normalerweise aktiviert bleiben.',
+ 'multi_ocr_variant_autocontrast_help': 'Spreizt die vorhandenen Helligkeitswerte automatisch. '
+                                        'Hilft oft bei flauen, grau wirkenden oder schlecht '
+                                        'ausgeleuchteten Scans, ohne Farben grundsätzlich zu '
+                                        'entfernen.',
+ 'multi_ocr_variant_contrast_help': 'Erhöht den Kontrast moderat um 25%. Dadurch werden helle und '
+                                    'dunkle Bereiche stärker getrennt; das kann blasse Tinte oder '
+                                    'schwachen Druck besser erkennbar machen.',
+ 'multi_ocr_variant_sharp_help': 'Erhöht die Kantenschärfe um 60%. Das kann bei leicht unscharfen '
+                                 'Zeilen helfen, kann bei starkem Rauschen aber auch Störungen '
+                                 'betonen.',
+ 'multi_ocr_variant_gray_autocontrast_help': 'Wandelt das Bild in Graustufen um und wendet danach '
+                                             'Auto-Kontrast an. Sinnvoll, wenn Farbe für die '
+                                             'Schrift keine Rolle spielt oder Farbstiche die '
+                                             'Erkennung stören.',
+ 'multi_ocr_variant_binary_otsu_help': 'Wandelt das Bild mit einem automatisch berechneten '
+                                       'Otsu-Schwellenwert in Schwarz-Weiß um. Gut bei klaren '
+                                       'Scans mit starkem Vordergrund-Hintergrund-Kontrast; bei '
+                                       'Flecken, Schatten oder Pergament oft zu hart.',
+ 'multi_ocr_variant_contrast_sharp_help': 'Kombiniert eine vorsichtige Kontrasterhöhung mit '
+                                          'zusätzlicher Schärfung. Sinnvoll bei leicht '
+                                          'verwaschenen, aber nicht zu verrauschten Vorlagen.',
+ 'multi_ocr_variant_equalize_help': 'Gleicht das Histogramm aus, damit Helligkeitsbereiche '
+                                    'gleichmäßiger verteilt werden. Kann bei ungleichmäßiger '
+                                    'Beleuchtung helfen, erzeugt bei manchen Scans aber '
+                                    'unnatürliche Kontraste.',
+ 'multi_ocr_variant_slightly_bright_help': 'Erhöht die Helligkeit leicht um 5%. Nützlich bei '
+                                           'insgesamt zu dunklen Scans oder wenn dunkler '
+                                           'Hintergrund die Schriftflächen verschluckt.'}
+
+# PATCH17_LM_PAGE_OCR_MENU_UPDATE_DE
+DE_UI_MENU_UPDATE_TEXTS.update({'lm_menu_lm_ocr': 'LM Seiten OCR (ohne Overlay-Boxen)', 'lm_menu_lm_ocr_boxes': 'LM Seiten OCR mit Overlay-Boxen'})

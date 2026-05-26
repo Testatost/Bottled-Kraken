@@ -2,7 +2,6 @@
 
 from .shared import *
 
-
 def _resolve_tr_and_parent(tr, parent=None):
     """Erlaubt sowohl (title, tr, parent) als auch (title, parent)."""
     if parent is None and tr is not None and not callable(tr):
@@ -12,7 +11,6 @@ def _resolve_tr_and_parent(tr, parent=None):
     if not callable(tr):
         tr = (lambda key, *args: key)
     return tr, parent
-
 
 class ProgressStatusDialog(QDialog):
     cancel_requested = Signal()
@@ -57,7 +55,6 @@ class ProgressStatusDialog(QDialog):
         self.progress.setValue(int(round(percent)))
         self.progress.setFormat(f"{percent:.1f}%")
 
-
 class BusySpinnerWidget(QWidget):
     def __init__(self, parent=None, diameter: int = 42):
         super().__init__(parent)
@@ -89,7 +86,6 @@ class BusySpinnerWidget(QWidget):
         start = int((-self._angle + 90) * 16)
         span = int(-110 * 16)
         painter.drawArc(rect, start, span)
-
 
 class BusyStatusDialog(QDialog):
     cancel_requested = Signal()
@@ -132,7 +128,6 @@ class BusyStatusDialog(QDialog):
 
     def set_progress(self, value: int):
         return
-
 
 class VoiceRecordDialog(QDialog):
     start_requested = Signal()
@@ -203,7 +198,6 @@ class VoiceRecordDialog(QDialog):
     def closeEvent(self, event):
         super().closeEvent(event)
 
-
 class ExportModeDialog(QDialog):
     def __init__(self, tr, parent=None):
         super().__init__(parent)
@@ -216,13 +210,17 @@ class ExportModeDialog(QDialog):
         lay.addWidget(self.rb_all)
         lay.addWidget(self.rb_sel)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        try:
+            bb.button(QDialogButtonBox.Ok).setText(tr("btn_ok"))
+            bb.button(QDialogButtonBox.Cancel).setText(tr("btn_cancel"))
+        except Exception:
+            pass
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
     def accept(self):
         self.choice = "all" if self.rb_all.isChecked() else "selected"
         super().accept()
-
 
 class ExportSelectFilesDialog(QDialog):
     def __init__(self, tr, items: List[TaskItem], parent=None):
@@ -239,6 +237,11 @@ class ExportSelectFilesDialog(QDialog):
             self.listw.addItem(li)
         lay.addWidget(self.listw)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        try:
+            bb.button(QDialogButtonBox.Ok).setText(tr("btn_ok"))
+            bb.button(QDialogButtonBox.Cancel).setText(tr("btn_cancel"))
+        except Exception:
+            pass
         bb.accepted.connect(self._on_ok)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -248,3 +251,166 @@ class ExportSelectFilesDialog(QDialog):
         self.accept()
 
 __all__ = [name for name in globals() if not name.startswith("__")]
+
+# =============================================================================
+# FIX8.41: Busy spinner ProgressStatusDialog override
+# =============================================================================
+# Lokale LM-/Vision-Aufgaben haben keine verlässliche Laufzeit. Der alte Prozentbalken
+# suggerierte eine falsche Genauigkeit. Daher zeigt ProgressStatusDialog jetzt einen
+# animierten Kreis und einen einfachen Hinweistext. set_progress bleibt kompatibel,
+# ändert aber absichtlich nichts am Dialog.
+
+_BK_FIX41_ORIG_PROGRESS_INIT = ProgressStatusDialog.__init__
+
+def _bk_fix41_progress_status_init(self, title: str, tr, parent=None):
+    tr, parent = _resolve_tr_and_parent(tr, parent)
+    QDialog.__init__(self, parent)
+    self._tr = tr
+    self.setWindowTitle(title)
+    self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
+    self.setWindowFlag(Qt.Dialog, True)
+    self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+    if parent is not None:
+        self.setWindowModality(Qt.WindowModal)
+    else:
+        self.setWindowModality(Qt.ApplicationModal)
+    lay = QVBoxLayout(self)
+    lay.setContentsMargins(18, 18, 18, 18)
+    lay.setSpacing(12)
+    row = QHBoxLayout()
+    row.setSpacing(14)
+    self.spinner = BusySpinnerWidget(self, diameter=44)
+    row.addWidget(self.spinner, 0, Qt.AlignTop)
+    self.lbl_status = QLabel(self._tr('lm_busy_default_message'))
+    self.lbl_status.setWordWrap(True)
+    self.lbl_status.setMinimumWidth(380)
+    self.lbl_status.setMaximumWidth(620)
+    row.addWidget(self.lbl_status, 1)
+    lay.addLayout(row)
+    self.progress = QProgressBar(self)
+    self.progress.hide()
+    self.btn_cancel = QPushButton(self._tr('btn_cancel'))
+    self.btn_cancel.clicked.connect(self.cancel_requested.emit)
+    lay.addWidget(self.btn_cancel, 0, Qt.AlignRight)
+    self.adjustSize()
+
+def _bk_fix41_progress_status_set_status(self, text: str):
+    txt = str(text or '').strip()
+    if not txt:
+        txt = self._tr('lm_busy_default_message')
+    self.lbl_status.setText(txt)
+    self.adjustSize()
+
+def _bk_fix41_progress_status_set_progress(self, value: int):
+    return
+
+ProgressStatusDialog.__init__ = _bk_fix41_progress_status_init
+ProgressStatusDialog.set_status = _bk_fix41_progress_status_set_status
+ProgressStatusDialog.set_progress = _bk_fix41_progress_status_set_progress
+
+# =============================================================================
+# FIX8.42: Dynamische Breite für LM-Warte-/Hinweisdialoge
+# =============================================================================
+# Textbreite wird am Inhalt ausgerichtet, aber auf 500 px begrenzt.
+
+def _bk_fix42_dialog_text_width(label: QLabel, text: str, minimum: int = 220, maximum: int = 500) -> int:
+    try:
+        metrics = label.fontMetrics()
+        plain = re.sub(r"<[^>]+>", " ", str(text or ""))
+        longest = max([line.strip() for line in plain.splitlines()] or [plain], key=len)
+        width = metrics.horizontalAdvance(longest) + 28
+        return max(minimum, min(maximum, int(width)))
+    except Exception:
+        return maximum
+
+def _bk_fix42_apply_dynamic_label_width(dlg, text: str):
+    try:
+        width = _bk_fix42_dialog_text_width(dlg.lbl_status, text, 220, 500)
+        dlg.lbl_status.setMinimumWidth(width)
+        dlg.lbl_status.setMaximumWidth(500)
+        dlg.lbl_status.setWordWrap(True)
+        dlg.setMaximumWidth(560)
+        dlg.adjustSize()
+    except Exception:
+        pass
+
+def _bk_fix42_progress_status_set_status(self, text: str):
+    txt = str(text or '').strip() or self._tr('lm_busy_default_message')
+    self.lbl_status.setText(txt)
+    _bk_fix42_apply_dynamic_label_width(self, txt)
+
+def _bk_fix42_busy_status_set_status(self, text: str):
+    txt = str(text or '').strip() or str(getattr(self, '_base_message', '') or self._tr('lm_busy_default_message'))
+    self._base_message = txt
+    self.lbl_status.setText(txt)
+    _bk_fix42_apply_dynamic_label_width(self, txt)
+
+ProgressStatusDialog.set_status = _bk_fix42_progress_status_set_status
+try:
+    BusyStatusDialog.set_status = _bk_fix42_busy_status_set_status
+except Exception:
+    pass
+
+# =============================================================================
+# FIX8.43: LM-Wartefenster bis zur Bildschirmbreite skalieren
+# =============================================================================
+# Die vorherige harte 500px-Grenze war für lange Dateinamen/Statusmeldungen zu eng.
+# Die maximale Breite orientiert sich jetzt an der verfügbaren Bildschirmbreite.
+
+def _bk_fix43_screen_max_dialog_width(dlg=None) -> int:
+    try:
+        try:
+            _QApplication = QApplication
+        except Exception:
+            from PySide6.QtWidgets import QApplication as _QApplication
+        app = _QApplication.instance()
+        screen = None
+        if dlg is not None and getattr(dlg, "windowHandle", None) is not None and dlg.windowHandle():
+            screen = dlg.windowHandle().screen()
+        if screen is None and app is not None:
+            screen = app.primaryScreen()
+        if screen is not None:
+            return max(360, int(screen.availableGeometry().width()) - 96)
+    except Exception:
+        pass
+    return 1200
+
+def _bk_fix43_dialog_text_width(label: QLabel, text: str, minimum: int = 260) -> int:
+    try:
+        max_width = _bk_fix43_screen_max_dialog_width(label.window() if label is not None else None)
+        metrics = label.fontMetrics()
+        plain = re.sub(r"<[^>]+>", " ", str(text or ""))
+        longest = max([line.strip() for line in plain.splitlines()] or [plain], key=len)
+        width = metrics.horizontalAdvance(longest) + 36
+        return max(minimum, min(max_width, int(width)))
+    except Exception:
+        return 900
+
+def _bk_fix43_apply_dynamic_label_width(dlg, text: str):
+    try:
+        max_width = _bk_fix43_screen_max_dialog_width(dlg)
+        width = _bk_fix43_dialog_text_width(dlg.lbl_status, text, 260)
+        dlg.lbl_status.setMinimumWidth(width)
+        dlg.lbl_status.setMaximumWidth(max_width)
+        dlg.lbl_status.setWordWrap(True)
+        dlg.setMaximumWidth(max_width + 80)
+        dlg.adjustSize()
+    except Exception:
+        pass
+
+def _bk_fix43_progress_status_set_status(self, text: str):
+    txt = str(text or '').strip() or self._tr('lm_busy_default_message')
+    self.lbl_status.setText(txt)
+    _bk_fix43_apply_dynamic_label_width(self, txt)
+
+def _bk_fix43_busy_status_set_status(self, text: str):
+    txt = str(text or '').strip() or str(getattr(self, '_base_message', '') or self._tr('lm_busy_default_message'))
+    self._base_message = txt
+    self.lbl_status.setText(txt)
+    _bk_fix43_apply_dynamic_label_width(self, txt)
+
+ProgressStatusDialog.set_status = _bk_fix43_progress_status_set_status
+try:
+    BusyStatusDialog.set_status = _bk_fix43_busy_status_set_status
+except Exception:
+    pass
