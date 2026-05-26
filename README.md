@@ -20,7 +20,7 @@ The project is aimed at anyone who does not just need some quick OCR text, but a
 Bottled Kraken is especially useful for **historical prints, manuscripts, forms**, and other page layouts where a purely automatic OCR pass is often not enough.
 
 <p align="center">
-  <img src="Bottled Kraken Screenshot v3.1.png" alt="Bottled Kraken Screenshot" width="1000">
+  <img src="Bottled Kraken Screenshot v3.3.png" alt="Bottled Kraken Screenshot" width="1000">
 </p>
 
 ---
