@@ -1,24 +1,23 @@
-"""Mixin-Methoden für den Bildbearbeitungsdialog."""
-from ...shared import *
-from ...dialogs import *
-from ..common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog, LiveValueDialog
-from ..canvas import ImageEditCanvas
-
+from bottled_kraken.common import (
+    QMenu,
+    QPointF,
+    QRectF,
+    math,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog, LiveValueDialog
+from bottled_kraken._image_edit.canvas import ImageEditCanvas
 class ImageEditDialogFiltersRotationTransformMixin:
         def _toggle_gray(self, checked: bool):
             self.color_mode = "GRAY" if checked else "RGB"
             self._refresh_preview(reset_zoom=False)
-
         def _contrast_level_from_slider(self, value: int) -> float:
             return 1.0 + (max(0, min(100, int(value))) / 100.0) * 3.0
-
         def _set_contrast_slider_from_level(self, level: float):
             value = int(round(((max(1.0, min(4.0, float(level))) - 1.0) / 3.0) * 100.0))
             if hasattr(self, "contrast_slider"):
                 self.contrast_slider.blockSignals(True)
                 self.contrast_slider.setValue(max(0, min(100, value)))
                 self.contrast_slider.blockSignals(False)
-
         def _update_contrast_slider_ui(self):
             level = max(1.0, min(4.0, float(getattr(self, "contrast_level", 2.2))))
             if hasattr(self, "lbl_contrast_strength"):
@@ -29,10 +28,8 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 self.contrast_slider.setToolTip(f"{self._tr('image_edit_contrast')}: {level:.2f}×")
             if hasattr(self, "contrast_controls_widget"):
                 self.contrast_controls_widget.setVisible(bool(getattr(self, "contrast_enabled", False)))
-
         def _on_contrast_slider_pressed(self):
             self._contrast_preview_pending = False
-
         def _schedule_contrast_preview(self):
             if not self.contrast_enabled:
                 return
@@ -42,27 +39,23 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 timer.start()
             else:
                 self._apply_pending_contrast_preview()
-
         def _apply_pending_contrast_preview(self):
             if not getattr(self, "_contrast_preview_pending", False):
                 return
             self._contrast_preview_pending = False
             if self.contrast_enabled:
                 self._refresh_preview(reset_zoom=False)
-
         def _on_contrast_slider_released(self):
             timer = getattr(self, "_contrast_preview_timer", None)
             if timer is not None:
                 timer.stop()
             self._contrast_preview_pending = True
             self._apply_pending_contrast_preview()
-
         def _on_contrast_slider_changed(self, value: int):
             self.contrast_level = self._contrast_level_from_slider(value)
             self._update_contrast_slider_ui()
             if self.contrast_enabled:
                 self._schedule_contrast_preview()
-
         def _toggle_contrast(self, checked: bool):
             self.contrast_enabled = bool(checked)
             if self.contrast_enabled and hasattr(self, "contrast_slider"):
@@ -73,7 +66,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self._contrast_preview_pending = False
             self._update_contrast_slider_ui()
             self._refresh_preview(reset_zoom=False)
-
         def _rotate_by(self, delta: float):
             self.rotation_angle = (self.rotation_angle + delta) % 360.0
             self.canvas.rotation_angle = float(self.rotation_angle)
@@ -83,7 +75,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self.canvas.selection_rect = None
             self._refresh_preview(reset_zoom=False)
             self._history_push()
-
         def _reset_rotation(self):
             self.rotation_angle = 0.0
             self.canvas.rotation_angle = 0.0
@@ -93,35 +84,25 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self.canvas.selection_rect = None
             self._refresh_preview(reset_zoom=False)
             self._history_push()
-
         def _flip_horizontal(self):
             self.canvas.cancel_free_transform()
             self.canvas.selection_rect = None
             self.flip_horizontal = not bool(getattr(self, "flip_horizontal", False))
             self._refresh_preview(reset_zoom=False)
             self._history_push()
-
         def _flip_vertical(self):
             self.canvas.cancel_free_transform()
             self.canvas.selection_rect = None
             self.flip_vertical = not bool(getattr(self, "flip_vertical", False))
             self._refresh_preview(reset_zoom=False)
             self._history_push()
-
         def _set_transform_mode(self, mode: str):
             mode = str(mode or "scale").lower()
             if mode not in ("scale", "rotate", "skew", "perspective", "warp"):
                 mode = "scale"
             old_mode = str(getattr(self.canvas, "transform_mode", "scale") or "scale")
-
-            # Alle freien Transformationsmodi arbeiten auf derselben aktuellen
-            # Vierpunkt-Geometrie. Drehen wird nicht mehr als separater PIL-Rotate-
-            # Zwischenzustand behandelt, sondern direkt in transform_quad geführt.
-            # Dadurch bleiben Inhalt UND Auswahlrahmen beim Wechsel zwischen
-            # Skalieren/Drehen/Neigen/Perspektive/Verkrümmen erhalten.
             if old_mode == "rotate" and mode != "rotate":
                 self.canvas.transform_rotate_angle = 0.0
-
             if mode == "rotate":
                 self.canvas.transform_rotate_angle = 0.0
                 self.canvas._rotate_base_source_order = list(getattr(self.canvas, "transform_source_order", [0, 1, 2, 3]) or [0, 1, 2, 3])
@@ -132,7 +113,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             else:
                 self.canvas._rotate_base_warp_grid = None
                 self.canvas._rotate_base_source_order = None
-
             self.canvas.transform_mode = mode
             if mode == "warp" and self.canvas.transform_src_rect is not None:
                 grid = getattr(self.canvas, "transform_warp_grid", None)
@@ -150,7 +130,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 self.lbl_transform_mode.setText(self._tr(f"image_edit_transform_mode_{mode}"))
             self._sync_transform_mode_buttons()
             self.canvas.update()
-
         def _sync_transform_mode_buttons(self):
             active_transform = self.canvas.has_active_transform()
             if hasattr(self, "btn_transform"):
@@ -187,7 +166,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
                     self.lbl_transform_mode.setText(self._tr(f"image_edit_transform_mode_{self.canvas.transform_mode}"))
                 else:
                     self.lbl_transform_mode.setText(self._tr("image_edit_transform_inactive"))
-
         def _toggle_free_transform(self, checked: bool):
             if checked:
                 self.canvas.show_selection = True
@@ -205,13 +183,9 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 return
             self._sync_transform_mode_buttons()
             self.canvas.setFocus()
-
         def _apply_transform(self):
             if not self.canvas.has_active_transform():
                 return
-
-            # Sauberen Vorher-Zustand sichern:
-            # ohne aktive Transformations-Overlay-Vorschau, aber mit unverändertem Bild.
             before_settings = self.get_settings()
             before_settings.free_transform_enabled = False
             before_settings.transform_src_norm = None
@@ -234,7 +208,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             if len(undo) > 100:
                 del undo[:-100]
             self._history_redo = []
-
             transformed_poly = self.canvas.transformed_selection_polygon()
             try:
                 self.original_image = self._apply_free_transform_to_image(self.original_image.convert("RGB")).convert("RGB")
@@ -244,7 +217,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             if transformed_poly:
                 self.canvas.selection_polygon = [QPointF(p) for p in transformed_poly]
                 self.canvas.selection_rect = self.canvas._selection_rect_from_points(self.canvas.selection_polygon)
-                # Preserve original drawn/created lines instead of collapsing to a rectangle.
                 if len(self.canvas.selection_polygon) > 4:
                     self.canvas.selection_draw_mode = "freehand" if getattr(self.canvas, "_selection_polygon_before_transform", None) else self.canvas.selection_draw_mode
             else:
@@ -253,11 +225,8 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self.canvas.show_selection = True
             self._refresh_preview(reset_zoom=False)
             self._sync_transform_mode_buttons()
-
-            # Nachher-Zustand sichern.
             self._history_push()
             self.canvas.setFocus()
-
         def _cancel_transform(self):
             previous = getattr(self.canvas, "_selection_before_transform", None)
             previous_poly = getattr(self.canvas, "_selection_polygon_before_transform", None)
@@ -275,7 +244,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self._sync_transform_mode_buttons()
             self.canvas.update()
             self.canvas.setFocus()
-
         def _clear_selection(self):
             self.canvas.cancel_free_transform()
             self.canvas.selection_rect = None
@@ -289,7 +257,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self._sync_transform_mode_buttons()
             self.canvas.update()
             self._history_push()
-
         def _transform_rotate_local(self, degrees: float):
             if not self.canvas.has_active_transform() or not self.canvas.transform_quad:
                 return
@@ -314,7 +281,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self.canvas.transform_source_order = order
             self.canvas._ensure_transform_inside()
             self.canvas.update(); self.canvas.changed.emit()
-
         def _transform_flip_local(self, axis: str):
             if not self.canvas.has_active_transform() or not self.canvas.transform_quad:
                 return
@@ -334,7 +300,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             self.canvas.transform_source_order = order
             self.canvas._ensure_transform_inside()
             self.canvas.update(); self.canvas.changed.emit()
-
         def _show_selection_context_menu(self, global_pos):
             menu = QMenu(self)
             act_transform = menu.addAction(self._tr("image_edit_menu_free_transform"))
@@ -344,7 +309,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 self._clear_selection()
             elif chosen == act_transform:
                 self._toggle_free_transform(True)
-
         def _show_crop_context_menu(self, global_pos):
             menu = QMenu(self)
             act_delete = menu.addAction(self._tr("image_edit_menu_deselect"))
@@ -353,7 +317,6 @@ class ImageEditDialogFiltersRotationTransformMixin:
             if chosen == act_delete:
                 if self.canvas.delete_selected_crop():
                     self._history_push()
-
         def _show_transform_context_menu(self, global_pos):
             menu = QMenu(self)
             act_apply = menu.addAction(self._tr("image_edit_menu_transform_apply"))

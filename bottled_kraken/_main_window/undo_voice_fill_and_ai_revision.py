@@ -1,3 +1,2 @@
-from .voice_and_ai_revision import MainWindowUndoVoiceFillAndAiRevisionMixin
-
+from bottled_kraken._main_window.voice_and_ai_revision import MainWindowUndoVoiceFillAndAiRevisionMixin
 __all__ = ['MainWindowUndoVoiceFillAndAiRevisionMixin']

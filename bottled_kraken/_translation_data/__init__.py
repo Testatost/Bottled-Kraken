@@ -1,1 +1,0 @@
-"""Modularisierte Übersetzungsdaten."""

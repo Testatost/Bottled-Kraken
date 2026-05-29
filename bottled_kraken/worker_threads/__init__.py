@@ -1,1 +1,0 @@
-"""Organisch getrennte Worker-Klassen."""

@@ -1,10 +1,19 @@
-"""Mixin für MainWindow: whisper setup and model selection."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import (
+    List,
+    QAction,
+    QActionGroup,
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QMessageBox,
+    STATUS_DONE,
+    STATUS_VOICE_RECORDING,
+    TaskItem,
+    os,
+)
+from bottled_kraken.workers import (
+    VoiceLineFillWorker,
+)
 class MainWindowWhisperSetupAndModelSelectionMixin:
     def _workers_still_running(self) -> bool:
         for w in self._all_workers():
@@ -14,14 +23,12 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             except Exception:
                 pass
         return False
-
     def _check_shutdown_complete(self):
         if not self._workers_still_running():
             self._shutdown_poll_timer.stop()
             self._shutdown_force_timer.stop()
             self._cleanup_temp_dirs()
             self._final_close()
-
     def _final_close(self):
         try:
             if self.voice_record_dialog:
@@ -61,12 +68,8 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             pass
         self._shutdown_poll_timer.stop()
         self._shutdown_force_timer.stop()
-        # Fenster wirklich schließen, ohne self.close() erneut auszulösen
         super().close()
-
     def _force_kill_process(self):
-        # Kein harter Kill mehr.
-        # Nur Diagnose, falls doch noch etwas hängt.
         running = []
         for w in self._all_workers():
             try:
@@ -76,24 +79,19 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
                 pass
         if running:
             print("Shutdown wartet noch auf:", ", ".join(running))
-        # Letzter Versuch: regulär quitten
         app = QApplication.instance()
         if app is not None:
             app.quit()
-
     def _normalize_whisper_base_dir(self, raw: str) -> str:
         return os.path.abspath((raw or "").strip()) if (raw or "").strip() else ""
-
     def _scan_whisper_models(self) -> List[str]:
         self.whisper_available_models = []
         base = self._normalize_whisper_base_dir(self.whisper_models_base_dir)
         if not base or not os.path.isdir(base):
             return []
         out = []
-        # Fall A: Basisordner selbst ist schon ein Modellordner
         if os.path.isfile(os.path.join(base, "model.bin")):
             out.append(base)
-        # Fall B: Unterordner enthalten Modelle
         try:
             for name in sorted(os.listdir(base)):
                 full = os.path.join(base, name)
@@ -103,7 +101,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             pass
         self.whisper_available_models = out
         return out
-
     def _find_existing_whisper_large_v3_model(self) -> str:
         candidates = []
         seen = set()
@@ -116,17 +113,14 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         for base in candidates:
             if not os.path.isdir(base):
                 continue
-            # Fall A: Basisordner ist selbst schon das Modell
             if (
                     os.path.basename(base).lower() == "faster-whisper-large-v3"
                     and os.path.isfile(os.path.join(base, "model.bin"))
             ):
                 return base
-            # Fall B: klassischer Unterordner
             direct = os.path.join(base, "faster-whisper-large-v3")
             if os.path.isdir(direct) and os.path.isfile(os.path.join(direct, "model.bin")):
                 return direct
-            # Fall C: allgemein Unterordner durchsuchen
             try:
                 for name in os.listdir(base):
                     full = os.path.join(base, name)
@@ -139,7 +133,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             except Exception:
                 pass
         return ""
-
     def _set_whisper_model(self, model_path: str):
         model_path = os.path.abspath(model_path) if model_path else ""
         self.whisper_model_path = model_path
@@ -147,7 +140,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         self.whisper_model_loaded = bool(model_path)
         self._rebuild_whisper_model_submenu()
         self._update_whisper_menu_status()
-
     def _clear_whisper_model(self):
         self.whisper_model_path = ""
         self.whisper_model_name = ""
@@ -155,7 +147,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         self._rebuild_whisper_model_submenu()
         self._update_whisper_menu_status()
         self.status_bar.showMessage(self._tr("msg_whisper_model_unloaded"))
-
     def _rebuild_whisper_model_submenu(self):
         if not hasattr(self, "whisper_models_submenu"):
             return
@@ -183,7 +174,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         self.act_whisper_unload.triggered.connect(self._clear_whisper_model)
         self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
         self.whisper_models_submenu.addAction(self.act_whisper_unload)
-
     def _update_whisper_menu_status(self):
         model_txt = self.whisper_model_name if self.whisper_model_name else "-"
         mic_txt = self.whisper_selected_input_device_label if self.whisper_selected_input_device_label else "-"
@@ -196,7 +186,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             self.act_whisper_status_path.setText(self._tr("whisper_status_path", path_txt))
         if hasattr(self, "act_whisper_unload"):
             self.act_whisper_unload.setEnabled(bool(self.whisper_model_loaded))
-
     def set_whisper_base_dir_dialog(self):
         folder = QFileDialog.getExistingDirectory(
             self,
@@ -208,14 +197,12 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         self.whisper_models_base_dir = self._normalize_whisper_base_dir(folder)
         self.settings.setValue("paths/whisper_models_base_dir", self.whisper_models_base_dir)
         self._scan_whisper_models()
-        # falls bisheriges Modell nicht mehr im Pfad liegt -> entladen
         if self.whisper_model_path and not os.path.exists(self.whisper_model_path):
             self._clear_whisper_model()
         else:
             self._rebuild_whisper_model_submenu()
             self._update_whisper_menu_status()
         self.status_bar.showMessage(self._tr("msg_whisper_path_set", self.whisper_models_base_dir))
-
     def scan_whisper_models_now(self):
         models = self._scan_whisper_models()
         if models:
@@ -228,11 +215,8 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         else:
             self._clear_whisper_model()
             self.status_bar.showMessage(self._tr("msg_whisper_models_not_found"))
-
     def scan_whisper_and_select_first_mic(self):
-        # 1) Whisper-Modelle scannen
         self.scan_whisper_models_now()
-        # 2) erstes verfügbares Mikro automatisch setzen
         devices = self._get_input_audio_devices()
         if not devices:
             return
@@ -243,7 +227,6 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
         self.status_bar.showMessage(
             self._tr("msg_microphone_set", self.whisper_selected_input_device_label)
         )
-
     def choose_whisper_microphone_dialog(self):
         devices = self._get_input_audio_devices()
         if not devices:
@@ -273,15 +256,12 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
                 break
         self._update_whisper_menu_status()
         self.status_bar.showMessage(self._tr("msg_microphone_set", self.whisper_selected_input_device_label))
-
     def choose_rec_model_if_missing(self):
         if not self.model_path:
             self.choose_rec_model()
-
     def choose_seg_model_if_missing(self):
         if not self.seg_model_path:
             self.choose_seg_model()
-
     def export_default_shortcut(self):
         items = self._export_format_items()
         names = [x[0] for x in items]
@@ -297,23 +277,13 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             return
         fmt = next(fmt for name, fmt in items if name == choice)
         self.export_flow(fmt)
-
     def _overlay_selected_rows(self) -> List[int]:
         return sorted(set(int(i) for i in getattr(self.canvas, "_selected_indices", set()) if i is not None))
-
     def _has_overlay_selection(self) -> bool:
         return len(self._overlay_selected_rows()) > 0
-
     def _has_line_selection(self) -> bool:
         return len(self._selected_line_rows()) > 0
-
     def delete_current_context(self):
-        """
-        Entf:
-        - wenn Overlay-Box(en) ausgewählt -> Box(en) + zugehörige Zeile(n) löschen
-        - sonst wenn Zeile(n) ausgewählt -> Zeile(n) + Box(en) löschen
-        - sonst Queue-Löschen wie bisher
-        """
         task = self._current_task()
         overlay_rows = self._overlay_selected_rows()
         line_rows = self._selected_line_rows()
@@ -322,16 +292,9 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             if rows:
                 self._delete_multiple_lines(task, rows)
                 return
-        # Fallback wie bisher
         if self.queue_table.hasFocus():
             self.delete_selected_queue_items(reset_preview=True)
-
     def select_all_current_context(self):
-        """
-        Ctrl+A:
-        - wenn Zeilenliste oder Canvas aktiv -> alle Zeilen + alle Overlays auswählen
-        - sonst normales Queue-Verhalten
-        """
         task = self._current_task()
         if not task or not task.results:
             if self.queue_table.rowCount() > 0:
@@ -356,10 +319,8 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             self.canvas.select_indices(indices, center=False)
             self.canvas.overlay_multi_selected.emit(indices)
             return
-        # Fallback: Queue
         if self.queue_table.rowCount() > 0:
             self.queue_table.selectAll()
-
     def _delete_multiple_lines(self, task: TaskItem, rows: List[int]):
         if not task.results:
             return
@@ -376,10 +337,8 @@ class MainWindowWhisperSetupAndModelSelectionMixin:
             lowest_removed = min(clean_rows)
             next_row = max(0, min(lowest_removed, len(recs) - 1))
         self._sync_ui_after_recs_change(task, keep_row=next_row)
-
     def show_shortcuts_dialog(self):
         self.show_lm_help_dialog()
-
     def _start_voice_line_fill(self):
         task = self._current_task()
         if not task or task.status != STATUS_DONE or not task.results:

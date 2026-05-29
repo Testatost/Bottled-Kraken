@@ -1,9 +1,0 @@
-from .whisper_downloads import MainWindowWhisperDownloadsMixin
-from .uninstall_delete_help import MainWindowUninstallDeleteHelpMixin
-from .lm_help_dialogs import MainWindowLmHelpDialogsMixin
-from .image_edit_queue import MainWindowImageEditQueueMixin
-
-class MainWindowWhisperDownloadHelpAndImageEditQueueMixin(MainWindowWhisperDownloadsMixin, MainWindowUninstallDeleteHelpMixin, MainWindowLmHelpDialogsMixin, MainWindowImageEditQueueMixin):
-    pass
-
-__all__ = ['MainWindowWhisperDownloadHelpAndImageEditQueueMixin', 'MainWindowWhisperDownloadsMixin', 'MainWindowUninstallDeleteHelpMixin', 'MainWindowLmHelpDialogsMixin', 'MainWindowImageEditQueueMixin']

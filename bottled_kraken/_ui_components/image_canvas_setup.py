@@ -1,8 +1,28 @@
-"""Mixin-Methoden für die Bild-Canvas."""
-from ..shared import *
-from .queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
-from .overlay_dialogs import OverlayBoxDialog
-
+from bottled_kraken.common import (
+    Dict,
+    Optional,
+    QBrush,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsSimpleTextItem,
+    QGraphicsView,
+    QIcon,
+    QPen,
+    QPoint,
+    QPointF,
+    QRectF,
+    Qt,
+    isValid,
+    is_supported_drop_or_paste_file,
+    os,
+    resource_path,
+)
+from bottled_kraken._ui_components.queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
+from bottled_kraken._ui_components.overlay_dialogs import OverlayBoxDialog
 class ImageCanvasSetupMixin:
     def __init__(self, tr_func=None):
         super().__init__()
@@ -15,12 +35,10 @@ class ImageCanvasSetupMixin:
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.NoDrag)
         self._space_panning = False
-        # NEU: Maus-Panning (LMB drag)
         self._mouse_panning = False
         self._pan_start = QPoint()
         self._pan_start_h = 0
         self._pan_start_v = 0
-        # Drag & Drop
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         self._zoom = 1.0
@@ -36,56 +54,45 @@ class ImageCanvasSetupMixin:
         self._brush_selected = QBrush(QColor(10, 132, 255, 60))
         self._drop_text = None
         self.tr_func = tr_func
-        # Box-Zeichenmodus
         self._draw_mode = False
         self._draw_start = None
         self._draw_rect_item: Optional[QGraphicsRectItem] = None
         self._pen_draw = QPen(QColor("#00ff7f"), 2)
         self._brush_draw = QBrush(QColor(0, 255, 127, 40))
-        # Multi-Selection per Mausziehen
         self._selection_mode = False
         self._selection_start = None
         self._selection_rect_item: Optional[QGraphicsRectItem] = None
         self._pen_selection = QPen(QColor("#0a84ff"), 2, Qt.DashLine)
         self._brush_selection = QBrush(QColor(10, 132, 255, 40))
-        # Nur aktiv, nachdem die OCR abgeschlossen ist
         self._overlay_enabled = False
-        # Vorschau-Werkzeug: "select" = Overlay-/Zeilenbearbeitung, "pan" = Sichtbereich verschieben.
         self._tool_mode = "select"
-        # Split-Modus für bestehende Boxen
         self._split_mode = False
         self._split_target_idx: Optional[int] = None
         self._split_preview_item: Optional[QGraphicsLineItem] = None
         self._split_pen = QPen(QColor("#ffd60a"), 2, Qt.DashLine)
         self._show_drop_hint()
-
     def _get_view_state(self):
-        # Gibt (Transform, Szenen-Zentrumspunkt, Zoom-Skalar) zurück.
         try:
             t = self.transform()
             center = self.mapToScene(self.viewport().rect().center())
-            z = float(t.m11())  # angenommen: gleichmäßige Skalierung
+            z = float(t.m11())
             return t, center, z
         except Exception:
             return None, None, None
-
     def _restore_view_state(self, t, center, z):
         try:
             if t is not None:
                 self.setTransform(t)
             if center is not None:
                 self.centerOn(center)
-            # internen Zoom synchron halten (wheelEvent nutzt ihn)
             if z is not None:
                 self._zoom = float(z)
             else:
                 self._zoom = float(self.transform().m11())
         except Exception:
             pass
-
     @staticmethod
     def _event_point(event) -> QPoint:
-        # Funktioniert über verschiedene PySide6-Versionen hinweg: manchmal gibt es event.position(), manchmal nicht.
         try:
             p = event.position()
             return p.toPoint()
@@ -94,10 +101,8 @@ class ImageCanvasSetupMixin:
                 return event.pos()
             except Exception:
                 return QPoint(0, 0)
-
     def set_overlay_enabled(self, enabled: bool):
         self._overlay_enabled = bool(enabled)
-
     def set_tool_mode(self, mode: str):
         mode = "pan" if str(mode or "").lower() == "pan" else "select"
         if getattr(self, "_tool_mode", "select") == mode:
@@ -112,13 +117,10 @@ class ImageCanvasSetupMixin:
         self.setDragMode(QGraphicsView.NoDrag)
         self._apply_overlay_item_interactivity()
         self._update_tool_cursor()
-
     def tool_mode(self) -> str:
         return getattr(self, "_tool_mode", "select")
-
     def _pan_tool_active(self) -> bool:
         return self.tool_mode() == "pan"
-
     def _event_requests_pan(self, event) -> bool:
         try:
             if self._pan_tool_active():
@@ -126,13 +128,11 @@ class ImageCanvasSetupMixin:
             return bool(event.modifiers() & Qt.AltModifier)
         except Exception:
             return self._pan_tool_active()
-
     def _can_pan_view(self) -> bool:
         try:
             return self._pixmap_item is not None and self._zoom > (self._fit_zoom * 1.01)
         except Exception:
             return self._pixmap_item is not None
-
     def _apply_overlay_item_interactivity(self):
         locked = self._pan_tool_active()
         for rect in getattr(self, "_rects", {}).values():
@@ -145,7 +145,6 @@ class ImageCanvasSetupMixin:
                 rect.setFlag(QGraphicsRectItem.ItemIsSelectable, not locked)
             except Exception:
                 pass
-
     def _update_tool_cursor(self):
         if self._pan_tool_active():
             self.viewport().setCursor(Qt.OpenHandCursor)
@@ -153,7 +152,6 @@ class ImageCanvasSetupMixin:
         else:
             self.viewport().unsetCursor()
             self.unsetCursor()
-
     def set_theme(self, theme: str):
         if theme == "dark":
             self._bg_color = QColor("#1e1e1e")
@@ -168,7 +166,6 @@ class ImageCanvasSetupMixin:
             self.refresh_overlays()
         else:
             self._show_drop_hint()
-
     def dragEnterEvent(self, event: QDragEnterEvent):
         if not event.mimeData().hasUrls():
             event.ignore()
@@ -179,7 +176,6 @@ class ImageCanvasSetupMixin:
                 event.acceptProposedAction()
                 return
         event.ignore()
-
     def dragMoveEvent(self, event):
         if not event.mimeData().hasUrls():
             event.ignore()
@@ -190,7 +186,6 @@ class ImageCanvasSetupMixin:
                 event.acceptProposedAction()
                 return
         event.ignore()
-
     def dropEvent(self, event: QDropEvent):
         if not event.mimeData().hasUrls():
             event.ignore()
@@ -205,14 +200,12 @@ class ImageCanvasSetupMixin:
             event.acceptProposedAction()
         else:
             event.ignore()
-
     def start_draw_box_mode(self):
         if not self._overlay_enabled:
             return
         self._draw_mode = True
         self._draw_start = None
         self.setDragMode(QGraphicsView.NoDrag)
-
     def stop_draw_box_mode(self):
         self._draw_mode = False
         self._draw_start = None
@@ -224,7 +217,6 @@ class ImageCanvasSetupMixin:
                 pass
             self._draw_rect_item = None
         self.setDragMode(QGraphicsView.NoDrag)
-
     def start_split_box_mode(self, idx: int):
         if not self._overlay_enabled:
             return
@@ -240,7 +232,6 @@ class ImageCanvasSetupMixin:
             except RuntimeError:
                 pass
             self._split_preview_item = None
-
     def stop_split_box_mode(self):
         self._split_mode = False
         self._split_target_idx = None
@@ -252,7 +243,6 @@ class ImageCanvasSetupMixin:
             except RuntimeError:
                 pass
             self._split_preview_item = None
-
     def start_selection_mode(self, scene_pos: QPointF):
         if not self._overlay_enabled:
             return
@@ -270,7 +260,6 @@ class ImageCanvasSetupMixin:
         self._selection_rect_item.setBrush(self._brush_selection)
         self._selection_rect_item.setZValue(999)
         self.scene.addItem(self._selection_rect_item)
-
     def stop_selection_mode(self):
         self._selection_mode = False
         self._selection_start = None
@@ -281,7 +270,6 @@ class ImageCanvasSetupMixin:
             except RuntimeError:
                 pass
             self._selection_rect_item = None
-
     def select_indices(self, indices, center: bool = False):
         try:
             idxs = {int(i) for i in indices if i is not None}
@@ -314,7 +302,6 @@ class ImageCanvasSetupMixin:
             rect = self._rects.get(first)
             if rect and isValid(rect):
                 self.centerOn(rect)
-
     def _finalize_selection_rect(self, additive: bool = False):
         if not self._selection_rect_item or not isValid(self._selection_rect_item):
             self.stop_selection_mode()

@@ -1,3 +1,9 @@
-"""FR translations for person_table_ai_notice_texts."""
-
-BK_PATCH24B_TRANSLATIONS_FR = {'ptr_warn_local_no_pipeline': 'La pipeline complète n’est pas disponible en mode modèle IA local. Veuillez utiliser OpenRouter / l’IA distante pour cela.', 'ptr_warn_local_no_multi_ocr_ai': 'Les fonctions IA pour le Multi-OCR ne sont pas disponibles en mode modèle IA local. Veuillez utiliser OpenRouter / l’IA distante pour cela.', 'ptr_ai_save_merged_title': 'Enregistrer le texte fusionné', 'ptr_ai_save_result_title': 'Enregistrer le résultat', 'ptr_ai_tools_open_title': 'Outils IA', 'ptr_multi_followup_open_title': 'Multi-OCR terminé', 'ptr_multi_followup_open_ai': 'Ouvrir les outils IA'}
+BK_PATCH24B_TRANSLATIONS_FR = {
+    'ptr_warn_local_no_pipeline': 'La pipeline complète n’est pas disponible en mode modèle IA local. Veuillez utiliser OpenRouter / l’IA distante pour cela.',
+    'ptr_warn_local_no_multi_ocr_ai': 'Les fonctions IA pour le Multi-OCR ne sont pas disponibles en mode modèle IA local. Veuillez utiliser OpenRouter / l’IA distante pour cela.',
+    'ptr_ai_save_merged_title': 'Enregistrer le texte fusionné',
+    'ptr_ai_save_result_title': 'Enregistrer le résultat',
+    'ptr_ai_tools_open_title': 'Outils IA',
+    'ptr_multi_followup_open_title': 'Multi-OCR terminé',
+    'ptr_multi_followup_open_ai': 'Ouvrir les outils IA',
+}

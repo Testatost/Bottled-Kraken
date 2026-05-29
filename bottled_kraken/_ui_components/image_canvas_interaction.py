@@ -1,8 +1,14 @@
-"""Mixin-Methoden für die Bild-Canvas."""
-from ..shared import *
-from .queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
-from .overlay_dialogs import OverlayBoxDialog
-
+from bottled_kraken.common import (
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
+    QMenu,
+    QRectF,
+    Qt,
+    isValid,
+)
+from bottled_kraken._ui_components.queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
+from bottled_kraken._ui_components.overlay_dialogs import OverlayBoxDialog
 class ImageCanvasInteractionMixin:
     def contextMenuEvent(self, event):
         if self._pan_tool_active():
@@ -40,7 +46,6 @@ class ImageCanvasInteractionMixin:
             return
         if chosen == act_add_draw:
             self.overlay_add_draw_requested.emit(self.mapToScene(pos))
-
     def mousePressEvent(self, event):
         if self._split_mode and event.button() == Qt.LeftButton:
             rect_item = self._rects.get(self._split_target_idx)
@@ -65,7 +70,6 @@ class ImageCanvasInteractionMixin:
                 event.accept()
                 return
             it = self.itemAt(self._event_point(event))
-            # Klick auf Nummernlabel auf die zugehörige Box umlenken
             if isinstance(it, QGraphicsSimpleTextItem):
                 txt = it.text().strip()
                 if txt.isdigit():
@@ -73,7 +77,6 @@ class ImageCanvasInteractionMixin:
                     rect = self._rects.get(idx)
                     if rect and isValid(rect):
                         it = rect
-            # 1) Zeichenmodus hat höchste Priorität
             if self._draw_mode and self._overlay_enabled and self._pixmap_item is not None:
                 sp = self.mapToScene(self._event_point(event))
                 self._draw_start = sp
@@ -91,7 +94,6 @@ class ImageCanvasInteractionMixin:
                 self.scene.addItem(self._draw_rect_item)
                 event.accept()
                 return
-            # Klick direkt auf eine Overlay-Box
             if isinstance(it, ResizableRectItem):
                 ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
                 if ctrl_pressed:
@@ -109,13 +111,8 @@ class ImageCanvasInteractionMixin:
                         self._selected_idx = None
                     event.accept()
                     return
-                # WICHTIG:
-                # Nicht hier den Event "schlucken".
-                # Die ResizableRectItem muss den Mausklick selbst bekommen,
-                # damit Move/Resize funktioniert.
                 super().mousePressEvent(event)
                 return
-            # Rechteckauswahl nur wenn NICHT im Zeichenmodus
             if (
                     self._overlay_enabled
                     and self._pixmap_item is not None
@@ -127,7 +124,6 @@ class ImageCanvasInteractionMixin:
                 event.accept()
                 return
         super().mousePressEvent(event)
-
     def mouseDoubleClickEvent(self, event):
         item = self.itemAt(self._event_point(event))
         if isinstance(item, ResizableRectItem) and event.button() == Qt.LeftButton:
@@ -135,7 +131,6 @@ class ImageCanvasInteractionMixin:
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
-
     def mouseMoveEvent(self, event):
         if self._split_mode and self._split_target_idx is not None:
             rect_item = self._rects.get(self._split_target_idx)
@@ -169,7 +164,6 @@ class ImageCanvasInteractionMixin:
             r = QRectF(self._selection_start, sp).normalized()
             if isValid(self._selection_rect_item):
                 self._selection_rect_item.setRect(r)
-            # Live-Vorschau: alle getroffenen Boxen sofort blau markieren
             hit = []
             for idx, rect in self._rects.items():
                 if not isValid(rect):
@@ -182,7 +176,6 @@ class ImageCanvasInteractionMixin:
             event.accept()
             return
         super().mouseMoveEvent(event)
-
     def mouseReleaseEvent(self, event):
         if self._draw_mode and event.button() == Qt.LeftButton and self._draw_start and self._draw_rect_item is not None:
             rect = None

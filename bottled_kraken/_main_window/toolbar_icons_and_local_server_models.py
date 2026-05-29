@@ -1,21 +1,11 @@
-"""Mixin für MainWindow: toolbar icons and local server models."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import KRAKEN_MODELS_DIR, List, Optional, QAction, QIcon, QInputDialog, QLocale, QMessageBox, QStyle, RecordView, STATUS_AI_PROCESSING, STATUS_DONE, TaskItem, Tuple, UndoSnapshot, json, load_kraken_segmentation_model, os, time, translation, urllib
 class MainWindowToolbarIconsAndLocalServerModelsMixin:
     def _set_secondary_button_icons(self):
-        # Einfache Button-Symbole werden themeabhängig eingefärbt.
-        # LM-Überarbeitung bleibt ausdrücklich beim unveränderten Theme-/Standard-Icon
-        # aus der Archiv-Version, damit kein gefülltes Quadrat entsteht.
         def plain_theme_or_standard(theme_name: str, std_icon):
             icon = QIcon.fromTheme(theme_name)
             if icon.isNull():
                 icon = self.style().standardIcon(std_icon)
             return icon
-
         if hasattr(self, "btn_import_lines"):
             self.btn_import_lines.setIcon(
                 self.style().standardIcon(QStyle.SP_DialogOpenButton)
@@ -44,7 +34,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             self.btn_toggle_log.setIcon(
                 self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
             )
-
     def _scan_kraken_models(self):
         self.kraken_rec_models = []
         self.kraken_seg_models = []
@@ -57,11 +46,9 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         for root, _dirs, files in os.walk(model_dir):
             for name in files:
                 ext = os.path.splitext(name)[1].lower()
-                # nur noch .mlmodel
                 if ext != ".mlmodel":
                     continue
                 full = os.path.join(root, name)
-                # Dubletten über Dateinamen rausfiltern
                 key = name.lower()
                 if key in seen_names:
                     continue
@@ -75,7 +62,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
                 self.kraken_seg_models.append(full)
             else:
                 self.kraken_unknown_models.append(full)
-
     def _load_default_segmentation_model(self):
         if self.seg_model_path and os.path.exists(self.seg_model_path):
             return
@@ -86,20 +72,11 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             self.kraken_seg_models[0]
         )
         self.seg_model_path = preferred
-
     def _model_type_to_text(self, model_type) -> str:
         if isinstance(model_type, (list, tuple, set)):
             return " ".join(str(x) for x in model_type if x).strip().lower()
         return str(model_type or "").strip().lower()
-
     def _classify_kraken_model_file(self, model_path: str) -> str:
-        """
-        Gibt zurück:
-            "rec"      -> Recognition-Modell
-            "seg"      -> Segmentierungs-Modell
-            "unknown"  -> nicht sicher bestimmbar
-        """
-        # 1) Primär: echtes Kraken-Metadatum lesen
         try:
             nn = load_kraken_segmentation_model(model_path)
             model_type = self._model_type_to_text(getattr(nn, "model_type", ""))
@@ -109,14 +86,12 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
                 return "seg"
         except Exception:
             pass
-        # 2) Fallback nur für alte / unklare Modelle
         lname = os.path.basename(model_path).lower()
         if any(x in lname for x in ("blla", "seg", "segment", "baseline", "region")):
             return "seg"
         if any(x in lname for x in ("rec", "recognition", "ocr", "htr", "handwriting", "print")):
             return "rec"
         return "unknown"
-
     def _set_scanned_rec_model(self, model_path: str):
         if not model_path or not os.path.exists(model_path):
             return
@@ -127,7 +102,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         self.status_bar.showMessage(self._tr("msg_loaded_rec", os.path.basename(model_path)))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
-
     def _set_scanned_seg_model(self, model_path: str):
         if not model_path or not os.path.exists(model_path):
             return
@@ -138,7 +112,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         self.status_bar.showMessage(self._tr("msg_loaded_seg", os.path.basename(model_path)))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
-
     def _rebuild_kraken_models_submenu(self):
         if not hasattr(self, "kraken_models_submenu"):
             return
@@ -177,7 +150,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         self.kraken_models_submenu.addSeparator()
         self.kraken_models_submenu.addAction(self.act_clear_rec)
         self.kraken_models_submenu.addAction(self.act_clear_seg)
-
     def _update_kraken_menu_status(self):
         rec_name = os.path.basename(self.model_path) if self.model_path else "-"
         seg_name = os.path.basename(self.seg_model_path) if self.seg_model_path else "-"
@@ -185,7 +157,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             self.act_rec_status.setText(self._tr("status_rec_model", rec_name))
         if hasattr(self, "act_seg_status"):
             self.act_seg_status.setText(self._tr("status_seg_model", seg_name))
-
     def choose_rec_model_from_scanned(self):
         if not getattr(self, "kraken_rec_models", None):
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("ptr_warn_no_recognition_models"))
@@ -209,7 +180,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         self.btn_rec_model.setText(self._tr("btn_rec_model_value", os.path.basename(self.model_path)))
         self._update_models_menu_labels()
         self._update_model_clear_buttons()
-
     def _detect_local_openai_server(self, force: bool = False) -> Tuple[Optional[str], Optional[str]]:
         now = time.monotonic()
         if not force:
@@ -217,8 +187,8 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             if age < self._ai_server_cache_ttl:
                 return self._ai_server_cache.get("base_url"), self._ai_server_cache.get("model_id")
         candidates = [
-            "http://127.0.0.1:1234/v1",  # LM Studio
-            "http://127.0.0.1:8000/v1",  # vLLM
+            "http://127.0.0.1:1234/v1",
+            "http://127.0.0.1:8000/v1",
             "http://127.0.0.1:8080/v1",
         ]
         for base_url in candidates:
@@ -236,15 +206,12 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             "model_id": None,
         }
         return None, None
-
     def _check_ai_server(self) -> bool:
         base_url, model_id = self._detect_local_openai_server()
         return bool(base_url and model_id)
-
     def _fetch_loaded_llm_name(self) -> str:
         base_url, model_id = self._detect_local_openai_server()
         return model_id or "-"
-
     def _refresh_ai_endpoint_from_localhost(self, force: bool = False):
         if self.ai_manual_base_url:
             base_url = self._normalize_ai_base_url(self.ai_manual_base_url)
@@ -266,14 +233,12 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             self.ai_base_url = None
         self.ai_mode = "auto"
         self._update_ai_model_ui()
-
     def _resolve_ai_model_id(self) -> str:
         self._refresh_ai_endpoint_from_localhost()
         model_id = (self.ai_model_id or "").strip()
         if model_id:
             return model_id
         return ""
-
     def refresh_models_menu_status(self):
         model_name = self._get_active_ai_model_display()
         mode_label = self._current_ai_mode_label()
@@ -287,7 +252,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         if hasattr(self, "act_clear_manual_lm_url"):
             self.act_clear_manual_lm_url.setEnabled(self.ai_mode == "manual" and bool(self.ai_manual_base_url))
         self._update_ai_model_ui()
-
     def _fetch_models_from_base_url(self, base_url: str, timeout: float = 0.6) -> Tuple[List[str], str]:
         if not base_url:
             return [], ""
@@ -310,7 +274,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
                 mid = str(m.get("id", "")).strip()
                 if mid:
                     out.append(mid)
-            # Reihenfolge erhalten, Duplikate entfernen
             seen = set()
             uniq = []
             for mid in out:
@@ -321,33 +284,24 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             return uniq, active
         except Exception:
             return [], ""
-
     def _tr(self, key: str, *args):
         lang = getattr(self, "current_lang", translation.DEFAULT_LANGUAGE)
         return translation.translate(lang, key, *args)
-
     def _detect_system_lang(self) -> str:
         try:
             name = QLocale.system().name()
         except Exception:
             name = translation.DEFAULT_LANGUAGE
         return translation.normalize_language_code(name)
-
     def _tr_in(self, lang: str, key: str, *args):
         return translation.translate(lang, key, *args)
-
     def _tr_log(self, key: str, *args):
-        # Logmeldungen sollen nach einem Sprachwechsel ab sofort in der aktiven
-        # UI-Sprache weiterlaufen. Ältere Logzeilen bleiben unverändert.
         lang = getattr(self, "current_lang", None) or getattr(self, "log_lang", None) or translation.DEFAULT_LANGUAGE
         lang = translation.normalize_language_code(lang)
         self.log_lang = lang
         return self._tr_in(lang, key, *args)
-
     def _delete_queue_via_key(self):
-        # Löscht selektierte Zeilen und setzt danach die Vorschau zurück
         self.delete_selected_queue_items(reset_preview=True)
-
     def run_ai_revision_for_selected(self):
         checked = self._checked_queue_tasks() if hasattr(self, "_checked_queue_tasks") else []
         selected = self._selected_queue_tasks() if hasattr(self, "_selected_queue_tasks") else []
@@ -362,7 +316,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         self._run_ai_revision_batch(items)
-
     def run_ai_revision_for_all(self):
         if hasattr(self, "_ai_revision_ready_tasks"):
             items = self._ai_revision_ready_tasks(list(self.queue_items))
@@ -372,7 +325,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
             return
         self._run_ai_revision_batch(items)
-
     def on_ai_batch_file_started(self, path: str, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
         if task:
@@ -380,22 +332,18 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
                 task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in task.results[3]]
             task.status = STATUS_AI_PROCESSING
             self._update_queue_row(path)
-
     def _cancel_ai_batch_revision(self):
         if hasattr(self, "ai_batch_worker") and self.ai_batch_worker and self.ai_batch_worker.isRunning():
             self.ai_batch_worker.cancel()
-
     @staticmethod
     def _snapshot_recs(recs: List[RecordView]) -> List[Tuple[str, Optional[Tuple[int, int, int, int]]]]:
         return [(rv.text, rv.bbox) for rv in recs]
-
     @staticmethod
     def _restore_recs(snapshot: List[Tuple[str, Optional[Tuple[int, int, int, int]]]]) -> List[RecordView]:
         recs: List[RecordView] = []
         for i, (t, bb) in enumerate(snapshot):
             recs.append(RecordView(i, t, bb))
         return recs
-
     def _push_undo(self, task: TaskItem):
         if not task.results:
             return
@@ -406,7 +354,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         if len(task.undo_stack) > 300:
             task.undo_stack.pop(0)
         task.redo_stack.clear()
-
     def _apply_snapshot(self, task: TaskItem, snap: UndoSnapshot):
         if not task.results:
             return
@@ -420,7 +367,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         if keep_row < 0:
             keep_row = 0 if recs else None
         self._sync_ui_after_recs_change(task, keep_row=keep_row)
-
     def undo(self):
         task = self._current_task()
         if not task or task.status != STATUS_DONE or not task.results:
@@ -434,7 +380,6 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
         task.redo_stack.append((self._snapshot_recs(recs), int(cur_sel) if cur_sel is not None else -1))
         snap = task.undo_stack.pop()
         self._apply_snapshot(task, snap)
-
     def redo(self):
         task = self._current_task()
         if not task or task.status != STATUS_DONE or not task.results:

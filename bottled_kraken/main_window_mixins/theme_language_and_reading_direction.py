@@ -1,3 +1,0 @@
-from .theme_language import MainWindowThemeLanguageAndReadingDirectionMixin
-
-__all__ = ['MainWindowThemeLanguageAndReadingDirectionMixin']

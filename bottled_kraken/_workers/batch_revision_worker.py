@@ -1,11 +1,23 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ..shared import *
-
+from bottled_kraken.common import _normalize_ai_script_mode
+from bottled_kraken._workers.ai_revision_worker import AIRevisionWorker
+from bottled_kraken.common import (
+    AI_SCRIPT_PRINT,
+    Any,
+    Dict,
+    List,
+    Optional,
+    QThread,
+    RecordView,
+    Signal,
+    TaskItem,
+    os,
+    translation,
+)
 class AIBatchRevisionWorker(QThread):
-    file_started = Signal(str, int, int)  # path, current, total
-    file_finished = Signal(str, list, int, int)  # path, revised_lines, current, total
-    file_failed = Signal(str, str, int, int)  # path, error, current, total
-    progress_changed = Signal(int)  # overall 0..100
+    file_started = Signal(str, int, int)
+    file_finished = Signal(str, list, int, int)
+    file_failed = Signal(str, str, int, int)
+    progress_changed = Signal(int)
     status_changed = Signal(str)
     finished_batch = Signal()
     def __init__(
@@ -94,7 +106,6 @@ class AIBatchRevisionWorker(QThread):
             worker.failed_revision.connect(
                 lambda path, msg: error_holder.setdefault("msg", msg)
             )
-            # synchron im Batch-Thread
             worker.run()
         finally:
             self._current_worker = None

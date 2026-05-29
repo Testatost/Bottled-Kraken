@@ -1,19 +1,12 @@
 from __future__ import annotations
-
 import os
 import tempfile
 import zipfile
 from pathlib import Path
-
-
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
-
-
 def _has_release_integrity_test(project_root: Path) -> bool:
     return (project_root / "tests" / "run_release_zip_integrity_tests.py").exists()
-
-
 def _skip_path(path: Path, project_root: Path) -> bool:
     try:
         rel_parts = path.relative_to(project_root).parts
@@ -39,8 +32,6 @@ def _skip_path(path: Path, project_root: Path) -> bool:
     if name.lower().endswith(".zip"):
         return True
     return False
-
-
 def _include_file(path: Path, project_root: Path) -> bool:
     if not path.is_file() or _skip_path(path, project_root):
         return False
@@ -50,8 +41,6 @@ def _include_file(path: Path, project_root: Path) -> bool:
     if rel.startswith("bottled_kraken/"):
         return path.suffix in {".py", ".json", ".txt", ".md", ".png", ".svg", ".ico"}
     return False
-
-
 def ensure_release_zip_for_tests() -> None:
     if os.environ.get("BK_DISABLE_AUTO_RELEASE_ZIP"):
         return

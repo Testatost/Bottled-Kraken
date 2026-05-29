@@ -1,8 +1,17 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
+from bottled_kraken.common import (
+    Image,
+    List,
+    Optional,
+    QCursor,
+    QPixmap,
+    QPointF,
+    QRectF,
+    QSizePolicy,
+    Qt,
+    pil_to_qpixmap,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 from PySide6.QtGui import QPolygonF
-
 class ImageEditCanvasLifecycleMixin:
         def __init__(self, parent=None):
             super().__init__(parent)
@@ -25,12 +34,12 @@ class ImageEditCanvasLifecycleMixin:
             self.show_selection = False
             self.selection_rect: Optional[QRectF] = None
             self.selection_polygon: Optional[List[QPointF]] = None
-            self.selection_draw_mode = "rect"   # rect, ellipse, polygon, freehand
+            self.selection_draw_mode = "rect"
             self._selection_point_drag_index = -1
             self._freehand_points: List[QPointF] = []
             self.separator: Optional[ImageEditSeparator] = None
             self.show_erase = False
-            self.erase_shape = ""   # "", "rect", "ellipse"
+            self.erase_shape = ""
             self.erase_rect: Optional[QRectF] = None
             self.drag_mode = None
             self.drag_start = QPointF()
@@ -51,7 +60,7 @@ class ImageEditCanvasLifecycleMixin:
             self._pan_start_y = 0.0
             self._tool_mode = "select"
             self.free_transform_active = False
-            self.transform_mode = "scale"   # scale, rotate, skew, perspective, warp
+            self.transform_mode = "scale"
             self.transform_src_rect: Optional[QRectF] = None
             self.transform_src_polygon: Optional[List[QPointF]] = None
             self.transform_quad: Optional[List[QPointF]] = None
@@ -69,7 +78,6 @@ class ImageEditCanvasLifecycleMixin:
             self._transform_rotate_center = QPointF()
             self._transform_rotate_points = None
             self._transform_scale_axis_lock = None
-
         def set_tool_mode(self, mode: str):
             mode = "pan" if str(mode or "").lower() == "pan" else "select"
             if getattr(self, "_tool_mode", "select") == mode:
@@ -81,13 +89,10 @@ class ImageEditCanvasLifecycleMixin:
             self._tool_mode = mode
             self._update_cursor(self._widget_to_image(self.mapFromGlobal(QCursor.pos())))
             self.update()
-
         def tool_mode(self) -> str:
             return getattr(self, "_tool_mode", "select")
-
         def _pan_tool_active(self) -> bool:
             return self.tool_mode() == "pan"
-
         def _event_requests_pan(self, event) -> bool:
             try:
                 if self._pan_tool_active():
@@ -95,7 +100,6 @@ class ImageEditCanvasLifecycleMixin:
                 return bool(event.modifiers() & Qt.AltModifier)
             except Exception:
                 return self._pan_tool_active()
-
         def set_image(self, img: Optional[Image.Image], reset_zoom: bool = True):
             self.base_image = img
             self._transform_overlay_cache_key = None
@@ -114,7 +118,6 @@ class ImageEditCanvasLifecycleMixin:
                 self._ensure_transform_inside()
             self.update()
             self.changed.emit()
-
         def _update_view_image(self):
             if self.base_image is None:
                 self.view_image = None
@@ -151,7 +154,6 @@ class ImageEditCanvasLifecycleMixin:
             if getattr(self, "erase_rect", None) is not None:
                 self.erase_rect = self.erase_rect.intersected(bounds)
             self._update_image_offset()
-
         def create_default_crop(self):
             if not self.view_image:
                 return
@@ -163,7 +165,6 @@ class ImageEditCanvasLifecycleMixin:
             else:
                 self.crop_rect = rect
                 self.changed.emit()
-
         def create_default_selection(self):
             if not self.view_image:
                 return
@@ -171,14 +172,7 @@ class ImageEditCanvasLifecycleMixin:
             self.selection_rect = QRectF(w * 0.25, h * 0.20, w * 0.50, h * 0.35)
             self.show_selection = True
             self.changed.emit()
-
         def _ensure_separator_inside(self):
-            """Hält den Trennbalken im sichtbaren Bildbereich.
-
-            Diese Methode war im letzten Patch versehentlich nicht mehr in der
-            Canvas-Klasse enthalten. set_image() ruft sie aber beim Öffnen des
-            Bildbearbeitungsdialogs auf.
-            """
             if self.view_image is None or self.separator is None:
                 return
             try:

@@ -1,13 +1,4 @@
-"""External OCR backend integration for Bottled Kraken.
-
-This module lets the CPU one-file application discover and use separately
-installed GPU backends such as the NVIDIA CUDA or AMD ROCm backend installers.
-The main application remains CPU-capable; GPU OCR is delegated to a worker
-process in the external backend environment.
-"""
-
 from __future__ import annotations
-
 import json
 import os
 import subprocess
@@ -16,23 +7,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-from ..shared import QThread, Signal, OCRJob, RecordView, BBox
-from ..translation import translation
-
+from bottled_kraken.common import QThread, Signal, OCRJob, RecordView, BBox
+from bottled_kraken.translation import translation
 BACKEND_APP_DIR_NAME = "BottledKraken"
 BACKEND_CACHE_TTL_SECONDS = 20.0
-
 def _no_console_kwargs() -> Dict[str, object]:
-    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
     if not sys.platform.startswith("win"):
         return {}
-
     kwargs: Dict[str, object] = {}
-
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -40,9 +24,7 @@ def _no_console_kwargs() -> Dict[str, object]:
         kwargs["startupinfo"] = startupinfo
     except Exception:
         pass
-
     return kwargs
-
 @dataclass
 class ExternalOCRBackend:
     kind: str
@@ -55,31 +37,24 @@ class ExternalOCRBackend:
     detail: str = ""
     raw_info: Optional[Dict[str, Any]] = None
     self_test: Optional[Dict[str, Any]] = None
-
 _BACKEND_CACHE: Dict[str, Tuple[float, Optional[ExternalOCRBackend]]] = {}
-
 def _default_backend_root() -> Path:
     custom = os.environ.get("BOTTLED_KRAKEN_BACKENDS_DIR", "").strip()
     if custom:
         return Path(custom).expanduser()
-
     if sys.platform.startswith("win"):
         local = os.environ.get("LOCALAPPDATA", "").strip()
         if local:
             return Path(local) / BACKEND_APP_DIR_NAME / "backends"
         return Path.home() / "AppData" / "Local" / BACKEND_APP_DIR_NAME / "backends"
-
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / BACKEND_APP_DIR_NAME / "backends"
-
     xdg = os.environ.get("XDG_DATA_HOME", "").strip()
     if xdg:
         return Path(xdg).expanduser() / BACKEND_APP_DIR_NAME / "backends"
     return Path.home() / ".local" / "share" / BACKEND_APP_DIR_NAME / "backends"
-
 def _backend_dir_for_kind(kind: str) -> Path:
     return _default_backend_root() / kind
-
 def _safe_read_backend_info(kind: str) -> Optional[Dict[str, Any]]:
     info_path = _backend_dir_for_kind(kind) / "backend_info.json"
     if not info_path.is_file():
@@ -91,7 +66,6 @@ def _safe_read_backend_info(kind: str) -> Optional[Dict[str, Any]]:
         return data
     except Exception:
         return None
-
 def _backend_info_to_obj(kind: str, data: Dict[str, Any]) -> Optional[ExternalOCRBackend]:
     base = _backend_dir_for_kind(kind)
     py = str(data.get("python") or "").strip()
@@ -111,18 +85,8 @@ def _backend_info_to_obj(kind: str, data: Dict[str, Any]) -> Optional[ExternalOC
         info_path=str(base / "backend_info.json"),
         raw_info=data,
     )
-
 def _run_backend_self_test(backend: ExternalOCRBackend, timeout: int = 40) -> ExternalOCRBackend:
     def _probe_backend_vram() -> Dict[str, Any]:
-        """
-        Zusätzliche VRAM-Probe direkt in der externen Backend-Python-Umgebung.
-
-        Hintergrund:
-        Ältere installierte Backend-Worker melden zwar CUDA/HIP und Gerätename,
-        aber noch keinen VRAM. Die Hardware-Anzeige im Hinweise-Dialog soll trotzdem
-        sofort nach einer Backend-Installation korrekt aktualisieren, ohne dass der
-        Nutzer das Backend zwingend neu installieren muss.
-        """
         code = (
             "import json, torch\n"
             "out = {}\n"
@@ -140,12 +104,10 @@ def _run_backend_self_test(backend: ExternalOCRBackend, timeout: int = 40) -> Ex
             "    out['vram_probe_error'] = repr(exc)\n"
             "print(json.dumps(out, ensure_ascii=False), flush=True)\n"
         )
-
         try:
             env = os.environ.copy()
             env.setdefault("PYTHONUTF8", "1")
             env.setdefault("PYTHONIOENCODING", "utf-8")
-
             p2 = subprocess.run(
                 [backend.python, "-c", code],
                 stdout=subprocess.PIPE,
@@ -157,7 +119,6 @@ def _run_backend_self_test(backend: ExternalOCRBackend, timeout: int = 40) -> Ex
                 env=env,
                 **_no_console_kwargs(),
             )
-
             raw = (p2.stdout or "").strip()
             if raw:
                 start = raw.find("{")
@@ -165,19 +126,14 @@ def _run_backend_self_test(backend: ExternalOCRBackend, timeout: int = 40) -> Ex
                 if start >= 0 and end >= start:
                     data2 = json.loads(raw[start:end + 1])
                     return data2 if isinstance(data2, dict) else {}
-
         except Exception:
             pass
-
         return {}
-
     try:
         cmd = [backend.python, backend.worker, "--self-test", "--backend-kind", backend.kind]
-
         env = os.environ.copy()
         env.setdefault("PYTHONUTF8", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
-
         p = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
@@ -189,59 +145,43 @@ def _run_backend_self_test(backend: ExternalOCRBackend, timeout: int = 40) -> Ex
             env=env,
             **_no_console_kwargs(),
         )
-
         text = (p.stdout or "").strip()
         data = None
-
         if text:
-            # The worker prints JSON only, but be tolerant of warnings before/after it.
             start = text.find("{")
             end = text.rfind("}")
             if start >= 0 and end >= start:
                 data = json.loads(text[start:end + 1])
-
         if not isinstance(data, dict):
             data = {
                 "ok": False,
                 "error": (p.stderr or p.stdout or "No JSON self-test output").strip(),
             }
-
-        # VRAM-Daten nachziehen, falls der Worker sie nicht selbst liefert.
         if data.get("ok") or data.get("cuda_available"):
             if not data.get("cuda_device_total_memory") and not data.get("cuda_device_total_memory_gb"):
                 probe = _probe_backend_vram()
                 for key, value in probe.items():
                     data.setdefault(key, value)
-
         backend.self_test = data
         backend.ok = bool(data.get("ok") or data.get("cuda_available"))
-
         if backend.ok:
             dev = str(data.get("device_name") or data.get("backend_kind") or backend.kind)
-
             if backend.kind == "nvidia-cuda":
                 cuda = data.get("cuda_version")
                 backend.detail = f"{dev} (CUDA {cuda})" if cuda else f"{dev} (CUDA)"
-
             elif backend.kind == "amd-rocm":
                 hip = data.get("hip_version")
                 backend.detail = f"{dev} (HIP {hip})" if hip else f"{dev} (ROCm)"
-
             else:
                 backend.detail = dev
-
         else:
             backend.detail = str(data.get("error") or p.stderr or "Backend self-test failed").strip()
-
     except Exception as exc:
         backend.ok = False
         backend.detail = repr(exc)
         backend.self_test = {"ok": False, "error": repr(exc)}
-
     return backend
-
 def get_external_ocr_backend(kind: str, *, refresh: bool = False) -> Optional[ExternalOCRBackend]:
-    """Return an installed external OCR backend after a quick self-test."""
     kind = str(kind or "").strip().lower()
     if kind not in ("nvidia-cuda", "amd-rocm"):
         return None
@@ -250,14 +190,12 @@ def get_external_ocr_backend(kind: str, *, refresh: bool = False) -> Optional[Ex
         cached = _BACKEND_CACHE.get(kind)
         if cached and (now - cached[0]) <= BACKEND_CACHE_TTL_SECONDS:
             return cached[1]
-
     data = _safe_read_backend_info(kind)
     backend = _backend_info_to_obj(kind, data) if data else None
     if backend is not None:
         backend = _run_backend_self_test(backend)
     _BACKEND_CACHE[kind] = (now, backend)
     return backend
-
 def get_external_ocr_backends(*, refresh: bool = False) -> Dict[str, ExternalOCRBackend]:
     out: Dict[str, ExternalOCRBackend] = {}
     for kind in ("nvidia-cuda", "amd-rocm"):
@@ -265,14 +203,10 @@ def get_external_ocr_backends(*, refresh: bool = False) -> Dict[str, ExternalOCR
         if b is not None:
             out[kind] = b
     return out
-
 def clear_external_ocr_backend_cache():
     _BACKEND_CACHE.clear()
-
-from .external_backend_worker_source import EXTERNAL_KRAKEN_WORKER_SOURCE
-
+from bottled_kraken._workers.external_backend_worker_source import EXTERNAL_KRAKEN_WORKER_SOURCE
 def ensure_external_worker_script(backend: ExternalOCRBackend) -> bool:
-    """Install or update the backend worker script in the external backend dir."""
     try:
         worker_path = Path(backend.worker)
         worker_path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,7 +220,6 @@ def ensure_external_worker_script(backend: ExternalOCRBackend) -> bool:
         return True
     except Exception:
         return False
-
 class ExternalBackendOCRWorker(QThread):
     file_started = Signal(str)
     file_done = Signal(str, str, list, object, list)
@@ -296,15 +229,13 @@ class ExternalBackendOCRWorker(QThread):
     failed = Signal(str)
     device_resolved = Signal(str)
     gpu_info = Signal(str)
-
     def __init__(self, job: OCRJob, backend: ExternalOCRBackend):
         super().__init__()
         self.job = job
         self.backend = backend
         self._proc: Optional[subprocess.Popen] = None
         self._job_file: Optional[Path] = None
-
-    def requestInterruption(self):  # type: ignore[override]
+    def requestInterruption(self):
         super().requestInterruption()
         proc = self._proc
         if proc and proc.poll() is None:
@@ -312,7 +243,6 @@ class ExternalBackendOCRWorker(QThread):
                 proc.terminate()
             except Exception:
                 pass
-
     def _write_job_file(self) -> Path:
         import tempfile
         payload = {
@@ -330,7 +260,6 @@ class ExternalBackendOCRWorker(QThread):
             json.dump(payload, f, ensure_ascii=False)
         self._job_file = Path(path)
         return self._job_file
-
     def _handle_event(self, data: Dict[str, Any]):
         event = data.get("event")
         if event == "file_started":
@@ -346,7 +275,7 @@ class ExternalBackendOCRWorker(QThread):
                 bbox: Optional[BBox] = None
                 if isinstance(raw_bb, (list, tuple)) and len(raw_bb) == 4:
                     try:
-                        bbox = tuple(int(v) for v in raw_bb)  # type: ignore[assignment]
+                        bbox = tuple(int(v) for v in raw_bb)
                     except Exception:
                         bbox = None
                 records.append(RecordView(len(records), str(item.get("text") or ""), bbox))
@@ -364,7 +293,6 @@ class ExternalBackendOCRWorker(QThread):
             self.gpu_info.emit(str(data.get("value") or ""))
         elif event == "failed":
             self.failed.emit(str(data.get("message") or translation.translate(translation.DEFAULT_LANGUAGE, "err_external_backend_failed")))
-
     def run(self):
         try:
             if not ensure_external_worker_script(self.backend):

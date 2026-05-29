@@ -1,13 +1,21 @@
-"""Mixin für MainWindow: menu setup and queue headers."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import _theme_app_qss
+from bottled_kraken.common import (
+    QAction,
+    QActionGroup,
+    QApplication,
+    QColor,
+    QPalette,
+    QToolButton,
+    Qt,
+    THEMES,
+    translation,
+)
+from bottled_kraken.workers import (
+    BackendInstallDialog,
+    clear_external_ocr_backend_cache,
+)
 import math
-
-from .menu_behavior import BKStayOpenMenu
-
+from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
 class MainWindowThemeToolbarMixin:
         def apply_theme(self, theme: str):
             self.current_theme = theme
@@ -41,11 +49,9 @@ class MainWindowThemeToolbarMixin:
             self._set_primary_toolbar_icons()
             self._set_secondary_button_icons()
             self._apply_lines_tree_theme()
-
         def toggle_theme(self):
             new_theme = "dark" if self.current_theme == "bright" else "bright"
             self.apply_theme(new_theme)
-
         def _apply_lines_tree_theme(self):
             if not hasattr(self, "list_lines") or self.list_lines is None:
                 return
@@ -126,16 +132,13 @@ class MainWindowThemeToolbarMixin:
             self.list_lines.setAlternatingRowColors(True)
             self.list_lines.setStyleSheet(qss)
             self.list_lines.viewport().update()
-
         def set_language(self, lang):
             self.current_lang = translation.normalize_language_code(lang)
-            # Das Log folgt ab sofort der aktuell gewählten UI-Sprache.
             self.log_lang = self.current_lang
             self.settings.setValue("ui/language", self.current_lang)
             self.retranslate_ui()
             self._refresh_hw_menu_availability()
             self._update_toolbar_language_theme_ui()
-
         def _build_toolbar_language_theme_menus(self):
             self.lang_toolbar_menu = BKStayOpenMenu(self)
             self.lang_group = QActionGroup(self)
@@ -153,7 +156,6 @@ class MainWindowThemeToolbarMixin:
                     setattr(self, f"act_lang_{lang_code}", action)
             self.btn_lang_menu.setMenu(self.lang_toolbar_menu)
             self._update_toolbar_language_theme_ui()
-
         def _update_toolbar_language_theme_ui(self):
             if hasattr(self, "btn_theme_toggle"):
                 self.btn_theme_toggle.setChecked(self.current_theme == "dark")
@@ -161,17 +163,14 @@ class MainWindowThemeToolbarMixin:
                 self.btn_theme_toggle.setIcon(self._theme_toggle_icon())
                 self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonIconOnly)
                 self.btn_theme_toggle.setToolTip(self._tr("toolbar_theme_tooltip"))
-
             if hasattr(self, "btn_lang_menu"):
                 self.btn_lang_menu.setText("")
                 self.btn_lang_menu.setIcon(self._language_menu_icon())
                 self.btn_lang_menu.setToolButtonStyle(Qt.ToolButtonIconOnly)
                 self.btn_lang_menu.setToolTip(self._tr("toolbar_language_tooltip"))
-
             for lang_code, action in getattr(self, "lang_actions", {}).items():
                 action.setText(translation.language_display_name(lang_code, self.current_lang))
                 action.setChecked(self.current_lang == lang_code)
-
         def _update_models_menu_labels(self):
             if hasattr(self, "act_rec"):
                 self.act_rec.setText(self._tr("act_load_rec_model"))
@@ -194,23 +193,18 @@ class MainWindowThemeToolbarMixin:
             self._update_kraken_menu_status()
             if hasattr(self, "kraken_models_submenu"):
                 self._rebuild_kraken_models_submenu()
-
         def _make_toolbar_buttons_pushy(self):
-            # Alle QToolButtons, die QToolBar für QAction erstellt
             for b in self.toolbar.findChildren(QToolButton):
-                b.setAutoRaise(False)  # wichtig: sonst wirkt es oft "flat"
+                b.setAutoRaise(False)
                 b.setCursor(Qt.PointingHandCursor)
-            # Auch die Modell-Buttons
             self.btn_rec_model.setCursor(Qt.PointingHandCursor)
             self.btn_seg_model.setCursor(Qt.PointingHandCursor)
             if hasattr(self, "btn_import_lines"):
                 self.btn_import_lines.setCursor(Qt.PointingHandCursor)
-
         def open_integrated_backend_installer(self, backend_kind: str):
             dlg = BackendInstallDialog(backend_kind, tr_func=self._tr, parent=self)
             dlg.install_finished.connect(self._on_integrated_backend_install_finished)
             dlg.exec()
-
         def _on_integrated_backend_install_finished(self, ok: bool, backend_kind: str):
             try:
                 clear_external_ocr_backend_cache()

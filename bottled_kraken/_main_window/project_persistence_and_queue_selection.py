@@ -1,3 +1,2 @@
-from .project_and_toolbar import MainWindowProjectPersistenceAndQueueSelectionMixin
-
+from bottled_kraken._main_window.project_and_toolbar import MainWindowProjectPersistenceAndQueueSelectionMixin
 __all__ = ['MainWindowProjectPersistenceAndQueueSelectionMixin']

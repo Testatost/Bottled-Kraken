@@ -1,8 +1,7 @@
-"""OCR variant tab helpers for the main window."""
 try:
     from PySide6.QtCore import QEvent, QTimer, Qt
     from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QTabBar, QToolButton
-except Exception:  # pragma: no cover
+except Exception:
     QEvent = None
     QTimer = None
     Qt = None
@@ -12,9 +11,9 @@ except Exception:  # pragma: no cover
     QToolButton = None
     QTabBar = object
 try:
-    from .ocr_tab_close_widget import OCRTabCloseWidget
-    from .ocr_tab_name_utils import plain_ocr_tab_text
-except Exception:  # pragma: no cover
+    from bottled_kraken._main_window.ocr_tab_close_widget import OCRTabCloseWidget
+    from bottled_kraken._main_window.ocr_tab_name_utils import plain_ocr_tab_text
+except Exception:
     OCRTabCloseWidget = None
     def plain_ocr_tab_text(text: str) -> str:
         value = str(text or "").strip()
@@ -293,9 +292,8 @@ def on_ocr_variant_current_changed(window, index: int) -> None:
                 pass
         except Exception:
             pass
-
 try:
-    from .ocr_variant_tab_bar import OCRVariantTabBar
-except Exception:  # pragma: no cover
+    from bottled_kraken._main_window.ocr_variant_tab_bar import OCRVariantTabBar
+except Exception:
     class OCRVariantTabBar(QTabBar):
         pass

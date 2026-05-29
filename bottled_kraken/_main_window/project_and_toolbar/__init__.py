@@ -1,8 +1,6 @@
-from .project_files import MainWindowProjectFilesMixin
-from .queue_selection import MainWindowQueueSelectionMixin
-from .toolbar_icons import MainWindowToolbarIconFactoryMixin
-
+from bottled_kraken._main_window.project_and_toolbar.project_files import MainWindowProjectFilesMixin
+from bottled_kraken._main_window.project_and_toolbar.queue_selection import MainWindowQueueSelectionMixin
+from bottled_kraken._main_window.project_and_toolbar.toolbar_icons import MainWindowToolbarIconFactoryMixin
 class MainWindowProjectPersistenceAndQueueSelectionMixin(MainWindowProjectFilesMixin, MainWindowQueueSelectionMixin, MainWindowToolbarIconFactoryMixin):
     pass
-
 __all__ = ['MainWindowProjectPersistenceAndQueueSelectionMixin', 'MainWindowProjectFilesMixin', 'MainWindowQueueSelectionMixin', 'MainWindowToolbarIconFactoryMixin']

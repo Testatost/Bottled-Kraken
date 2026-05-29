@@ -34,7 +34,6 @@ DOTS_ONLY_RE = re.compile(r'^(?:\.\s*){3,}$')
 def emit(event: str, **payload):
     payload["event"] = event
     print(json.dumps(payload, ensure_ascii=False), flush=True)
-
 def parse_auto_revision_replacements(value):
     default = [("ſ", "s"), ("⸗", "-"), ("±", "+/-")]
     if value is None: return default
@@ -130,7 +129,6 @@ def baseline_length(bl) -> float:
     x1, y1 = pts[0]
     x2, y2 = pts[-1]
     return math.hypot(x2 - x1, y2 - y1)
-
 def clamp_bbox(bb: BBox, w: int, h: int) -> Optional[BBox]:
     x0, y0, x1, y1 = bb
     x0 = max(0, min(w - 1, int(x0)))
@@ -140,7 +138,6 @@ def clamp_bbox(bb: BBox, w: int, h: int) -> Optional[BBox]:
     if x1 <= x0 or y1 <= y0:
         return None
     return x0, y0, x1, y1
-
 def expand_bbox(bb: Optional[BBox], image_width: int, image_height: int) -> Optional[BBox]:
     if not bb:
         return None
@@ -149,7 +146,6 @@ def expand_bbox(bb: Optional[BBox], image_width: int, image_height: int) -> Opti
     pad_x = max(2, int(round(bh * 0.10)))
     pad_y = max(1, int(round(bh * 0.08)))
     return clamp_bbox((x0 - pad_x, y0 - pad_y, x1 + pad_x, y1 + pad_y), image_width, image_height)
-
 def sort_records(records, image_width: int, image_height: int, reading_mode: int):
     items = []
     for r in records:
@@ -183,7 +179,6 @@ def sort_records(records, image_width: int, image_height: int, reading_mode: int
         row["items"].sort(key=lambda t: t[2], reverse=rev_x)
         out.extend([x[0] for x in row["items"]])
     return out
-
 def kraken_device_arg(device: Any = None) -> str:
     if device is None:
         return "cpu"
@@ -196,17 +191,14 @@ def kraken_device_arg(device: Any = None) -> str:
         pass
     text = str(device or "cpu").strip()
     return text or "cpu"
-
 def load_rec_model(path: str, device: Any):
     dev = kraken_device_arg(device)
     try:
         return models.load_any(path, device=dev)
     except TypeError:
         return models.load_any(path)
-
 def load_seg_model(path: str):
     return vgsl.TorchVGSLModel.load_model(path)
-
 def segment(im: Image.Image, model: Any, device: Any):
     dev = kraken_device_arg(device)
     try:
@@ -216,10 +208,8 @@ def segment(im: Image.Image, model: Any, device: Any):
             return blla.segment(im, model=model, device=dev)
         except TypeError:
             return blla.segment(im, model=model)
-
 def recognize(rec_model: Any, im: Image.Image, seg: Any):
     return rpred.rpred(rec_model, im, seg)
-
 def filter_short_baselines(seg: Any):
     try:
         if hasattr(seg, "baselines") and hasattr(seg, "lines") and seg.baselines and seg.lines:
@@ -234,10 +224,8 @@ def filter_short_baselines(seg: Any):
     except Exception:
         pass
     return seg
-
 def load_image_gray(path: str) -> Image.Image:
     return Image.open(path).convert("L")
-
 def expected_lines(seg: Any) -> Optional[int]:
     for attr in ("lines", "baselines"):
         v = getattr(seg, attr, None)
@@ -247,13 +235,11 @@ def expected_lines(seg: Any) -> Optional[int]:
             except Exception:
                 pass
     return None
-
 def choose_device(kind: str):
     kind = (kind or "").lower().strip()
     if kind in ("nvidia-cuda", "amd-rocm", "cuda", "rocm") and torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
-
 def device_label(kind: str, device):
     try:
         if device.type == "cuda":
@@ -266,7 +252,6 @@ def device_label(kind: str, device):
     except Exception:
         pass
     return "CPU"
-
 def ocr_preset_boxes(img_path, im, boxes, rec_model, seg_model, device, reading_direction, file_idx, total_files, auto_revision_enabled=False, auto_revision_replacements=None):
     page_w, page_h = im.size
     valid = []
@@ -307,7 +292,6 @@ def ocr_preset_boxes(img_path, im, boxes, rec_model, seg_model, device, reading_
         out.append({"idx": len(out), "text": final_text, "bbox": list(bb)})
         emit("progress", value=int(((file_idx + ((i + 1) / total)) / max(1, total_files)) * 100))
     return "\n".join(x["text"] for x in out).strip(), out
-
 def ocr_page(img_path, rec_model, seg_model, device, reading_direction, file_idx, total_files, preset_boxes=None, auto_revision_enabled=False, auto_revision_replacements=None):
     im_orig = None
     im = None
@@ -407,7 +391,6 @@ def ocr_page(img_path, rec_model, seg_model, device, reading_direction, file_idx
                 torch.cuda.empty_cache()
         except Exception:
             pass
-
 def self_test(kind: str) -> int:
     result = {
         "ok": False,
@@ -439,7 +422,6 @@ def self_test(kind: str) -> int:
         result["error"] = repr(exc)
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
     return 0 if result.get("ok") else 1
-
 def run_job(job_path: str, backend_kind: str) -> int:
     with open(job_path, "r", encoding="utf-8") as f:
         job = json.load(f)
@@ -475,7 +457,6 @@ def run_job(job_path: str, backend_kind: str) -> int:
             emit("file_error", path=img_path, message=traceback.format_exc())
     emit("finished")
     return 0
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
@@ -492,6 +473,5 @@ def main() -> int:
             return 1
     print(json.dumps({"ok": False, "error": "Use --self-test or --job-json."}, ensure_ascii=False), flush=True)
     return 2
-
 if __name__ == "__main__":
     raise SystemExit(main())

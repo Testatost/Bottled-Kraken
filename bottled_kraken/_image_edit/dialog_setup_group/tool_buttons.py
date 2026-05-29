@@ -1,10 +1,18 @@
-"""Mixin-Methoden für den Bildbearbeitungsdialog."""
-from ...shared import *
-from ...dialogs import *
-from ..common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
-from ..canvas import ImageEditCanvas
+from bottled_kraken.common import (
+    QBrush,
+    QColor,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QRectF,
+    QSize,
+    QToolButton,
+    Qt,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
+from bottled_kraken._image_edit.canvas import ImageEditCanvas
 from PySide6.QtGui import QPainterPath
-
 class ImageEditDialogToolButtonsMixin:
         def _enter_transform_or_apply(self):
             if hasattr(self, "canvas") and self.canvas.has_active_transform():
@@ -12,7 +20,6 @@ class ImageEditDialogToolButtonsMixin:
                 return
             if hasattr(self, "canvas") and self.canvas.selection_rect is not None:
                 self._toggle_free_transform(True)
-
         def _set_preview_tool_mode(self, mode: str):
             mode = "pan" if str(mode or "").lower() == "pan" else "select"
             if hasattr(self, "canvas"):
@@ -25,19 +32,15 @@ class ImageEditDialogToolButtonsMixin:
                 self.btn_select_tool.setChecked(mode == "select")
             if hasattr(self, "btn_hand_tool"):
                 self.btn_hand_tool.setChecked(mode == "pan")
-
         def _preview_tool_icon_color(self) -> QColor:
             return QColor("#f8fafc" if getattr(self, "_preview_tool_theme", "bright") == "dark" else "#111827")
-
         def _build_preview_tool_icon(self, tool: str) -> QIcon:
             ink = self._preview_tool_icon_color()
             pix = QPixmap(24, 24)
             pix.fill(Qt.transparent)
-
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.Antialiasing, True)
             painter.setPen(QPen(ink, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-
             if tool == "pan":
                 hand = QPainterPath()
                 hand.moveTo(7.2, 16.2)
@@ -88,13 +91,11 @@ class ImageEditDialogToolButtonsMixin:
                 cursor.closeSubpath()
                 painter.setBrush(QBrush(ink))
                 painter.drawPath(cursor)
-
             painter.end()
             icon = QIcon()
             icon.addPixmap(pix, QIcon.Normal, QIcon.Off)
             icon.addPixmap(pix, QIcon.Normal, QIcon.On)
             return icon
-
         def _preview_tool_button_qss(self) -> str:
             return """
                 QToolButton {
@@ -115,7 +116,6 @@ class ImageEditDialogToolButtonsMixin:
                     background: rgba(59, 130, 246, 0.44);
                 }
             """
-
         def _make_preview_tool_button(self, tool: str, tooltip_key: str) -> QToolButton:
             btn = QToolButton(self)
             btn.setText("")
@@ -129,7 +129,6 @@ class ImageEditDialogToolButtonsMixin:
             btn.setFixedSize(30, 28)
             btn.setStyleSheet(self._preview_tool_button_qss())
             return btn
-
         def _make_sidebar_button(self, tool: str, tooltip_text: str, checkable: bool = True) -> QToolButton:
             btn = QToolButton(self)
             btn.setCheckable(checkable)

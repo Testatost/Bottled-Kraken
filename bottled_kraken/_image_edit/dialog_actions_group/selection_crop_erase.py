@@ -1,9 +1,16 @@
-"""Mixin-Methoden für den Bildbearbeitungsdialog."""
-from ...shared import *
-from ...dialogs import *
-from ..common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog, LiveValueDialog
-from ..canvas import ImageEditCanvas
-
+from bottled_kraken.common import (
+    Image,
+    ImageDraw,
+    Optional,
+    QDialog,
+    QMessageBox,
+    QPointF,
+    QRectF,
+    Qt,
+    Tuple,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog, LiveValueDialog
+from bottled_kraken._image_edit.canvas import ImageEditCanvas
 class ImageEditDialogSelectionCropEraseMixin:
         def _current_erase_action(self) -> Optional[Tuple[str, Tuple[int, int, int, int]]]:
             if not self.canvas.show_erase:
@@ -13,7 +20,6 @@ class ImageEditDialogSelectionCropEraseMixin:
                 return None
             shape = self.canvas.erase_shape or "rect"
             return shape, erase_orig
-
         def _commit_erase_selection(self):
             action = self._current_erase_action()
             if action is None:
@@ -23,7 +29,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self.canvas.erase_rect = None
             self._refresh_preview(reset_zoom=False)
             self.canvas.setFocus()
-
         def _undo_erase_commit(self):
             if not self.erase_actions:
                 return
@@ -31,7 +36,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self.canvas.erase_rect = None
             self._refresh_preview(reset_zoom=False)
             self.canvas.setFocus()
-
         def _selection_mask_for_original_image(self):
             if self.canvas.selection_rect is None or self.canvas.view_image is None:
                 return None
@@ -58,7 +62,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             else:
                 return None
             return mask
-
         def _delete_selection_content(self):
             if self.canvas.selection_rect is None:
                 return False
@@ -75,7 +78,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self._set_selection_draw_mode("rect")
             self._history_push()
             return True
-
         def _delete_selected_crop_or_erase(self):
             if self.canvas.selection_rect is not None:
                 if self._delete_selection_content():
@@ -85,7 +87,6 @@ class ImageEditDialogSelectionCropEraseMixin:
                     self._history_push()
                     return
             self._commit_erase_selection()
-
         def keyPressEvent(self, event):
             if event.modifiers() & Qt.ControlModifier and event.key() == Qt.Key_Z:
                 self._undo_action()
@@ -117,34 +118,29 @@ class ImageEditDialogSelectionCropEraseMixin:
                 event.accept()
                 return
             super().keyPressEvent(event)
-
         def _apply_selected(self):
             if callable(self.on_apply_selected):
                 self._batch_apply_used = True
                 self.result_images = []
                 self.on_apply_selected(self)
                 self.accept()
-
         def _apply_all(self):
             if callable(self.on_apply_all):
                 self._batch_apply_used = True
                 self.result_images = []
                 self.on_apply_all(self)
                 self.accept()
-
         def _update_border_button_text(self):
             if self.white_border_px > 0:
                 self.btn_border.setText(self._tr("image_edit_white_border_with_px", self.white_border_px))
             else:
                 self.btn_border.setText(self._tr("image_edit_white_border"))
-
         def _open_border_dialog(self):
             dlg = WhiteBorderDialog(self.white_border_px, self)
             if dlg.exec() == QDialog.Accepted:
                 self.white_border_px = dlg.get_value()
                 self._update_border_button_text()
                 self._refresh_preview(reset_zoom=False)
-
         def _toggle_rotation_mode(self, checked: bool):
             self.canvas.rotation_mode = checked
             self.btn_rotate_mode.setText(self._tr("image_edit_rotate_on") if checked else self._tr("image_edit_rotate_off"))
@@ -153,7 +149,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self._sync_transform_mode_buttons()
             self.canvas.update()
             self._history_push()
-
         def _begin_crop_drag_at_global_pos(self, global_pos):
             self.canvas.cancel_free_transform()
             self.canvas.selection_rect = None
@@ -166,9 +161,7 @@ class ImageEditDialogSelectionCropEraseMixin:
             if callable(begin):
                 begin(QPointF(local_pos))
             self._sync_transform_mode_buttons()
-
         def _create_crop_area(self):
-            # Nur Crop erzeugen, keinen Auswahlbereich.
             self.canvas.cancel_free_transform()
             self.canvas.selection_rect = None
             self.canvas.show_crop = True
@@ -179,22 +172,18 @@ class ImageEditDialogSelectionCropEraseMixin:
             self.canvas.update()
             self._sync_transform_mode_buttons()
             self._history_push()
-
         def _on_crop_button_clicked(self, checked: bool):
             if checked:
-                # Beim Aktivieren des Crop-Modus keine Auswahl anzeigen oder erzeugen.
                 self.canvas.cancel_free_transform()
                 self.canvas.selection_rect = None
                 self.canvas.show_crop = True
             else:
                 self.canvas.show_crop = False
             self.canvas.update()
-
         def _set_selection_draw_mode(self, mode: str):
             mode = str(mode or "rect").lower()
             if mode not in ("rect", "ellipse", "polygon", "freehand"):
                 mode = "rect"
-            # Auswahlwerkzeuge sind exklusiv zu Crop/Freier Transformation.
             if mode in ("rect", "ellipse", "polygon", "freehand"):
                 if hasattr(self, "chk_crop") and self.chk_crop.isChecked():
                     self.chk_crop.setChecked(False)
@@ -213,7 +202,6 @@ class ImageEditDialogSelectionCropEraseMixin:
                     btn.setChecked(bool(active))
                     btn.blockSignals(False)
             self.canvas.setFocus()
-
         def _toggle_grid(self, checked: bool):
             self.canvas.show_grid = checked
             self.grid_slider.setEnabled(bool(checked))
@@ -221,15 +209,12 @@ class ImageEditDialogSelectionCropEraseMixin:
             self.grid_slider.setVisible(bool(checked))
             self.lbl_grid_size.setVisible(bool(checked))
             self.canvas.update()
-
         def _on_grid_slider_changed(self, value: int):
             self.canvas.grid_spacing = int(round(6 + (value / 100.0) * 90))
             self.canvas.update()
-
         def _toggle_crop(self, checked: bool):
             self.canvas.show_crop = checked
             if checked:
-                # Crop-Modus ist exklusiv gegenüber dem Auswahlbereich.
                 self.canvas.cancel_free_transform()
                 self.canvas.selection_rect = None
                 self.canvas.selection_polygon = None
@@ -250,7 +235,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self._sync_transform_mode_buttons()
             self.canvas.update()
             self._history_push()
-
         def _toggle_selection(self, checked: bool):
             self.canvas.show_selection = bool(checked)
             if not checked:
@@ -260,7 +244,6 @@ class ImageEditDialogSelectionCropEraseMixin:
             self._sync_transform_mode_buttons()
             self.canvas.update()
             self.canvas.changed.emit()
-
         def _toggle_split(self, checked: bool):
             self.canvas.show_separator = checked
             self.chk_smart_split.setEnabled(checked)
@@ -273,9 +256,12 @@ class ImageEditDialogSelectionCropEraseMixin:
                     self.chk_smart_split.blockSignals(True)
                     self.chk_smart_split.setChecked(False)
                     self.chk_smart_split.blockSignals(False)
+            if checked and self.chk_smart_split.isChecked():
+                adjust = getattr(self, "_adjust_smart_split_separator", None)
+                if callable(adjust):
+                    adjust()
             self.canvas.update()
             self._history_push()
-
         def _toggle_erase_mode(self, shape: str, checked: bool):
             if checked and self.canvas.rotation_mode:
                 QMessageBox.information(
@@ -311,7 +297,6 @@ class ImageEditDialogSelectionCropEraseMixin:
                     self.canvas.erase_shape = ""
             self.canvas.update()
             self.canvas.changed.emit()
-
         def _clear_erase_area(self):
             self.canvas.erase_rect = None
             self.canvas.show_erase = False

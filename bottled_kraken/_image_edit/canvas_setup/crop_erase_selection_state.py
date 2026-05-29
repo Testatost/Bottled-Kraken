@@ -1,8 +1,15 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
+from bottled_kraken.common import (
+    Image,
+    ImageDraw,
+    List,
+    Optional,
+    QPointF,
+    QRectF,
+    Tuple,
+    math,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 from PySide6.QtGui import QPolygonF
-
 class ImageEditCanvasCropEraseSelectionStateMixin:
         def _store_active_crop(self):
             if not hasattr(self, "crop_rects"):
@@ -16,7 +23,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             else:
                 self.crop_rects.append(QRectF(self.crop_rect))
                 self.selected_crop_index = len(self.crop_rects) - 1
-
         def _sync_active_crop(self):
             if not hasattr(self, "crop_rects"):
                 self.crop_rects = []
@@ -27,7 +33,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             if self.selected_crop_index < 0 or self.selected_crop_index >= len(self.crop_rects):
                 self.selected_crop_index = len(self.crop_rects) - 1
             self.crop_rect = QRectF(self.crop_rects[self.selected_crop_index])
-
         def add_crop_rect(self, rect: QRectF):
             if not hasattr(self, "crop_rects"):
                 self.crop_rects = []
@@ -39,7 +44,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             self.show_crop = True
             self.update()
             self.changed.emit()
-
         def select_crop_index(self, idx: int) -> bool:
             if not hasattr(self, "crop_rects"):
                 self.crop_rects = []
@@ -54,7 +58,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             self.crop_rect = None
             self.update()
             return False
-
         def delete_selected_crop(self) -> bool:
             if not hasattr(self, "crop_rects"):
                 self.crop_rects = []
@@ -71,7 +74,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 self.changed.emit()
                 return True
             return False
-
         def _crop_hit_index(self, p: QPointF) -> Optional[int]:
             if not hasattr(self, "crop_rects"):
                 self.crop_rects = []
@@ -81,7 +83,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 if rect is not None and (rect.contains(p) or self._rect_edge_at(rect, p)):
                     return idx
             return None
-
         def get_all_crops_orig(self) -> List[Tuple[int, int, int, int]]:
             if self.base_image is None or self.view_image is None:
                 return []
@@ -107,7 +108,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                     int(round(y2 * sy)),
                 ))
             return out
-
         def set_crops_from_orig(self, crop_list: Optional[List[Tuple[int, int, int, int]]], active_index: int = -1):
             self.crop_rects = []
             self.crop_rect = None
@@ -132,7 +132,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 self.selected_crop_index = active_index
                 self.crop_rect = QRectF(self.crop_rects[self.selected_crop_index])
             self.update()
-
         def get_crop_orig(self) -> Optional[Tuple[int, int, int, int]]:
             crops = self.get_all_crops_orig()
             if not crops:
@@ -141,7 +140,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             if idx < 0 or idx >= len(crops):
                 idx = len(crops) - 1
             return crops[idx]
-
         def get_erase_orig(self) -> Optional[Tuple[int, int, int, int]]:
             if self.erase_rect is None or self.base_image is None or self.view_image is None:
                 return None
@@ -159,7 +157,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 int(round(x2 * sx)),
                 int(round(y2 * sy)),
             )
-
         def set_erase_from_orig(self, erase_orig: Optional[Tuple[int, int, int, int]]):
             if erase_orig is None or self.base_image is None or self.view_image is None:
                 self.erase_rect = None
@@ -172,10 +169,8 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             x1, y1, x2, y2 = erase_orig
             self.erase_rect = QRectF(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
             self.update()
-
         def set_crop_from_orig(self, crop_orig: Optional[Tuple[int, int, int, int]]):
             self.set_crops_from_orig([crop_orig] if crop_orig else [], 0)
-
         def set_selection_draw_mode(self, mode: str):
             mode = str(mode or "rect").lower()
             if mode not in ("rect", "ellipse", "polygon", "freehand"):
@@ -183,7 +178,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             self.selection_draw_mode = mode
             self.show_selection = True
             self.update()
-
         def _selection_rect_from_points(self, points: List[QPointF]) -> Optional[QRectF]:
             pts = [p for p in (points or []) if p is not None]
             if not pts:
@@ -195,7 +189,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             if max_x - min_x < 2 or max_y - min_y < 2:
                 return None
             return self._clamp_rect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
-
         def _set_selection_polygon(self, points: List[QPointF]):
             pts = []
             for p in points or []:
@@ -208,7 +201,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             self.show_selection = True
             self.update()
             self.changed.emit()
-
         def _selection_point_hit(self, p: QPointF) -> int:
             pts = list(self.selection_polygon or [])
             if not pts and self.selection_rect is not None:
@@ -228,7 +220,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                     best_idx = idx
                     best_dist = dist
             return best_idx
-
         def _ensure_selection_polygon_from_rect(self):
             if self.selection_polygon or self.selection_rect is None:
                 return
@@ -239,7 +230,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 QPointF(r.right(), r.bottom()),
                 QPointF(r.left(), r.bottom()),
             ]
-
         def _ellipse_points_for_rect(self, rect: QRectF, steps: int = 48) -> List[QPointF]:
             if rect is None:
                 return []
@@ -253,7 +243,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 a = (2.0 * math.pi * i) / float(steps)
                 pts.append(QPointF(cx + math.cos(a) * rx, cy + math.sin(a) * ry))
             return pts
-
         def _simplify_selection_points(self, points: List[QPointF], min_dist: float = 10.0) -> List[QPointF]:
             pts = [QPointF(p) for p in (points or [])]
             if len(pts) <= 3:
@@ -274,7 +263,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 step = max(1, int(math.ceil(len(simplified) / 120.0)))
                 simplified = simplified[::step]
             return simplified
-
         def _selection_mask_for_rect(self, src_rect: QRectF, size: Tuple[int, int]) -> Image.Image:
             w, h = int(size[0]), int(size[1])
             mask = Image.new("L", (max(1, w), max(1, h)), 0)
@@ -285,21 +273,13 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             else:
                 ImageDraw.Draw(mask).rectangle((0, 0, max(0, w - 1), max(0, h - 1)), fill=255)
             return mask
-
         def get_selection_state_orig(self) -> Optional[dict]:
-            """Speichert Auswahlrechteck UND freie/gezielte Auswahlpunkte in Originalbild-Koordinaten.
-
-            Beim Zoomen darf eine Frei-Hand- oder gezielte Auswahl nicht nur als
-            Bounding-Rectangle rekonstruiert werden. Sonst bleiben die alten
-            Polygonpunkte in View-Koordinaten hängen und wandern sichtbar.
-            """
             if self.selection_rect is None or self.base_image is None or self.view_image is None:
                 return None
             bw, bh = self.base_image.size
             vw, vh = self.view_image.size
             sx = bw / max(1.0, float(vw))
             sy = bh / max(1.0, float(vh))
-
             rect = self.selection_rect
             rect_orig = (
                 int(round(max(0.0, min(rect.left(), vw - 2)) * sx)),
@@ -307,23 +287,19 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
                 int(round(max(2.0, min(rect.right(), vw)) * sx)),
                 int(round(max(2.0, min(rect.bottom(), vh)) * sy)),
             )
-
             polygon_orig = []
             for p in (getattr(self, "selection_polygon", None) or []):
                 polygon_orig.append((
                     int(round(max(0.0, min(float(p.x()), float(vw))) * sx)),
                     int(round(max(0.0, min(float(p.y()), float(vh))) * sy)),
                 ))
-
             return {
                 "rect": rect_orig,
                 "polygon": polygon_orig,
                 "mode": str(getattr(self, "selection_draw_mode", "rect") or "rect"),
                 "show": bool(getattr(self, "show_selection", False)),
             }
-
         def set_selection_state_from_orig(self, state: Optional[dict]):
-            """Stellt Auswahlrechteck UND freie/gezielte Auswahlpunkte nach Zoom/Resize wieder her."""
             if not state or self.base_image is None or self.view_image is None:
                 self.selection_rect = None
                 self.selection_polygon = None
@@ -333,31 +309,25 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             vw, vh = self.view_image.size
             sx = float(vw) / max(1.0, float(bw))
             sy = float(vh) / max(1.0, float(bh))
-
             rect_orig = state.get("rect")
             if rect_orig:
                 x1, y1, x2, y2 = rect_orig
                 self.selection_rect = QRectF(x1 * sx, y1 * sy, (x2 - x1) * sx, (y2 - y1) * sy)
             else:
                 self.selection_rect = None
-
             polygon = []
             for x, y in (state.get("polygon") or []):
                 polygon.append(QPointF(float(x) * sx, float(y) * sy))
             self.selection_polygon = polygon if polygon else None
-
             if self.selection_polygon and len(self.selection_polygon) >= 3:
                 rect = self._selection_rect_from_points(self.selection_polygon)
                 if rect is not None:
                     self.selection_rect = rect
-
             mode = str(state.get("mode") or "rect")
             if mode in ("rect", "ellipse", "polygon", "freehand"):
                 self.selection_draw_mode = mode
-
             self.show_selection = bool(state.get("show", True))
             self.update()
-
         def get_selection_orig(self) -> Optional[Tuple[int, int, int, int]]:
             if self.selection_rect is None or self.base_image is None or self.view_image is None:
                 return None
@@ -370,7 +340,6 @@ class ImageEditCanvasCropEraseSelectionStateMixin:
             x2 = max(x1 + 2, min(self.selection_rect.right(), vw))
             y2 = max(y1 + 2, min(self.selection_rect.bottom(), vh))
             return (int(round(x1 * sx)), int(round(y1 * sy)), int(round(x2 * sx)), int(round(y2 * sy)))
-
         def set_selection_from_orig(self, selection_orig: Optional[Tuple[int, int, int, int]]):
             if selection_orig is None or self.base_image is None or self.view_image is None:
                 self.selection_rect = None

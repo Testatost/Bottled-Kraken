@@ -1,3 +1,0 @@
-from .project_and_toolbar import MainWindowProjectPersistenceAndQueueSelectionMixin
-
-__all__ = ['MainWindowProjectPersistenceAndQueueSelectionMixin']

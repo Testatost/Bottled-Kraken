@@ -1,7 +1,10 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
-
+from bottled_kraken.common import (
+    QPointF,
+    QRectF,
+    Qt,
+    math,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 class ImageEditCanvasMouseMoveMixin:
         def mouseMoveEvent(self, event):
             wp = event.position()
@@ -21,7 +24,6 @@ class ImageEditCanvasMouseMoveMixin:
                     self.selection_polygon[idx] = QPointF(p)
                     self.selection_rect = self._selection_rect_from_points(self.selection_polygon)
                     self.update(); self.changed.emit(); return
-
             if self.drag_mode == "selection_freehand":
                 pts = list(getattr(self, "_freehand_points", []) or [])
                 if not pts or (abs(pts[-1].x() - p.x()) + abs(pts[-1].y() - p.y())) >= 10:
@@ -32,7 +34,6 @@ class ImageEditCanvasMouseMoveMixin:
                     self.selection_polygon = preview_pts[:]
                     self.selection_rect = self._selection_rect_from_points(preview_pts)
                 self.update(); self.changed.emit(); return
-
             if self.drag_mode == "transform_move" and self._transform_drag_points:
                 delta = p - self.drag_start
                 self.transform_quad = [QPointF(pt.x() + delta.x(), pt.y() + delta.y()) for pt in self._transform_drag_points]
@@ -56,14 +57,12 @@ class ImageEditCanvasMouseMoveMixin:
                 q = [QPointF(pt) for pt in (self.transform_quad or [])]
                 if len(q) == 4:
                     if len(pts) == 25:
-                        # Beim 5x5-Warp liegen die Rand-Ecken auf 0/4/24/20.
                         q[0] = QPointF(pts[0])
                         q[1] = QPointF(pts[4])
                         q[2] = QPointF(pts[24])
                         q[3] = QPointF(pts[20])
                         self.transform_quad = q
                     elif len(pts) == 9:
-                        # Rückwärtskompatibilität für ältere 3x3-Zwischenstände.
                         q[0] = QPointF(pts[0])
                         q[1] = QPointF(pts[2])
                         q[2] = QPointF(pts[8])
@@ -81,10 +80,6 @@ class ImageEditCanvasMouseMoveMixin:
                     if len(pts) == 25:
                         row = idx // 5
                         col = idx % 5
-                        # Nur für die 9 inneren Punkte: Alt verschiebt die drei
-                        # inneren Punkte derselben Horizontalen, Shift die drei
-                        # inneren Punkte derselben Vertikalen. Randgriffe bleiben
-                        # davon unberührt.
                         if 1 <= row <= 3 and 1 <= col <= 3:
                             if mods & Qt.AltModifier:
                                 move_indices = [row * 5 + c for c in (1, 2, 3)]
@@ -230,9 +225,6 @@ class ImageEditCanvasMouseMoveMixin:
                     self.transform_quad = rotated
                     self.selection_rect = self._bounding_rect_from_points(self.transform_quad)
                     self._ensure_transform_inside()
-                # Der Drehzustand steckt jetzt direkt in transform_quad. Dadurch folgen
-                # Vorschau, Inhalt und Auswahlrahmen demselben aktuellen Zustand und der
-                # Moduswechsel zu Skalieren/Neigen/Perspektive/Verkrümmen setzt nichts zurück.
                 self.transform_rotate_angle = 0.0
                 self.update(); self.changed.emit(); return
             if self.drag_mode == "img_rotate":

@@ -1,8 +1,6 @@
-from .ocr_start_stop import MainWindowOcrStartStopMixin
-from .ocr_results import MainWindowOcrResultsMixin
-from .line_selection_and_import import MainWindowLineSelectionAndImportMixin
-
+from bottled_kraken._main_window.ocr_batch.ocr_start_stop import MainWindowOcrStartStopMixin
+from bottled_kraken._main_window.ocr_batch.ocr_results import MainWindowOcrResultsMixin
+from bottled_kraken._main_window.ocr_batch.line_selection_and_import import MainWindowLineSelectionAndImportMixin
 class MainWindowImportLinesAndOcrBatchMixin(MainWindowOcrStartStopMixin, MainWindowOcrResultsMixin, MainWindowLineSelectionAndImportMixin):
     pass
-
 __all__ = ['MainWindowImportLinesAndOcrBatchMixin', 'MainWindowOcrStartStopMixin', 'MainWindowOcrResultsMixin', 'MainWindowLineSelectionAndImportMixin']

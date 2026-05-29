@@ -1,3 +1,2 @@
-from .overlay_lines import MainWindowLineEditingAndOverlaySyncMixin
-
+from bottled_kraken._main_window.overlay_lines import MainWindowLineEditingAndOverlaySyncMixin
 __all__ = ['MainWindowLineEditingAndOverlaySyncMixin']

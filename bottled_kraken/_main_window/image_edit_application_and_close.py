@@ -1,10 +1,20 @@
-"""Mixin für MainWindow: image edit application and close."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import _load_image_color
+from bottled_kraken.common import (
+    Image,
+    List,
+    QCoreApplication,
+    QDialog,
+    QMessageBox,
+    QProgressDialog,
+    QUEUE_COL_FILE,
+    Qt,
+    TaskItem,
+    os,
+)
+from bottled_kraken.image_edit import (
+    ImageEditDialog,
+    ImageEditSettings,
+)
 class MainWindowImageEditApplicationAndCloseMixin:
     def _load_task_into_edit_dialog(self, dlg: ImageEditDialog, task: TaskItem):
         image = _load_image_color(task.path)
@@ -46,13 +56,11 @@ class MainWindowImageEditApplicationAndCloseMixin:
         dlg.btn_erase_rect.blockSignals(False)
         dlg.btn_erase_ellipse.blockSignals(False)
         dlg._refresh_preview(reset_zoom=True)
-
     def _finalize_image_edit_batch(self, status_message: str):
         self._refresh_queue_numbers()
         self._fit_queue_columns_exact()
         self._update_queue_hint()
         self.status_bar.showMessage(status_message)
-
     def _apply_image_edit_to_targets(
             self,
             targets: List[TaskItem],
@@ -100,7 +108,6 @@ class MainWindowImageEditApplicationAndCloseMixin:
         finally:
             progress.close()
         self._finalize_image_edit_batch(status_message)
-
     def open_image_edit_dialog(self):
         task = self._current_task()
         if not task or not task.path or not os.path.exists(task.path):
@@ -177,7 +184,6 @@ class MainWindowImageEditApplicationAndCloseMixin:
             self.preview_image(created[0].path)
         self.status_bar.showMessage(self._tr("image_edit_applied_single_status"))
         self._log(self._tr_log("log_image_edit_applied", task.display_name, len(result_images)))
-
     def closeEvent(self, event):
         if self._is_closing:
             event.ignore()
@@ -189,7 +195,6 @@ class MainWindowImageEditApplicationAndCloseMixin:
             self.settings.setValue("ui/theme", self.current_theme)
             self.settings.sync()
             self._request_all_workers_stop()
-            # Threads kurz sauber auslaufen lassen
             for w in self._all_workers():
                 try:
                     if w and w.isRunning():

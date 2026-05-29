@@ -1,10 +1,16 @@
-"""Mixin für MainWindow: queue context preview and model loading."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import _load_image_color
+from bottled_kraken.common import (
+    Image,
+    List,
+    Optional,
+    QBrush,
+    QColor,
+    QMessageBox,
+    QTreeWidgetItem,
+    QUEUE_COL_FILE,
+    Qt,
+    RecordView,
+)
 class MainWindowPreviewAndResultsMixin:
         def preview_image(self, path: str, persist_current: bool = False):
             try:
@@ -21,7 +27,6 @@ class MainWindowPreviewAndResultsMixin:
                     self.canvas.set_overlay_enabled(False)
             except Exception as e:
                 QMessageBox.warning(self, self._tr("err_title"), self._tr("err_load", str(e)))
-
         def load_results(self, path: str, persist_current: bool = False):
             if persist_current:
                 self._persist_loaded_preview_bboxes()
@@ -38,7 +43,6 @@ class MainWindowPreviewAndResultsMixin:
             rows = self._selected_line_rows()
             if rows:
                 self.canvas.select_indices(rows, center=False)
-
         def _populate_lines_list(self, recs: List[RecordView], keep_row: Optional[int] = None):
             self._close_line_search_popup()
             self.list_lines.blockSignals(True)
@@ -71,18 +75,14 @@ class MainWindowPreviewAndResultsMixin:
                     self.list_lines.setCurrentRow(max(0, min(self.list_lines.count() - 1, keep_row)))
             if hasattr(self, "line_search_edit"):
                 self._filter_lines_list(self.line_search_edit.text())
-
         def refresh_preview(self):
             if self.queue_table.currentRow() >= 0:
                 path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
                 item = next((i for i in self.queue_items if i.path == path), None)
-                # refresh_preview lädt dieselbe sichtbare Seite neu (z. B. Overlay an/aus).
-                # Deshalb vor dem Neuaufbau die aktuellen Canvas-Boxen sichern.
                 if item and item.results:
                     self.load_results(path, persist_current=True)
                 else:
                     self.preview_image(path, persist_current=True)
-
         def on_queue_double_click(self, row, col):
             path = self.queue_table.item(row, QUEUE_COL_FILE).data(Qt.UserRole)
             self.preview_image(path)

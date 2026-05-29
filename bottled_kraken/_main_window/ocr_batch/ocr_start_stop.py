@@ -1,18 +1,21 @@
-"""Mixin für MainWindow: import lines and ocr batch."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    OCRJob,
+    QFileDialog,
+    QMessageBox,
+    QTimer,
+    STATUS_DONE,
+    STATUS_ERROR,
+    STATUS_PROCESSING,
+    STATUS_WAITING,
+    os,
+)
+from bottled_kraken.workers import (
+    ExternalBackendOCRWorker,
+    OCRWorker,
+    get_external_ocr_backend,
+)
 class MainWindowOcrStartStopMixin:
         def _bk_reset_ocr_cancel_state(self, *, reset_processing: bool = True, message: str = None):
-            """Reset after OCR cancellation so a new Kraken OCR run can be started.
-
-            This deliberately resets only OCR state. Queue rows that were still
-            PROCESSING at cancellation time are returned to WAITING, because
-            start_ocr() intentionally ignores PROCESSING rows.
-            """
             try:
                 for flag in ("_ocr_cancel_requested", "_ocr_stop_requested", "_stop_requested", "_cancel_requested"):
                     try:
@@ -54,9 +57,7 @@ class MainWindowOcrStartStopMixin:
                     pass
             except Exception:
                 pass
-
         def _bk_prepare_ocr_start_state(self) -> bool:
-            """Return True if a fresh OCR worker may be started."""
             try:
                 worker = getattr(self, "worker", None)
                 if worker is not None:
@@ -66,7 +67,6 @@ class MainWindowOcrStartStopMixin:
                     except Exception:
                         running = False
                     if running:
-                        # Do not start a second OCR worker on top of a still-running one.
                         try:
                             self.status_bar.showMessage(self._tr("msg_stopping"), 5000)
                         except Exception:
@@ -77,10 +77,6 @@ class MainWindowOcrStartStopMixin:
                     except Exception:
                         pass
                     self.worker = None
-
-                # A previous cancelled run can leave queue rows in PROCESSING.
-                # Those rows must become WAITING again, otherwise start_ocr() has
-                # no valid target and looks as if it were broken.
                 for task in list(getattr(self, "queue_items", []) or []):
                     try:
                         if getattr(task, "status", None) == STATUS_PROCESSING:
@@ -88,7 +84,6 @@ class MainWindowOcrStartStopMixin:
                             self._update_queue_row(task.path)
                     except Exception:
                         pass
-
                 for flag in ("_ocr_cancel_requested", "_ocr_stop_requested", "_stop_requested", "_cancel_requested"):
                     try:
                         setattr(self, flag, False)
@@ -97,7 +92,6 @@ class MainWindowOcrStartStopMixin:
                 return True
             except Exception:
                 return True
-
         def import_lines_for_all_images(self):
             if not self.queue_items:
                 QMessageBox.information(self, self._tr("info_title"), self._tr("info_no_images_loaded"))
@@ -127,7 +121,6 @@ class MainWindowOcrStartStopMixin:
                     self._apply_imported_lines_to_task(task, lines)
                 except Exception as e:
                     self._log(self._tr_log("log_import_error", task.display_name, e))
-
         def start_ocr(self):
             if not self._bk_prepare_ocr_start_state():
                 return
@@ -139,11 +132,7 @@ class MainWindowOcrStartStopMixin:
                 return
             checked_tasks = self._checked_queue_tasks()
             selected_tasks = self._selected_queue_tasks()
-            # Priorität: Checkmarks vor Auswahl
             target_tasks = checked_tasks if checked_tasks else selected_tasks
-            # Falls in der Queue nichts markiert/ausgewählt ist:
-            # auf die aktuell geladene Datei zurückfallen,
-            # damit Re-OCR nach Zeilenbearbeitung trotzdem funktioniert.
             if not target_tasks:
                 current_task = self._current_task()
                 if current_task and current_task.status in (STATUS_WAITING, STATUS_ERROR, STATUS_DONE):
@@ -152,8 +141,6 @@ class MainWindowOcrStartStopMixin:
                 tasks = []
                 for it in target_tasks:
                     if it.status in (STATUS_WAITING, STATUS_ERROR, STATUS_DONE):
-                        # WICHTIG:
-                        # Beim normalen "Start Kraken OCR" alte Split-/Overlay-Boxen ignorieren
                         it.preset_bboxes = []
                         if it.status != STATUS_WAITING:
                             it.status = STATUS_WAITING
@@ -187,20 +174,15 @@ class MainWindowOcrStartStopMixin:
                 reading_direction=self.reading_direction,
                 export_format="pdf",
                 export_dir=self.current_export_dir,
-                preset_bboxes_by_path={},  # normales Re-OCR ohne alte Split-Boxen
+                preset_bboxes_by_path={},
                 auto_revision_enabled=bool(getattr(self, "kraken_auto_revision_enabled", False)),
                 auto_revision_replacements=str(getattr(self, "kraken_auto_revision_replacements", "") or ""),
             )
-            # CPU-Release: CUDA/ROCm laufen optional über externe Backend-Installer.
-            # Wenn ein externes Backend installiert und funktionsfähig ist, wird der
-            # Kraken-OCR-Lauf an dessen Worker-Prozess delegiert. Sonst bleibt der
-            # interne CPU-OCRWorker aktiv.
             external_backend = None
             if self.device_str == "cuda":
                 external_backend = get_external_ocr_backend("nvidia-cuda", refresh=True)
             elif self.device_str == "rocm":
                 external_backend = get_external_ocr_backend("amd-rocm", refresh=True)
-
             if external_backend and external_backend.ok:
                 self.worker = ExternalBackendOCRWorker(job, external_backend)
                 self._log(self._tr_log("log_ocr_started", len(paths), f"{self.device_str} ({external_backend.detail})", self.reading_direction))
@@ -212,7 +194,6 @@ class MainWindowOcrStartStopMixin:
                     if "cpu" in self.hw_actions:
                         self.hw_actions["cpu"].setChecked(True)
                 self.worker = OCRWorker(job)
-
             self.worker.file_started.connect(self.on_file_started)
             self.worker.file_done.connect(self.on_file_done)
             self.worker.file_error.connect(self.on_file_error)
@@ -224,13 +205,10 @@ class MainWindowOcrStartStopMixin:
             if not isinstance(self.worker, ExternalBackendOCRWorker):
                 self._log(self._tr_log("log_ocr_started", len(paths), self.device_str, self.reading_direction))
             self.worker.start()
-
         def on_device_resolved(self, dev_str: str):
             self.status_bar.showMessage(self._tr("msg_using_device", dev_str))
-
         def on_gpu_info(self, info: str):
             self.status_bar.showMessage(self._tr("msg_detected_gpu", info))
-
         def stop_ocr(self):
             worker = getattr(self, "worker", None)
             if worker and worker.isRunning():
@@ -261,8 +239,6 @@ class MainWindowOcrStartStopMixin:
                     self.status_bar.showMessage(self._tr("msg_stopping"))
                 except Exception:
                     pass
-                # Safety net: if the worker does not emit finished_batch quickly,
-                # force it to stop and reset the UI/queue state.
                 def _force_cancelled_ocr_cleanup():
                     w = getattr(self, "worker", None)
                     try:

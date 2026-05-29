@@ -1,3 +1,2 @@
-from .theme_language import MainWindowThemeLanguageAndReadingDirectionMixin
-
+from bottled_kraken._main_window.theme_language import MainWindowThemeLanguageAndReadingDirectionMixin
 __all__ = ['MainWindowThemeLanguageAndReadingDirectionMixin']

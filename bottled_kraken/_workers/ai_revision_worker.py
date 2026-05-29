@@ -1,10 +1,11 @@
-"""Zusammengesetzter AI-Revision-Worker."""
-from ..shared import *
-from .ai_revision_analysis import AIRevisionAnalysisMixin
-from .ai_revision_requests import AIRevisionRequestsMixin
-from .ai_revision_runtime import AIRevisionRuntimeMixin
-from .ai_revision_response_parsing import AIRevisionResponseParsingMixin
-
+from bottled_kraken.common import (
+    QThread,
+    Signal,
+)
+from bottled_kraken._workers.ai_revision_analysis import AIRevisionAnalysisMixin
+from bottled_kraken._workers.ai_revision_requests import AIRevisionRequestsMixin
+from bottled_kraken._workers.ai_revision_runtime import AIRevisionRuntimeMixin
+from bottled_kraken._workers.ai_revision_response_parsing import AIRevisionResponseParsingMixin
 class AIRevisionWorker(
     AIRevisionRuntimeMixin,
     AIRevisionResponseParsingMixin,
@@ -12,10 +13,7 @@ class AIRevisionWorker(
     AIRevisionAnalysisMixin,
     QThread,
 ):
-    finished_revision = Signal(str, list)  # path, revised_lines
-
-    failed_revision = Signal(str, str)  # path, error
-
-    progress_changed = Signal(int)  # 0..100
-
-    status_changed = Signal(str)  # live text
+    finished_revision = Signal(str, list)
+    failed_revision = Signal(str, str)
+    progress_changed = Signal(int)
+    status_changed = Signal(str)

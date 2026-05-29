@@ -1,29 +1,28 @@
-"""Mixin für MainWindow: line editing and overlay sync."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import (
+    QDialog,
+    QMessageBox,
+    STATUS_DONE,
+    STATUS_EXPORTING,
+)
+from bottled_kraken.dialogs import (
+    ExportModeDialog,
+    ExportSelectFilesDialog,
+)
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QWidget
-
 class MainWindowOverlayExportFlowMixin:
         def on_export_file_started(self, display_name: str, current: int, total: int):
             task = next((i for i in self.queue_items if i.display_name == display_name), None)
             if task:
                 task.status = STATUS_EXPORTING
                 self._update_queue_row(task.path)
-
         def export_flow(self, fmt: str):
             if fmt == "pdf":
                 self._export_pdf_flow()
                 return
-
             checked_tasks = self._checked_queue_tasks()
             selected_tasks = self._selected_queue_tasks()
-            # Priorität: Checkmarks vor Auswahl
             target_tasks = checked_tasks if checked_tasks else selected_tasks
             if target_tasks:
-                # genau 1 Datei -> normaler "Speichern unter"-Dialog
                 if len(target_tasks) == 1:
                     it = target_tasks[0]
                     if it.status != STATUS_DONE or not it.results:
@@ -31,7 +30,6 @@ class MainWindowOverlayExportFlowMixin:
                         return
                     self._export_single_interactive(it, fmt)
                     return
-                # mehrere Dateien -> Batch-Export in Ordner
                 items = []
                 for it in target_tasks:
                     if it.status != STATUS_DONE or not it.results:

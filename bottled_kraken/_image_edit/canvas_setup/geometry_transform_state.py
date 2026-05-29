@@ -1,12 +1,16 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QPointF,
+    QRectF,
+    math,
+    np,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 from PySide6.QtGui import QPolygonF
-from ..warp_mesh_utils import default_warp_grid, warp_map_rect_point
-
+from bottled_kraken._image_edit.warp_mesh_utils import default_warp_grid, warp_map_rect_point
 class ImageEditCanvasGeometryTransformStateMixin:
         def _transform_point_current(self, pt: QPointF) -> QPointF:
-            """Transforms a selection point using the current free-transform state."""
             if not self.has_active_transform() or self.transform_src_rect is None or not self.transform_quad:
                 return QPointF(pt)
             src = self.transform_src_rect
@@ -15,10 +19,6 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 grid = self._warp_grid_tuples()
                 x, y = warp_map_rect_point((src.left(), src.top(), src.right(), src.bottom()), grid, pt.x(), pt.y())
                 return QPointF(x, y)
-
-            # Projective mapping from source rectangle to current transform quad.
-            # This matches the actual PIL perspective transformation much better
-            # than the previous bilinear approximation.
             try:
                 src_pts = [
                     (float(src.left()), float(src.top())),
@@ -48,44 +48,30 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 x = (1-u)*(1-v)*q0.x() + u*(1-v)*q1.x() + u*v*q2.x() + (1-u)*v*q3.x()
                 y = (1-u)*(1-v)*q0.y() + u*(1-v)*q1.y() + u*v*q2.y() + (1-u)*v*q3.y()
                 return QPointF(x, y)
-
         def transformed_selection_polygon(self) -> Optional[List[QPointF]]:
             pts = [QPointF(p) for p in (self.transform_src_polygon or self.selection_polygon or [])]
             if len(pts) >= 2:
                 return [self._transform_point_current(p) for p in pts]
-
-            # Während einer aktiven freien Transformation darf NICHT die laufend
-            # veränderte selection_rect als Quelle benutzt werden. Sonst wird der
-            # Rahmen beim Zoomen/Skew/Perspektive erneut aus der schon transformierten
-            # Bounding-Box berechnet und verschiebt/verzieht sich sichtbar.
             if self.has_active_transform() and self.transform_src_rect is not None:
                 r = self.transform_src_rect
             else:
                 r = self.selection_rect
-
             if r is not None:
                 pts = [r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft()]
                 return [self._transform_point_current(p) for p in pts]
             return None
-
         def selection_exists(self) -> bool:
             return self.selection_rect is not None
-
         def has_active_transform(self) -> bool:
             return bool(self.free_transform_active and self.transform_quad and self.transform_src_rect)
-
         def _default_warp_grid_points(self) -> List[QPointF]:
             r = self.transform_src_rect or self.selection_rect
             if r is None:
                 return []
-            # UI-Warp nutzt ein 5x5-Mesh. Die 9 inneren Punkte liegen wirklich
-            # innerhalb des Auswahlbereichs; der Rand bleibt dadurch unverändert,
-            # solange nicht explizit Rand-/Eckpunkte gezogen werden.
             return [
                 QPointF(r.left() + r.width() * (col / 4.0), r.top() + r.height() * (row / 4.0))
                 for row in range(5) for col in range(5)
             ]
-
         def _warp_grid_points_from_quad(self, quad=None) -> List[QPointF]:
             q = [QPointF(p) for p in (quad or self.transform_quad or [])]
             if len(q) != 4:
@@ -97,44 +83,31 @@ class ImageEditCanvasGeometryTransformStateMixin:
                     (1-u)*(1-v)*q0.y() + u*(1-v)*q1.y() + u*v*q2.y() + (1-u)*v*q3.y(),
                 )
             return [bilinear(col / 4.0, row / 4.0) for row in range(5) for col in range(5)]
-
         def _warp_grid_points(self) -> List[QPointF]:
             pts = getattr(self, "transform_warp_grid", None)
             if pts and len(pts) in (9, 25):
                 if len(pts) == 25:
                     return [QPointF(p) for p in pts]
-                # Alte 3x3-Zwischenstände defensiv auf das neue 5x5-Mesh migrieren.
                 q = [QPointF(pts[0]), QPointF(pts[2]), QPointF(pts[8]), QPointF(pts[6])]
                 self.transform_warp_grid = self._warp_grid_points_from_quad(q)
                 return [QPointF(p) for p in self.transform_warp_grid]
             pts = self._warp_grid_points_from_quad()
             self.transform_warp_grid = [QPointF(p) for p in pts]
             return pts
-
         def _warp_grid_tuples(self):
             return [(float(p.x()), float(p.y())) for p in self._warp_grid_points()]
-
         def _warp_free_drag_weights(self, p: QPointF) -> List[float]:
-            """Weights for dragging any arbitrary point inside the warp area.
-
-            No additional mesh points are inserted. The existing 3x3 control mesh is
-            pulled with a compact radial falloff around the clicked image position.
-            The strongest affected existing control point receives weight 1.0 so the
-            drag feels direct even when the click is between the visible handles.
-            """
             src = self.transform_src_rect or self.selection_rect
             if src is None or src.width() <= 1.0 or src.height() <= 1.0:
                 return [0.0] * 25
             try:
                 u = max(0.0, min(1.0, (float(p.x()) - float(src.left())) / max(1.0, float(src.width()))))
                 v = max(0.0, min(1.0, (float(p.y()) - float(src.top())) / max(1.0, float(src.height()))))
-                # Grid-Koordinaten passend zur 5x5-Anordnung.
                 anchors = [(col / 4.0, row / 4.0) for row in range(5) for col in range(5)]
                 radius = 0.72
                 weights = []
                 for au, av in anchors:
                     dist = math.hypot((u - au), (v - av))
-                    # glatter, kompakter Falloff; außerhalb des Radius bleibt ein Punkt stabil
                     weight = max(0.0, 1.0 - dist / radius) ** 2
                     weights.append(weight)
                 max_w = max(weights) if weights else 0.0
@@ -143,11 +116,9 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 return [max(0.0, min(1.0, float(w))) for w in weights]
             except Exception:
                 return [0.0] * 25
-
         def _move_warp_grid_by(self, dx: float, dy: float):
             pts = self._warp_grid_points()
             self.transform_warp_grid = [QPointF(p.x() + dx, p.y() + dy) for p in pts]
-
         def start_free_transform(self) -> bool:
             if self.selection_rect is None:
                 return False
@@ -166,7 +137,6 @@ class ImageEditCanvasGeometryTransformStateMixin:
             self.update()
             self.changed.emit()
             return True
-
         def cancel_free_transform(self):
             self.free_transform_active = False
             self.transform_src_rect = None
@@ -179,7 +149,6 @@ class ImageEditCanvasGeometryTransformStateMixin:
             self.transform_warp_grid = None
             self.update()
             self.changed.emit()
-
         def _ensure_transform_inside(self):
             if self.view_image is None or not self.transform_quad:
                 return
@@ -193,20 +162,16 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 self.transform_warp_grid = [QPointF(max(0.0, min(float(w), p.x())), max(0.0, min(float(h), p.y()))) for p in grid]
             if self.transform_src_rect is not None:
                 self.transform_src_rect = self._clamp_rect(self.transform_src_rect)
-
         def _transform_corner_anchor_index(self, idx: int) -> int:
             return {0: 2, 1: 3, 2: 0, 3: 1}.get(int(idx), 2)
-
         def _transform_horizontal_partner_index(self, idx: int) -> int:
             return {0: 1, 1: 0, 2: 3, 3: 2}.get(int(idx), 0)
-
         def _rect_from_anchor_and_point(self, anchor: QPointF, point: QPointF) -> QRectF:
             left = min(anchor.x(), point.x())
             right = max(anchor.x(), point.x())
             top = min(anchor.y(), point.y())
             bottom = max(anchor.y(), point.y())
             return QRectF(left, top, max(5.0, right - left), max(5.0, bottom - top))
-
         def _uniform_scale_rect(self, base_rect: QRectF, idx: int, point: QPointF) -> QRectF:
             ratio = max(1e-6, float(base_rect.width()) / max(1e-6, float(base_rect.height())))
             if idx in (0, 1, 2, 3):
@@ -226,7 +191,6 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 new_point = QPointF(anchor.x() + sx * width, anchor.y() + sy * height)
                 return self._rect_from_anchor_and_point(anchor, new_point)
             return QRectF(base_rect)
-
         def _axis_locked_scale_rect(self, base_rect: QRectF, idx: int, point: QPointF) -> QRectF:
             axis = getattr(self, '_transform_scale_axis_lock', None)
             if axis is None:
@@ -246,20 +210,19 @@ class ImageEditCanvasGeometryTransformStateMixin:
                 else:
                     new_point.setX(self._transform_drag_points[idx].x())
                 return self._rect_from_anchor_and_point(anchor, new_point)
-            if idx == 0:  # top edge
+            if idx == 0:
                 if axis == 'y':
                     r.setTop(min(point.y(), r.bottom() - 5))
-            elif idx == 1:  # right edge
+            elif idx == 1:
                 if axis == 'x':
                     r.setRight(max(point.x(), r.left() + 5))
-            elif idx == 2:  # bottom edge
+            elif idx == 2:
                 if axis == 'y':
                     r.setBottom(max(point.y(), r.top() + 5))
-            elif idx == 3:  # left edge
+            elif idx == 3:
                 if axis == 'x':
                     r.setLeft(min(point.x(), r.right() - 5))
             return r
-
         def get_transform_state_norm(self) -> Optional[dict]:
             if not self.has_active_transform() or self.view_image is None:
                 return None
@@ -291,7 +254,6 @@ class ImageEditCanvasGeometryTransformStateMixin:
                     for p in (getattr(self, "transform_src_polygon", None) or getattr(self, "selection_polygon", None) or [])
                 ],
             }
-
         def restore_transform_state_norm(self, state: Optional[dict]):
             if not state or self.view_image is None:
                 if state is None:

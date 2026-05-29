@@ -26,7 +26,9 @@ BK_LM_OCR_TRANSLATIONS_DE = {
     'ai_status_fix46_fullpage_context': '1/3: Kompletter LM-Seiten-OCR wird nur als Kontext gelesen: {}',
     'ai_status_fix46_overlay_line': '2/3: Overlay-Box {}/{} wird mit Kraken-OCR an das lokale Modell gesendet: {}',
     'ai_prompt_overlay_compare_system': 'Du bist ein präziser OCR- und Korrekturassistent. Du erhältst genau einen Bildausschnitt: die Overlay-Box einer einzelnen ausgewählten Zeile. Lies ausschließlich diesen Ausschnitt neu. Vergleiche dein eigenes OCR-Ergebnis mit der vorhandenen Kraken-OCR-Zeile. Kraken-OCR und dein Box-OCR sind gleichwertige Quellen. Ergänze nur fehlende Informationen an der richtigen Position. Kürze niemals Namen, Orte, Daten, Altersangaben oder Zahlen. Gib ausschließlich gültiges JSON zurück: {"text":"..."}.',
-    'ai_prompt_overlay_compare_user': 'Zeilen-ID: {}\n\nVorhandene Kraken-OCR-Zeile:\n{}\n\nKompletter LM-Seiten-OCR nur als Kontext, nicht als Ersatz:\n{}\n\nAufgabe:\n1. Lies die übermittelte Overlay-Box selbst neu.\n2. Vergleiche dein Box-OCR mit der Kraken-OCR-Zeile.\n3. Wenn in Kraken etwas fehlt, ergänze es an der passenden Stelle.\n4. Wenn dein Box-OCR unsicher oder kürzer ist, behalte die Kraken-Zeile.\n5. Gib genau eine vollständige Zeile zurück, keine Erklärung, kein Markdown.\n\nWichtig: Wiederholungszeichen sind nur echte Anführungszeichen wie " oder "" oder -"-. Punkte oder Punktreihen sind keine Wiederholungszeichen. Ein Wiederholungszeichen bedeutet: Wert vertikal darüber an derselben Bildposition übernehmen.',
+    'ai_prompt_overlay_compare_user': (
+        'Zeilen-ID: {}\n\nVorhandene Kraken-OCR-Zeile:\n{}\n\nKompletter LM-Seiten-OCR nur als Kontext, nicht als Ersatz:\n{}\n\nAufgabe:\n1. Lies die übermittelte Overlay-Box selbst neu.\n2. Vergleiche dein Box-OCR mit der Kraken-OCR-Zeile.\n3. Wenn in Kraken etwas fehlt, ergänze es an der passenden Stelle.\n4. Wenn dein Box-OCR unsicher oder kürzer ist, behalte die Kraken-Zeile.\n5. Gib genau eine vollständige Zeile zurück, keine Erklärung, kein Markdown.\n\nWichtig: Wiederholungszeichen sind nur echte Anführungszeichen wie " oder "" oder -"-. Punkte oder Punktreihen sind keine Wiederholungszeichen. Ein Wiederholungszeichen bedeutet: Wert vertikal darüber an derselben Bildposition übernehmen.'
+),
     'ai_status_fix48_mandatory_page_ocr': '1/3 Pflichtschritt: kompletter LM-Seiten-OCR als Kontext für {0}',
     'export_format_odt': 'LibreOffice Writer (.odt)',
     'msg_odt_export_done': 'ODT exportiert: {}',
@@ -35,7 +37,9 @@ BK_LM_OCR_TRANSLATIONS_DE = {
     'prompt_desc_sqlite_system': 'Systemanweisung für die lokale KI zur SQLite-kompatiblen Extraktion von Personen- und Registerdaten.',
     'prompt_desc_sqlite_user': 'Benutzeranweisung für SQLite-Daten: extrahiert Personen, Einträge, Alter, Orte, Jahre und Belege in ein flaches JSON für Tabellen.',
     'ai_prompt_sqlite_system': 'Du bist ein präziser Extraktionsassistent. Erzeuge ausschließlich valides JSON für einen SQLite-Export. Keine Markdown-Erklärung.',
-    'ai_prompt_sqlite_user': 'Extrahiere aus dem OCR-Text eine SQLite-kompatible Struktur mit documents, persons und entries. Jede erkannte Person/Registrierung soll einen eigenen Eintrag bekommen. Bewahre Namen, Alter, Orte, Jahreszahlen, Datumsangaben und den Originalbeleg. OCR-Text:\n{}',
+    'ai_prompt_sqlite_user': (
+        'Extrahiere aus dem OCR-Text eine SQLite-kompatible Struktur mit documents, persons und entries. Jede erkannte Person/Registrierung soll einen eigenen Eintrag bekommen. Bewahre Namen, Alter, Orte, Jahreszahlen, Datumsangaben und den Originalbeleg. OCR-Text:\n{}'
+),
     'busy_queue_ref': 'Wartebereich #{}',
     'lm_menu_lm_ocr_boxes': 'LM Seiten OCR + Boxen',
     'dlg_ai_ocr_boxes_title': 'LM Seiten OCR + Boxen',
@@ -47,5 +51,7 @@ BK_LM_OCR_TRANSLATIONS_DE = {
     'ai_status_page_boxes_done': 'LM Seiten OCR + Boxen abgeschlossen: {}',
     'info_lm_ocr_boxes_done_hint': 'LM Seiten OCR + Boxen wurde abgeschlossen. Die vorhandenen Overlay-Boxen wurden beibehalten. Für jede vorhandene Box wurde genau eine neue Textzeile aus dem LM-Seiten-OCR zugeordnet. Es wurden keine zusätzlichen Zeilen erzeugt und keine vorhandenen Zeilen gelöscht.',
     'ai_prompt_page_boxes_align_system': 'Du bist ein präziser OCR-Zuordnungsassistent. Ordne die Zeilen eines kompletten LM-Seiten-OCR exakt den vorhandenen Overlay-Boxen zu. Die Box-OCR-Texte und bisherigen Texte sind nur Anker zur Zuordnung. Die endgültigen Texte sollen aus dem kompletten Seiten-OCR stammen. Gib ausschließlich gültiges JSON zurück.',
-    'ai_prompt_page_boxes_align_user': 'Es gibt exakt {0} vorhandene Overlay-Boxen. Gib exakt {0} Ergebniszeilen zurück: eine für jede Box mit idx 0 bis {1}. Erzeuge keine zusätzlichen Zeilen und lasse keine Box aus. Nutze die Box-OCR-Texte nur zur Zuordnung; der finale Text soll aus dem LM-Seiten-OCR stammen. Wenn keine passende Seiten-OCR-Zeile existiert, verwende den besten Box-/Alttext.\n\nLM-Seiten-OCR-Zeilen:\n{2}\n\nOverlay-Box-Anker:\n{3}\n\nAntwortformat ausschließlich JSON: {{"lines":[{{"idx":0,"text":"..."}}]}}',
+    'ai_prompt_page_boxes_align_user': (
+        'Es gibt exakt {0} vorhandene Overlay-Boxen. Gib exakt {0} Ergebniszeilen zurück: eine für jede Box mit idx 0 bis {1}. Erzeuge keine zusätzlichen Zeilen und lasse keine Box aus. Nutze die Box-OCR-Texte nur zur Zuordnung; der finale Text soll aus dem LM-Seiten-OCR stammen. Wenn keine passende Seiten-OCR-Zeile existiert, verwende den besten Box-/Alttext.\n\nLM-Seiten-OCR-Zeilen:\n{2}\n\nOverlay-Box-Anker:\n{3}\n\nAntwortformat ausschließlich JSON: {{"lines":[{{"idx":0,"text":"..."}}]}}'
+),
 }

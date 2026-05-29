@@ -1,24 +1,26 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    List,
+    QThread,
+    Signal,
+    Tuple,
+    fitz,
+    gc,
+    math,
+    os,
+    traceback,
+)
 MAX_KRAKEN_OCR_LINES = 500
-
 class PDFRenderWorker(QThread):
-    progress = Signal(int, int, str)  # current, total, pdf_path
-    finished_pdf = Signal(str, list)  # pdf_path, out_paths
-    failed_pdf = Signal(str, str)  # pdf_path, error_message
-
+    progress = Signal(int, int, str)
+    finished_pdf = Signal(str, list)
+    failed_pdf = Signal(str, str)
     @staticmethod
     def _max_render_pixels() -> int:
-        # Zielgrenze für temporär gerenderte PDF-Seiten.
-        # 80 MP liegt unter der ursprünglichen Pillow-Warnschwelle und verhindert
-        # bei sehr großen Scan-PDFs unnötige Warnungen sowie RAM-Spitzen.
         raw = os.environ.get("BOTTLED_KRAKEN_PDF_RENDER_MAX_PIXELS", "80000000")
         try:
             return max(20_000_000, int(raw))
         except Exception:
             return 80_000_000
-
     @staticmethod
     def _min_render_dpi() -> int:
         raw = os.environ.get("BOTTLED_KRAKEN_PDF_RENDER_MIN_DPI", "180")
@@ -26,7 +28,6 @@ class PDFRenderWorker(QThread):
             return max(96, int(raw))
         except Exception:
             return 180
-
     @classmethod
     def _matrix_for_page(cls, page, requested_dpi: int) -> Tuple[fitz.Matrix, int]:
         dpi = max(72, int(requested_dpi or 300))
@@ -39,12 +40,10 @@ class PDFRenderWorker(QThread):
             dpi = max(cls._min_render_dpi(), int(dpi * scale))
             zoom = dpi / 72.0
         return fitz.Matrix(zoom, zoom), dpi
-
     def __init__(self, pdf_path: str, dpi: int = 300, parent=None):
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.dpi = int(dpi)
-
     def run(self):
         out_paths: List[str] = []
         try:
@@ -65,7 +64,6 @@ class PDFRenderWorker(QThread):
                     out = os.path.join(tmp_dir, f"{base}_p{i + 1:04d}.png")
                     pix.save(out)
                     out_paths.append(out)
-                    # MuPDF-Pixmaps explizit freigeben; bei großen PDFs verhindert das Speicheranstieg.
                     pix = None
                     page = None
                     if (i + 1) % 10 == 0:
@@ -76,7 +74,6 @@ class PDFRenderWorker(QThread):
                     self.progress.emit(i + 1, total, pdf_path)
             finally:
                 doc.close()
-            # auch wenn abgebrochen -> "fertig" mit dem was da ist
             self.finished_pdf.emit(pdf_path, out_paths)
         except Exception:
             self.failed_pdf.emit(self.pdf_path, traceback.format_exc())

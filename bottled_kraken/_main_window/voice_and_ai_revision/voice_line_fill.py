@@ -1,10 +1,13 @@
-"""Mixin für MainWindow: undo voice fill and ai revision."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    QMessageBox,
+    RecordView,
+    STATUS_DONE,
+    STATUS_ERROR,
+    os,
+)
+from bottled_kraken.dialogs import (
+    VoiceRecordDialog,
+)
 class MainWindowVoiceLineFillMixin:
         def run_voice_line_fill(self):
             task = self._current_task()
@@ -53,15 +56,12 @@ class MainWindowVoiceLineFillMixin:
             self.voice_record_dialog.stop_requested.connect(self.stop_voice_line_fill)
             self.voice_record_dialog.cancel_requested.connect(self._cancel_voice_record_dialog)
             self.voice_record_dialog.show()
-
         def on_voice_progress_changed(self, value: int):
             self._set_progress_idle(value)
-
         def on_voice_status_changed(self, text: str):
             self.status_bar.showMessage(text)
             if text.startswith("Erkannte Sprache:"):
                 self._log(text)
-
         def stop_voice_line_fill(self):
             if self.voice_worker and self.voice_worker.isRunning():
                 self.status_bar.showMessage(self._tr("msg_voice_stopped"))
@@ -74,7 +74,6 @@ class MainWindowVoiceLineFillMixin:
                     self.voice_record_dialog._keep_start_button_primary()
                 self._set_progress_idle(0)
                 self.voice_worker.stop()
-
         def on_voice_line_fill_done(self, path: str, line_index: int, new_text: str):
             task = next((i for i in self.queue_items if i.path == path), None)
             self.voice_worker = None
@@ -103,10 +102,8 @@ class MainWindowVoiceLineFillMixin:
             )
             task.edited = True
             task.status = STATUS_DONE
-            # Nach Whisper-Änderung UI aktualisieren
             self._sync_ui_after_recs_change(task, keep_row=line_index)
             self._update_queue_row(path)
-            # Automatisch auf nächste Zeile springen
             next_row = line_index + 1
             if 0 <= next_row < len(new_recs):
                 self.list_lines.blockSignals(True)
@@ -118,11 +115,9 @@ class MainWindowVoiceLineFillMixin:
                 self.list_lines.blockSignals(False)
                 self.canvas.select_indices([next_row], center=True)
                 self.list_lines.setFocus()
-                # Dialog offen lassen, damit man direkt weiter aufnehmen kann
                 if self.voice_record_dialog:
                     self.voice_record_dialog.set_recording_state(False)
             else:
-                # letzte Zeile erreicht -> Dialog schließen
                 if self.voice_record_dialog:
                     self.voice_record_dialog.close()
                     self.voice_record_dialog = None
@@ -132,9 +127,7 @@ class MainWindowVoiceLineFillMixin:
                 f"Sprachimport abgeschlossen: {os.path.basename(path)} | "
                 f"Zeile {line_index + 1} -> {new_text}"
             )
-
         def on_voice_line_fill_failed(self, path: str, msg: str):
-            # Schutz gegen doppelte Ausführung
             if self.voice_worker is None:
                 return
             task = next((i for i in self.queue_items if i.path == path), None)

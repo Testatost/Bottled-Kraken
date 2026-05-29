@@ -1,27 +1,114 @@
-"""FR translations for lm_options_texts."""
-
-BK_LM_OPTIONS_TRANSLATIONS_FR = {'act_lm_token_settings': 'Définir les limites de tokens des modèles locaux', 'act_lm_prompt_settings': 'Modifier les prompts pour l’IA locale', 'dlg_lm_token_title': 'Limites de tokens LM locales', 'dlg_lm_token_hint': 'Ces valeurs définissent la longueur maximale de réponse de l’IA locale pour chaque fonction LM.', 'lm_token_current_line': 'Réviser la ligne actuelle', 'lm_token_selected_lines': 'Réviser les lignes sélectionnées', 'lm_token_all_lines': 'Réviser toutes les lignes', 'lm_token_lm_ocr': 'OCR de page LM', 'lm_token_gedcom': 'Fichier GEDCOM', 'btn_restore_defaults': 'Valeurs par défaut', 'msg_lm_tokens_saved': 'Limites de tokens LM locales enregistrées.', 'dlg_lm_prompts_title': 'Modifier les prompts de l’IA locale', 'dlg_lm_prompts_hint': 'Sélectionnez un prompt à gauche, modifiez-le à droite puis enregistrez. Conservez les espaces réservés comme {} et les accolades JSON doublées {{...}}.', 'lm_prompt_single_system': 'Ligne actuelle – prompt système', 'lm_prompt_single_user': 'Ligne actuelle – prompt utilisateur', 'lm_prompt_block_system': 'Lignes sélectionnées/toutes les lignes – prompt système de bloc', 'lm_prompt_block_user': 'Lignes sélectionnées/toutes les lignes – prompt utilisateur de bloc', 'lm_prompt_page_system': 'Toutes les lignes – prompt système de page', 'lm_prompt_page_user': 'Toutes les lignes – prompt utilisateur de page', 'lm_prompt_decision_system': 'Toutes les lignes – prompt système de décision', 'lm_prompt_decision_user': 'Toutes les lignes – prompt utilisateur de décision', 'lm_prompt_fullpage_ocr_system': 'OCR de page LM – prompt système', 'lm_prompt_fullpage_ocr_user': 'OCR de page LM – prompt utilisateur', 'lm_prompt_gedcom_system': 'GEDCOM – prompt système', 'lm_prompt_gedcom_user': 'GEDCOM – prompt utilisateur', 'btn_save': 'Enregistrer', 'btn_close': 'Fermer', 'btn_reset_selected_prompt': 'Réinitialiser le prompt sélectionné', 'btn_reset_all_prompts': 'Réinitialiser tous les prompts', 'msg_lm_prompts_saved': 'Prompts de l’IA locale enregistrés.', 'msg_lm_prompt_reset': 'Le prompt a été réinitialisé au prompt par défaut.', 'msg_lm_prompts_reset_all': 'Tous les prompts de l’IA locale ont été réinitialisés.', 'help_nav_overview': 'Vue d’ensemble', 'help_h1_overview': 'Vue d’ensemble', 'act_lm_custom_context': 'Consignes / listes / contexte', 'dlg_lm_custom_context_title': 'Consignes / listes / contexte', 'dlg_lm_custom_context_hint': 'Des listes de référence et consignes optionnelles peuvent être enregistrées ici, par exemple des noms de famille, lieux, métiers fréquents ou abréviations. Ces indications sont ajoutées automatiquement aux prompts utilisateur de l’IA locale.', 'dlg_lm_custom_context_placeholder': 'Exemple :\nNoms de famille : Müller, Schmidt, Hoffmann\nLieux : Leipzig, Markranstädt, Taucha\nRemarques : tenir compte du s long ; noms de mois latins possibles', 'btn_clear': 'Vider', 'msg_lm_custom_context_saved': 'Consignes IA enregistrées.', 'msg_lm_custom_context_cleared': 'Consignes IA vidées.', 'lm_custom_context_appendix': 'Consignes/listes de référence supplémentaires :\n{}\n\nUtilise ces indications uniquement comme aide à la décision pour les lectures incertaines de noms, lieux et termes récurrents. N’invente pas d’informations qui ne sont pas visibles dans l’image.', 'lm_token_canonical': 'Générer le JSON canonique', 'lm_prompt_canonical_system': 'JSON canonique – prompt système', 'lm_prompt_canonical_user': 'JSON canonique – prompt utilisateur', 'section_local_ocr_prompts': 'Prompts locaux OCR/révision', 'section_gedcom_prompts': 'GEDCOM – méthode principale recommandée', 'section_canonical_prompts': 'JSON canonique / graphe – prompts', 'section_structured_json_prompts': 'Prompts JSON structuré / graphe', 'lm_prompt_postgresql_system': 'JSON PostgreSQL – prompt système', 'lm_prompt_postgresql_user': 'JSON PostgreSQL – prompt utilisateur', 'lm_prompt_neo4j_system': 'JSON Neo4j – prompt système', 'lm_prompt_neo4j_user': 'JSON Neo4j – prompt utilisateur', 'prompt_group_structured_json': 'Prompts JSON structuré / graphe', 'prompt_desc_canonical_system': 'Consigne système pour le JSON canonique. Le modèle extrait une structure de graphe unifiée et vérifiable à partir du texte OCR.', 'prompt_desc_canonical_user': 'Consigne utilisateur pour le JSON canonique. Conserver les espaces réservés {schema_template} et {ocr_text}.', 'prompt_desc_postgresql_system': 'Consigne système pour le JSON PostgreSQL. Le modèle crée des tables JSON relationnelles pour les personnes, lieux, années et relations.', 'prompt_desc_postgresql_user': 'Consigne utilisateur pour le JSON PostgreSQL. Conserver les espaces réservés {schema_template} et {ocr_text}.', 'prompt_desc_neo4j_system': 'Consigne système pour le JSON Neo4j. Le modèle crée des nœuds et relations pour une base de données graphe.', 'prompt_desc_neo4j_user': 'Consigne utilisateur pour le JSON Neo4j. Conserver les espaces réservés {schema_template} et {ocr_text}.', 'export_format_odt': 'LibreOffice Writer (.odt)', 'msg_odt_export_done': 'ODT exporté : {}', 'lm_prompt_sqlite_system': 'SQLite – prompt système', 'lm_prompt_sqlite_user': 'SQLite – prompt utilisateur', 'prompt_desc_sqlite_system': 'Instruction système pour l’extraction locale par IA de données de personnes et de registres compatibles SQLite.', 'prompt_desc_sqlite_user': 'Instruction utilisateur pour SQLite : extrait personnes, entrées, âges, lieux, années et preuves dans des tables JSON plates.', 'ai_prompt_sqlite_system': 'Tu es un assistant d’extraction précis. Retourne uniquement du JSON valide pour un export SQLite. Aucune explication Markdown.', 'ai_prompt_sqlite_user': 'Extrais du texte OCR une structure compatible SQLite avec documents, persons et entries. Chaque personne/inscription détectée doit avoir son propre enregistrement. Conserve les noms, âges, lieux, années, dates et le justificatif original. Texte OCR :\n{}'}
-
-# PATCH17_LM_PAGE_OCR_PROMPT_UPDATE_FR
-BK_LM_OPTIONS_TRANSLATIONS_FR.update({'lm_token_lm_ocr': 'OCR de page LM (sans boîtes overlay)', 'lm_prompt_fullpage_ocr_system': 'OCR de page LM (sans boîtes overlay) – prompt système', 'lm_prompt_fullpage_ocr_user': 'OCR de page LM (sans boîtes overlay) – prompt utilisateur', 'lm_prompt_page_boxes_align_system': 'OCR de page LM avec boîtes overlay – prompt système d’alignement', 'lm_prompt_page_boxes_align_user': 'OCR de page LM avec boîtes overlay – prompt utilisateur d’alignement', 'prompt_desc_fullpage_ocr_system': 'Instruction système pour l’OCR de page LM sans boîtes overlay : le modèle vision lit toute la page et crée de nouvelles lignes indépendamment des boîtes existantes.', 'prompt_desc_fullpage_ocr_user': 'Instruction utilisateur pour l’OCR de page LM sans boîtes overlay. Le modèle doit renvoyer des lignes simples ; les boîtes overlay existantes sont volontairement ignorées et ne sont pas réutilisées ensuite.', 'prompt_desc_page_boxes_align_system': 'Instruction système pour l’OCR de page LM avec boîtes overlay : le modèle associe exactement les lignes de l’OCR de page complète aux boîtes overlay existantes.', 'prompt_desc_page_boxes_align_user': 'Instruction utilisateur pour l’OCR de page LM avec boîtes overlay. Conservez les espaces réservés pour le nombre de boîtes, les lignes OCR de page et les ancres des boîtes overlay.'})
-
-
-# PATCH17_LM_BEHAVIOR_OPTIONS_FR
-BK_LM_OPTIONS_TRANSLATIONS_FR.update({'btn_cancel': 'Annuler', 'act_lm_behavior_settings': 'Comportement LM', 'dlg_lm_behavior_title': 'Configurer le comportement LM', 'dlg_lm_behavior_hint': 'Ces paramètres définissent comment le modèle local effectue la révision LM pour chaque mode de ligne.', 'lm_behavior_scope_current': 'Ligne actuelle', 'lm_behavior_scope_selected': 'Lignes sélectionnées', 'lm_behavior_scope_all': 'Toutes les lignes', 'lm_behavior_group_sources': 'Sources OCR et contexte', 'lm_behavior_page_ocr': 'Utiliser l’OCR de page complet comme contexte', 'lm_behavior_use_overlay': 'Respecter la boîte overlay pour la relecture', 'lm_behavior_script_mode': 'Préréglage écriture/contexte :', 'lm_behavior_pad_x': 'Pixels supplémentaires gauche/droite :', 'lm_behavior_pad_y': 'Pixels supplémentaires haut/bas :', 'lm_behavior_extra_y': 'Contexte vertical supplémentaire :', 'lm_behavior_apply_preset': 'Appliquer le préréglage', 'lm_behavior_weight': 'Pondération :', 'lm_behavior_weight_kraken': 'OCR Kraken > OCR LM', 'lm_behavior_weight_lm': 'OCR LM > OCR Kraken', 'lm_behavior_filters': 'Filtres pour la sortie LM :', 'lm_behavior_filters_placeholder': 'Une entrée par ligne, ou séparée par virgules/points-virgules. Ces caractères ou mots sont supprimés de la sortie LM.', 'msg_lm_behavior_saved': 'Comportement LM enregistré.', 'lm_behavior_overlay_prompt': 'ID de ligne : {}\n\nLigne OCR Kraken existante :\n{}\n\nContexte de page, si activé :\n{}\n\nTâche :\n1. Relis uniquement l’extrait d’image transmis.\n2. Respecte les limites overlay et de contexte configurées.\n3. Ne prends aucun mot ou caractère d’une zone qui n’est pas dans l’extrait d’image.\n4. Retourne exactement une ligne complète, sans explication ni Markdown.'})
-
-
-# PATCH17_LM_REVISION_MODE_FR
-BK_LM_OPTIONS_TRANSLATIONS_FR.update({
+BK_LM_OPTIONS_TRANSLATIONS_FR = {
+    'act_lm_token_settings': 'Nombre de tokens',
+    'act_lm_prompt_settings': 'Réglages des prompts',
+    'dlg_lm_token_title': 'Limites de tokens LM locales',
+    'dlg_lm_token_hint': 'Ces valeurs définissent la longueur maximale de réponse de l’IA locale pour chaque fonction LM.',
+    'lm_token_current_line': 'Réviser la ligne actuelle',
+    'lm_token_selected_lines': 'Réviser les lignes sélectionnées',
+    'lm_token_all_lines': 'Réviser toutes les lignes',
+    'lm_token_lm_ocr': 'OCR de page LM (sans boîtes overlay)',
+    'lm_token_gedcom': 'Fichier GEDCOM',
+    'btn_restore_defaults': 'Valeurs par défaut',
+    'msg_lm_tokens_saved': 'Limites de tokens LM locales enregistrées.',
+    'dlg_lm_prompts_title': 'Modifier les prompts de l’IA locale',
+    'dlg_lm_prompts_hint': 'Sélectionnez un prompt à gauche, modifiez-le à droite puis enregistrez. Conservez les espaces réservés comme {} et les accolades JSON doublées {{...}}.',
+    'lm_prompt_single_system': 'Ligne actuelle – prompt système',
+    'lm_prompt_single_user': 'Ligne actuelle – prompt utilisateur',
+    'lm_prompt_block_system': 'Lignes sélectionnées/toutes les lignes – prompt système de bloc',
+    'lm_prompt_block_user': 'Lignes sélectionnées/toutes les lignes – prompt utilisateur de bloc',
+    'lm_prompt_page_system': 'Toutes les lignes – prompt système de page',
+    'lm_prompt_page_user': 'Toutes les lignes – prompt utilisateur de page',
+    'lm_prompt_decision_system': 'Toutes les lignes – prompt système de décision',
+    'lm_prompt_decision_user': 'Toutes les lignes – prompt utilisateur de décision',
+    'lm_prompt_fullpage_ocr_system': 'OCR de page LM (sans boîtes overlay) – prompt système',
+    'lm_prompt_fullpage_ocr_user': 'OCR de page LM (sans boîtes overlay) – prompt utilisateur',
+    'lm_prompt_gedcom_system': 'GEDCOM – prompt système',
+    'lm_prompt_gedcom_user': 'GEDCOM – prompt utilisateur',
+    'btn_save': 'Enregistrer',
+    'btn_close': 'Fermer',
+    'btn_reset_selected_prompt': 'Réinitialiser le prompt sélectionné',
+    'btn_reset_all_prompts': 'Réinitialiser tous les prompts',
+    'msg_lm_prompts_saved': 'Prompts de l’IA locale enregistrés.',
+    'msg_lm_prompt_reset': 'Le prompt a été réinitialisé au prompt par défaut.',
+    'msg_lm_prompts_reset_all': 'Tous les prompts de l’IA locale ont été réinitialisés.',
+    'help_nav_overview': 'Vue d’ensemble',
+    'help_h1_overview': 'Vue d’ensemble',
+    'act_lm_custom_context': 'Consignes / listes / contexte',
+    'dlg_lm_custom_context_title': 'Consignes / listes / contexte',
+    'dlg_lm_custom_context_hint': 'Des listes de référence et consignes optionnelles peuvent être enregistrées ici, par exemple des noms de famille, lieux, métiers fréquents ou abréviations. Ces indications sont ajoutées automatiquement aux prompts utilisateur de l’IA locale.',
+    'dlg_lm_custom_context_placeholder': (
+        'Exemple :\nNoms de famille : Müller, Schmidt, Hoffmann\nLieux : Leipzig, Markranstädt, Taucha\nRemarques : tenir compte du s long ; noms de mois latins possibles'
+),
+    'btn_clear': 'Vider',
+    'msg_lm_custom_context_saved': 'Consignes IA enregistrées.',
+    'msg_lm_custom_context_cleared': 'Consignes IA vidées.',
+    'lm_custom_context_appendix': (
+        'Consignes/listes de référence supplémentaires :\n{}\n\nUtilise ces indications uniquement comme aide à la décision pour les lectures incertaines de noms, lieux et termes récurrents. N’invente pas d’informations qui ne sont pas visibles dans l’image.'
+),
+    'lm_token_canonical': 'Générer le JSON canonique',
+    'lm_prompt_canonical_system': 'JSON canonique – prompt système',
+    'lm_prompt_canonical_user': 'JSON canonique – prompt utilisateur',
+    'section_local_ocr_prompts': 'Prompts locaux OCR/révision',
+    'section_gedcom_prompts': 'GEDCOM – méthode principale recommandée',
+    'section_canonical_prompts': 'JSON canonique / graphe – prompts',
+    'section_structured_json_prompts': 'Prompts JSON structuré / graphe',
+    'lm_prompt_postgresql_system': 'JSON PostgreSQL – prompt système',
+    'lm_prompt_postgresql_user': 'JSON PostgreSQL – prompt utilisateur',
+    'lm_prompt_neo4j_system': 'JSON Neo4j – prompt système',
+    'lm_prompt_neo4j_user': 'JSON Neo4j – prompt utilisateur',
+    'prompt_group_structured_json': 'Prompts JSON structuré / graphe',
+    'prompt_desc_canonical_system': 'Consigne système pour le JSON canonique. Le modèle extrait une structure de graphe unifiée et vérifiable à partir du texte OCR.',
+    'prompt_desc_canonical_user': 'Consigne utilisateur pour le JSON canonique. Conserver les espaces réservés {schema_template} et {ocr_text}.',
+    'prompt_desc_postgresql_system': 'Consigne système pour le JSON PostgreSQL. Le modèle crée des tables JSON relationnelles pour les personnes, lieux, années et relations.',
+    'prompt_desc_postgresql_user': 'Consigne utilisateur pour le JSON PostgreSQL. Conserver les espaces réservés {schema_template} et {ocr_text}.',
+    'prompt_desc_neo4j_system': 'Consigne système pour le JSON Neo4j. Le modèle crée des nœuds et relations pour une base de données graphe.',
+    'prompt_desc_neo4j_user': 'Consigne utilisateur pour le JSON Neo4j. Conserver les espaces réservés {schema_template} et {ocr_text}.',
+    'export_format_odt': 'LibreOffice Writer (.odt)',
+    'msg_odt_export_done': 'ODT exporté : {}',
+    'lm_prompt_sqlite_system': 'SQLite – prompt système',
+    'lm_prompt_sqlite_user': 'SQLite – prompt utilisateur',
+    'prompt_desc_sqlite_system': 'Instruction système pour l’extraction locale par IA de données de personnes et de registres compatibles SQLite.',
+    'prompt_desc_sqlite_user': 'Instruction utilisateur pour SQLite : extrait personnes, entrées, âges, lieux, années et preuves dans des tables JSON plates.',
+    'ai_prompt_sqlite_system': 'Tu es un assistant d’extraction précis. Retourne uniquement du JSON valide pour un export SQLite. Aucune explication Markdown.',
+    'ai_prompt_sqlite_user': (
+        'Extrais du texte OCR une structure compatible SQLite avec documents, persons et entries. Chaque personne/inscription détectée doit avoir son propre enregistrement. Conserve les noms, âges, lieux, années, dates et le justificatif original. Texte OCR :\n{}'
+),
+    'lm_prompt_page_boxes_align_system': 'OCR de page LM avec boîtes overlay – prompt système d’alignement',
+    'lm_prompt_page_boxes_align_user': 'OCR de page LM avec boîtes overlay – prompt utilisateur d’alignement',
+    'prompt_desc_fullpage_ocr_system': 'Instruction système pour l’OCR de page LM sans boîtes overlay : le modèle vision lit toute la page et crée de nouvelles lignes indépendamment des boîtes existantes.',
+    'prompt_desc_fullpage_ocr_user': 'Instruction utilisateur pour l’OCR de page LM sans boîtes overlay. Le modèle doit renvoyer des lignes simples ; les boîtes overlay existantes sont volontairement ignorées et ne sont pas réutilisées ensuite.',
+    'prompt_desc_page_boxes_align_system': 'Instruction système pour l’OCR de page LM avec boîtes overlay : le modèle associe exactement les lignes de l’OCR de page complète aux boîtes overlay existantes.',
+    'prompt_desc_page_boxes_align_user': 'Instruction utilisateur pour l’OCR de page LM avec boîtes overlay. Conservez les espaces réservés pour le nombre de boîtes, les lignes OCR de page et les ancres des boîtes overlay.',
+    'btn_cancel': 'Annuler',
+    'act_lm_behavior_settings': 'Paramètres : révision',
+    'dlg_lm_behavior_title': 'Configurer le comportement LM',
+    'dlg_lm_behavior_hint': 'Ces paramètres définissent comment le modèle local effectue la révision LM pour chaque mode de ligne.',
+    'lm_behavior_scope_current': 'Ligne actuelle',
+    'lm_behavior_scope_selected': 'Lignes sélectionnées',
+    'lm_behavior_scope_all': 'Toutes les lignes',
+    'lm_behavior_group_sources': 'Sources OCR et contexte',
+    'lm_behavior_page_ocr': 'Utiliser l’OCR de page complet comme contexte',
+    'lm_behavior_use_overlay': 'Respecter la boîte overlay pour la relecture',
+    'lm_behavior_script_mode': 'Préréglage écriture/contexte :',
+    'lm_behavior_pad_x': 'Pixels supplémentaires gauche/droite :',
+    'lm_behavior_pad_y': 'Pixels supplémentaires haut/bas :',
+    'lm_behavior_extra_y': 'Contexte vertical supplémentaire :',
+    'lm_behavior_apply_preset': 'Appliquer le préréglage',
     'lm_behavior_weight': 'Révision :',
-    'lm_behavior_weight_revision': 'OCR Kraken (source) révisé par LM',
     'lm_behavior_weight_kraken': 'OCR Kraken > OCR LM',
     'lm_behavior_weight_lm': 'OCR LM > OCR Kraken',
-    'lm_behavior_revision_prompt': 'ID de ligne : {}\n\nOCR Kraken comme source :\n{}\n\nContexte de page, si activé :\n{}\n\nTâche :\n1. Utilise la ligne OCR Kraken comme source principale.\n2. Compare-la avec l’extrait d’image transmis et le contexte activé.\n3. Corrige seulement les erreurs OCR visibles, caractères manquants, caractères erronés ou mauvaises coupures de mots.\n4. Si aucune amélioration sûre n’est possible, retourne la ligne OCR Kraken inchangée.\n5. Ne prends aucun mot ou caractère dans les zones hors de l’extrait d’image.\n6. Retourne exactement une ligne complète, sans explication ni Markdown.',
-})
-
-
-# PATCH_UI_FINAL_20260525_LM_FR
-BK_LM_OPTIONS_TRANSLATIONS_FR.update({'act_lm_token_settings': 'Nombre de tokens', 'act_lm_prompt_settings': 'Réglages des prompts', 'act_lm_custom_context': 'Consignes / listes / contexte', 'act_lm_behavior_settings': 'Paramètres : révision'})
-
-# PATCH_TOKEN_DIALOG_EXTRA_ROWS_20260526_FR
-BK_LM_OPTIONS_TRANSLATIONS_FR.update({'lm_token_lm_ocr_boxes': 'OCR de page LM avec boîtes overlay', 'lm_token_postgresql_json': 'JSON PostgreSQL', 'lm_token_neo4j_json': 'JSON Neo4j', 'lm_token_sqlite_json': 'JSON SQLite'})
+    'lm_behavior_filters': 'Filtres pour la sortie LM :',
+    'lm_behavior_filters_placeholder': 'Une entrée par ligne, ou séparée par virgules/points-virgules. Ces caractères ou mots sont supprimés de la sortie LM.',
+    'msg_lm_behavior_saved': 'Comportement LM enregistré.',
+    'lm_behavior_overlay_prompt': (
+        'ID de ligne : {}\n\nLigne OCR Kraken existante :\n{}\n\nContexte de page, si activé :\n{}\n\nTâche :\n1. Relis uniquement l’extrait d’image transmis.\n2. Respecte les limites overlay et de contexte configurées.\n3. Ne prends aucun mot ou caractère d’une zone qui n’est pas dans l’extrait d’image.\n4. Retourne exactement une ligne complète, sans explication ni Markdown.'
+),
+    'lm_behavior_weight_revision': 'OCR Kraken (source) révisé par LM',
+    'lm_behavior_revision_prompt': (
+        'ID de ligne : {}\n\nOCR Kraken comme source :\n{}\n\nContexte de page, si activé :\n{}\n\nTâche :\n1. Utilise la ligne OCR Kraken comme source principale.\n2. Compare-la avec l’extrait d’image transmis et le contexte activé.\n3. Corrige seulement les erreurs OCR visibles, caractères manquants, caractères erronés ou mauvaises coupures de mots.\n4. Si aucune amélioration sûre n’est possible, retourne la ligne OCR Kraken inchangée.\n5. Ne prends aucun mot ou caractère dans les zones hors de l’extrait d’image.\n6. Retourne exactement une ligne complète, sans explication ni Markdown.'
+),
+    'lm_token_lm_ocr_boxes': 'OCR de page LM avec boîtes overlay',
+    'lm_token_postgresql_json': 'JSON PostgreSQL',
+    'lm_token_neo4j_json': 'JSON Neo4j',
+    'lm_token_sqlite_json': 'JSON SQLite',
+}

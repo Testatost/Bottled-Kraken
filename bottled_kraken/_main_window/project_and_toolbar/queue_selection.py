@@ -1,15 +1,20 @@
-"""Mixin für MainWindow: project persistence and queue selection."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QCheckBox,
+    QHBoxLayout,
+    QTableWidgetItem,
+    QUEUE_COL_CHECK,
+    QUEUE_COL_FILE,
+    QUEUE_COL_NUM,
+    QWidget,
+    Qt,
+    TaskItem,
+)
 import math
-
 class MainWindowQueueSelectionMixin:
         def _queue_check_col_width(self) -> int:
             return 34
-
         def _make_queue_checkbox_widget(self, checked: bool = False) -> QWidget:
             wrap = QWidget()
             lay = QHBoxLayout(wrap)
@@ -22,14 +27,12 @@ class MainWindowQueueSelectionMixin:
             lay.addWidget(cb)
             wrap.setStyleSheet("background: transparent;")
             return wrap
-
         def _queue_checkbox_at_row(self, row: int) -> Optional[QCheckBox]:
             wrap = self.queue_table.cellWidget(row, QUEUE_COL_CHECK)
             if wrap is None:
                 return None
             cb = wrap.findChild(QCheckBox)
             return cb
-
         def _refresh_queue_numbers(self):
             for row in range(self.queue_table.rowCount()):
                 item = self.queue_table.item(row, QUEUE_COL_NUM)
@@ -39,11 +42,7 @@ class MainWindowQueueSelectionMixin:
                     item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                     self.queue_table.setItem(row, QUEUE_COL_NUM, item)
                 item.setText(str(row + 1))
-
         def on_queue_current_cell_changed(self, currentRow, currentColumn, previousRow, previousColumn):
-            # Bevor die neue Seite geladen wird, die aktuell sichtbaren Overlay-Boxen
-            # in die zuletzt geladene Task zurückschreiben. currentRow zeigt hier
-            # bereits auf die neue Seite; deshalb wird intern _loaded_preview_path genutzt.
             try:
                 self._persist_loaded_preview_bboxes()
             except Exception:
@@ -56,7 +55,6 @@ class MainWindowQueueSelectionMixin:
             path = item.data(Qt.UserRole)
             if path:
                 self.preview_image(path, persist_current=False)
-
         def _checked_queue_rows(self) -> List[int]:
             rows = []
             for row in range(self.queue_table.rowCount()):
@@ -64,7 +62,6 @@ class MainWindowQueueSelectionMixin:
                 if cb is not None and cb.isChecked():
                     rows.append(row)
             return rows
-
         def _set_all_queue_checkmarks(self, checked: bool):
             for row in range(self.queue_table.rowCount()):
                 cb = self._queue_checkbox_at_row(row)
@@ -73,7 +70,6 @@ class MainWindowQueueSelectionMixin:
                     cb.setChecked(bool(checked))
                     cb.blockSignals(False)
             self._update_queue_check_header()
-
         def _toggle_all_queue_checkmarks(self):
             total_rows = self.queue_table.rowCount()
             if total_rows == 0:
@@ -82,7 +78,6 @@ class MainWindowQueueSelectionMixin:
             checked_rows = len(self._checked_queue_rows())
             should_check_all = checked_rows != total_rows
             self._set_all_queue_checkmarks(should_check_all)
-
         def _checked_queue_tasks(self) -> List[TaskItem]:
             out = []
             for row in self._checked_queue_rows():
@@ -94,7 +89,6 @@ class MainWindowQueueSelectionMixin:
                 if task:
                     out.append(task)
             return out
-
         def _selected_queue_tasks(self) -> List[TaskItem]:
             rows = self.queue_table.selectionModel().selectedRows()
             if not rows:

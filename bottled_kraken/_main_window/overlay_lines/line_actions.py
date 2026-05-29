@@ -1,11 +1,13 @@
-"""Mixin für MainWindow: line editing and overlay sync."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import (
+    BBox,
+    List,
+    Optional,
+    QInputDialog,
+    RecordView,
+    TaskItem,
+    Tuple,
+)
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QWidget
-
 class MainWindowLineActionsMixin:
         def _move_line_to_dialog(self, task: TaskItem, row: int):
             if not task.results:
@@ -25,7 +27,6 @@ class MainWindowLineActionsMixin:
             if not ok:
                 return
             self._move_line_to(task, row, target - 1)
-
         def _move_line_to(self, task: TaskItem, from_row: int, to_row: int):
             if not task.results:
                 return
@@ -41,7 +42,6 @@ class MainWindowLineActionsMixin:
             recs.insert(to_row, rv)
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=to_row)
-
         def _delete_line(self, task: TaskItem, row: int):
             if not task.results:
                 return
@@ -53,7 +53,6 @@ class MainWindowLineActionsMixin:
             task.edited = True
             next_row = min(row, len(recs) - 1) if recs else None
             self._sync_ui_after_recs_change(task, keep_row=next_row)
-
         def _add_line(self, task: TaskItem, insert_row: int):
             new_text, ok = QInputDialog.getText(self, self._tr("dlg_new_line_title"), self._tr("dlg_new_line_label"))
             if not ok:
@@ -70,10 +69,8 @@ class MainWindowLineActionsMixin:
             self._pending_new_line_box = False
             self._pending_box_for_row = insert_row
             self.canvas.start_draw_box_mode()
-
         def on_canvas_select_line(self, idx: int):
             self.on_rect_clicked(idx)
-
         def _split_text_by_ratio(self, text: str, ratio: float) -> Tuple[str, str]:
             txt = (text or "").strip()
             if not txt:
@@ -99,7 +96,6 @@ class MainWindowLineActionsMixin:
             left = " ".join(words[:best_i]).strip()
             right = " ".join(words[best_i:]).strip()
             return left, right
-
         def _bbox_intersection(self, a: Optional[BBox], b: Optional[BBox]) -> Tuple[int, int, int]:
             if not a or not b:
                 return 0, 0, 0
@@ -114,7 +110,6 @@ class MainWindowLineActionsMixin:
             iw = ix1 - ix0
             ih = iy1 - iy0
             return iw * ih, iw, ih
-
         def _split_text_by_multiple_ratios(self, text: str, ratios: List[float]) -> List[str]:
             txt = (text or "").strip()
             if not txt:
@@ -133,7 +128,6 @@ class MainWindowLineActionsMixin:
                 cut = int(round(total_words * r))
                 cut = max(1, min(total_words - 1, cut))
                 cut_indices.append(cut)
-            # doppelte Schnittstellen bereinigen
             clean_cuts = []
             last = 0
             for cut in cut_indices:

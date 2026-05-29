@@ -1,10 +1,12 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
-
+from bottled_kraken.common import (
+    QApplication,
+    QPointF,
+    QRectF,
+    Qt,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 class ImageEditCanvasCropZoomResizeMixin:
         def begin_crop_drag_from_widget_pos(self, widget_pos):
-            """Startet einen neuen Crop-Bereich, der sofort mit linker Maustaste gezogen werden kann."""
             if self.view_image is None:
                 return
             p = self._widget_to_image(QPointF(widget_pos))
@@ -21,7 +23,6 @@ class ImageEditCanvasCropZoomResizeMixin:
             self.drag_start = QPointF(p)
             self.update()
             self.changed.emit()
-
         def wheelEvent(self, event):
             if self.base_image is None:
                 return
@@ -29,14 +30,12 @@ class ImageEditCanvasCropZoomResizeMixin:
             if dy == 0:
                 event.accept()
                 return
-
             widget_pos = event.position() if hasattr(event, "position") else QPointF(event.pos())
             old_img_pos = self._widget_to_image(widget_pos)
             old_view_w = float(self.view_pixmap.width()) if self.view_pixmap is not None else 1.0
             old_view_h = float(self.view_pixmap.height()) if self.view_pixmap is not None else 1.0
             rel_x = old_img_pos.x() / max(1.0, old_view_w)
             rel_y = old_img_pos.y() / max(1.0, old_view_h)
-
             old_crops = self.get_all_crops_orig() if hasattr(self, "get_all_crops_orig") else []
             old_crop_idx = getattr(self, "selected_crop_index", -1)
             old_erase = self.get_erase_orig() if self.show_erase else None
@@ -46,10 +45,8 @@ class ImageEditCanvasCropZoomResizeMixin:
                 if hasattr(self, "get_selection_state_orig") and getattr(self, "show_selection", False)
                 else (self.get_selection_orig() if getattr(self, "show_selection", False) else None)
             )
-
             self.zoom = max(0.2, min(6.0, self.zoom * (1.1 if dy > 0 else 0.9)))
             self._update_view_image()
-
             if self.view_pixmap is not None:
                 new_view_w = float(self.view_pixmap.width())
                 new_view_h = float(self.view_pixmap.height())
@@ -61,7 +58,6 @@ class ImageEditCanvasCropZoomResizeMixin:
                 self._pan_y = widget_pos.y() - base_y - target_y
                 self._clamp_pan()
                 self._update_image_offset()
-
             self.set_crops_from_orig(old_crops, old_crop_idx)
             if old_erase:
                 self.set_erase_from_orig(old_erase)
@@ -81,7 +77,6 @@ class ImageEditCanvasCropZoomResizeMixin:
             self.update()
             self.changed.emit()
             event.accept()
-
         def _wheel_zoom_delta(self, event) -> int:
             angle_delta = event.angleDelta()
             dy = int(angle_delta.y())
@@ -96,7 +91,6 @@ class ImageEditCanvasCropZoomResizeMixin:
                 if dx != 0:
                     return dx
             return 0
-
         def resizeEvent(self, event):
             old_crops = self.get_all_crops_orig()
             old_crop_idx = getattr(self, "selected_crop_index", -1)

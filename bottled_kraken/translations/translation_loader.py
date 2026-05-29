@@ -1,20 +1,9 @@
-"""Dynamic loader for translation packages.
-
-Language modules are plain Python files containing dictionaries. Each flat
-``dict[str, str]`` is merged into that language. New languages are therefore
-added by creating ``translations/<language-code>/`` with the same kind of
-modules; no central import list has to be edited.
-"""
-
 from __future__ import annotations
-
 import copy
 import importlib
 import pkgutil
 from typing import Dict, Iterable, List, Mapping
-
-from .language_registry import available_language_codes
-
+from bottled_kraken.translations.language_registry import available_language_codes
 LANGUAGE_MODULE_ORDER = [
     "common_actions_and_buttons",
     "ai_prompt_texts",
@@ -40,7 +29,6 @@ LANGUAGE_MODULE_ORDER = [
     "gedcom_texts",
     "runtime_ui_texts",
 ]
-
 PATCH_MODULE_OUTPUTS = {
     "additional_translations": ["ADDITIONAL_TRANSLATIONS"],
     "lm_wait_texts": ["BK_LM_WAIT_TEXT_TRANSLATIONS"],
@@ -64,16 +52,13 @@ PATCH_MODULE_OUTPUTS = {
         "BK_GEDCOM_TRANSLATIONS",
     ],
 }
-
 def _package_name() -> str:
     return __package__ or "bottled_kraken.translations"
-
 def _is_flat_translation_dict(value: object) -> bool:
     return isinstance(value, dict) and all(
         isinstance(key, str) and not isinstance(item, dict)
         for key, item in value.items()
     )
-
 def _language_module_names(language: str) -> List[str]:
     try:
         package = importlib.import_module(f"{_package_name()}.{language}")
@@ -90,17 +75,13 @@ def _language_module_names(language: str) -> List[str]:
     except Exception:
         discovered = []
     if not discovered:
-        # Frozen PyInstaller builds may not expose a physical package path.
-        # Try the known module order directly; missing modules are ignored later.
         discovered = list(LANGUAGE_MODULE_ORDER)
     order_index = {name: index for index, name in enumerate(LANGUAGE_MODULE_ORDER)}
     return sorted(dict.fromkeys(discovered), key=lambda name: (order_index.get(name, 10_000), name))
-
 def _dicts_from_module(module: object) -> Iterable[dict]:
     for name, value in vars(module).items():
         if name.isupper() and _is_flat_translation_dict(value):
             yield value
-
 def load_language_translations(language: str) -> Dict[str, str]:
     data: Dict[str, str] = {}
     for module_name in _language_module_names(language):
@@ -111,10 +92,8 @@ def load_language_translations(language: str) -> Dict[str, str]:
         for mapping in _dicts_from_module(module):
             data.update(copy.deepcopy(mapping))
     return data
-
 def load_all_language_translations() -> Dict[str, Dict[str, str]]:
     return {code: load_language_translations(code) for code in available_language_codes()}
-
 def _matches_named_mapping(name: str, logical_name: str, language: str) -> bool:
     suffix = "_" + language.upper()
     if name == logical_name:
@@ -122,7 +101,6 @@ def _matches_named_mapping(name: str, logical_name: str, language: str) -> bool:
     if name == logical_name + suffix:
         return True
     return name.endswith(suffix) and name[:-len(suffix)] == logical_name
-
 def load_named_language_mapping(module_name: str, logical_name: str) -> Dict[str, Dict[str, str]]:
     combined: Dict[str, Dict[str, str]] = {}
     for language in available_language_codes():
@@ -138,7 +116,6 @@ def load_named_language_mapping(module_name: str, logical_name: str) -> Dict[str
         if merged:
             combined[language] = merged
     return combined
-
 def load_translation_sections() -> List[Dict[str, Dict[str, str]]]:
     sections: list[Dict[str, Dict[str, str]]] = []
     for module_name in LANGUAGE_MODULE_ORDER:
@@ -147,10 +124,7 @@ def load_translation_sections() -> List[Dict[str, Dict[str, str]]]:
             if section:
                 sections.append(section)
     return sections
-
-# Backwards compatible alias for older imports.
 load_patch_sections = load_translation_sections
-
 __all__ = [
     "LANGUAGE_MODULE_ORDER",
     "PATCH_MODULE_OUTPUTS",

@@ -1,10 +1,9 @@
-"""Mixin für MainWindow: AI-Batch-Callbacks."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import (
+    RecordView,
+    STATUS_DONE,
+    STATUS_ERROR,
+    os,
+)
 class MainWindowAiBatchCallbacksMixin:
     def on_ai_batch_file_done(self, path: str, revised_lines: list, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
@@ -24,8 +23,6 @@ class MainWindowAiBatchCallbacksMixin:
         self._log(self._tr_log("log_ai_batch_debug_new_first", revised_lines[0] if revised_lines else self._tr("empty_text_marker")))
         self._log(self._tr_log("log_ai_batch_debug_all", revised_lines))
         self._push_undo(task)
-        # WICHTIG:
-        # Texte ersetzen, Boxen aber exakt so behalten wie sie aktuell im Task stehen.
         new_recs = [
             RecordView(i, revised_lines[i], recs[i].bbox)
             for i in range(len(recs))
@@ -45,14 +42,12 @@ class MainWindowAiBatchCallbacksMixin:
             self._sync_ui_after_recs_change(task, keep_row=keep_row)
         self._update_queue_row(path)
         self._log(self._tr_log("log_ai_done", os.path.basename(path)))
-
     def on_ai_batch_file_failed(self, path: str, msg: str, current: int, total: int):
         task = next((i for i in self.queue_items if i.path == path), None)
         if task:
             task.status = STATUS_ERROR
             self._update_queue_row(path)
         self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))
-
     def on_ai_batch_finished(self):
         worker = getattr(self, "ai_batch_worker", None)
         self.ai_batch_worker = None

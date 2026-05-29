@@ -1,6 +1,12 @@
-"""Dialoge für Overlay-Boxen."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    Optional,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QSpinBox,
+    QVBoxLayout,
+    Tuple,
+)
 class OverlayBoxDialog(QDialog):
     def __init__(self, tr, img_w: int, img_h: int, bbox: Optional[Tuple[int, int, int, int]] = None, parent=None):
         super().__init__(parent)

@@ -1,10 +1,23 @@
-"""Mixin für MainWindow: export rendering and paths."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import _load_image_color
+from bottled_kraken.common import (
+    Any,
+    BytesIO,
+    Dict,
+    Image,
+    List,
+    RecordView,
+    TaskItem,
+    base64,
+    containers,
+    csv,
+    docx_layout_blocks,
+    html,
+    json,
+    os,
+    pdf_canvas,
+    serialization,
+    table_to_rows,
+)
 class MainWindowExportRenderersMixin:
         def _build_kraken_segmentation_for_export(
                 self,
@@ -40,7 +53,6 @@ class MainWindowExportRenderersMixin:
                 regions=None,
                 line_orders=None,
             )
-
         def _render_hocr_html(self, path: str, item: TaskItem, export_image: Image.Image, record_views: List[RecordView]):
             buf = BytesIO()
             export_image.save(buf, format="PNG")
@@ -132,7 +144,6 @@ class MainWindowExportRenderersMixin:
         """
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html_doc)
-
         def _line_export_entry(self, rv: RecordView, fallback_idx: int) -> Dict[str, Any]:
             idx = int(getattr(rv, "idx", fallback_idx))
             entry: Dict[str, Any] = {
@@ -151,15 +162,12 @@ class MainWindowExportRenderersMixin:
             else:
                 entry.update({"x": None, "y": None, "width": None, "height": None, "bbox": None})
             return entry
-
         def _write_plain_txt_export(self, path: str, record_views: List[RecordView]):
             with open(path, "w", encoding="utf-8") as f:
                 for rv in record_views:
                     line = str(getattr(rv, "text", "") or "")
-                    # Der Plain-TXT-Export soll exakt eine erkannte Zeile pro Textzeile enthalten.
                     line = line.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
                     f.write(line.strip() + "\n")
-
         def _write_structured_txt_export(self, path: str, record_views: List[RecordView]):
             with open(path, "w", encoding="utf-8") as f:
                 f.write("# Bottled Kraken line export\n")
@@ -175,9 +183,7 @@ class MainWindowExportRenderersMixin:
                         json.dumps(entry["text"], ensure_ascii=False),
                     ]
                     f.write("\t".join(cols) + "\n")
-
         def _docx_set_cell_text(self, cell, text: str):
-            # python-docx erzeugt pro Zelle mindestens einen Absatz.
             from docx.shared import Pt
             cell.text = ""
             p = cell.paragraphs[0]
@@ -186,7 +192,6 @@ class MainWindowExportRenderersMixin:
                 run.font.size = Pt(8.5)
             except Exception:
                 pass
-
         def _docx_set_cell_width(self, cell, width_twips: int):
             try:
                 from docx.oxml import OxmlElement
@@ -201,7 +206,6 @@ class MainWindowExportRenderersMixin:
                 tc_w.set(qn("w:type"), "dxa")
             except Exception:
                 pass
-
         def _docx_set_table_layout_fixed(self, table):
             try:
                 from docx.oxml import OxmlElement
@@ -215,7 +219,6 @@ class MainWindowExportRenderersMixin:
                 layout.set(qn("w:type"), "fixed")
             except Exception:
                 pass
-
         def _write_docx_export(self, path: str, item: TaskItem, export_image: Image.Image, record_views: List[RecordView]):
             try:
                 from docx import Document
@@ -223,14 +226,10 @@ class MainWindowExportRenderersMixin:
                 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
             except Exception as e:
                 raise RuntimeError(self._tr("err_docx_missing")) from e
-
             page_w_px, page_h_px = export_image.size
             blocks = docx_layout_blocks(record_views, page_w_px, page_h_px)
             document = Document()
-
             section = document.sections[0]
-            # Eine A4-nahe Breite mit dynamischer Höhe hält historische Scans gut lesbar,
-            # ohne dass Word extrem große Seiten anlegt.
             page_width_in = 8.27
             page_height_in = max(9.0, min(14.0, page_width_in * (page_h_px / max(1, page_w_px))))
             section.page_width = Inches(page_width_in)
@@ -240,13 +239,11 @@ class MainWindowExportRenderersMixin:
             section.right_margin = Inches(margin_in)
             section.top_margin = Inches(margin_in)
             section.bottom_margin = Inches(margin_in)
-
             usable_width_in = max(1.0, page_width_in - (2 * margin_in))
             usable_height_in = max(1.0, page_height_in - (2 * margin_in))
             scale_x = usable_width_in / max(1, page_w_px)
             scale_y = usable_height_in / max(1, page_h_px)
             last_bottom = 0
-
             try:
                 normal_style = document.styles["Normal"]
             except Exception:
@@ -254,12 +251,10 @@ class MainWindowExportRenderersMixin:
             if normal_style is not None:
                 normal_style.font.name = "Arial"
                 normal_style.font.size = Pt(9)
-
             for block in blocks:
                 bb = block.get("bbox")
                 top = int(block.get("top") or (bb[1] if bb else last_bottom))
                 gap_px = max(0, top - int(last_bottom))
-
                 if block.get("type") == "table":
                     rows = block.get("rows") or []
                     if not rows:
@@ -274,8 +269,6 @@ class MainWindowExportRenderersMixin:
                     table.alignment = WD_TABLE_ALIGNMENT.LEFT
                     table.autofit = False
                     self._docx_set_table_layout_fixed(table)
-
-                    # Breiten anhand der Overlay-Positionen annähern.
                     anchors = block.get("anchors") or []
                     if len(anchors) == col_count and page_w_px > 0:
                         bounds = []
@@ -293,7 +286,6 @@ class MainWindowExportRenderersMixin:
                         col_width_twips = [int((w / total) * usable_width_in * 1440) for w in bounds]
                     else:
                         col_width_twips = [int((usable_width_in / max(1, col_count)) * 1440)] * col_count
-
                     for r_idx, row in enumerate(rows):
                         cells = table.rows[r_idx].cells
                         for c_idx in range(col_count):
@@ -307,15 +299,12 @@ class MainWindowExportRenderersMixin:
                     if bb:
                         last_bottom = int(bb[3])
                     continue
-
                 text = str(block.get("text") or "").strip()
                 if not text:
                     continue
                 p = document.add_paragraph()
                 pf = p.paragraph_format
                 if bb:
-                    # Einzug aus der Overlay-Box ableiten. Dadurch bleiben Listen, Spaltenanfänge
-                    # und Formularfelder im DOCX visuell näher an der Vorlage.
                     pf.left_indent = Inches(max(0.0, float(bb[0]) * scale_x))
                     line_height_pt = max(7.0, min(18.0, (float(bb[3] - bb[1]) * scale_y * 72.0) * 0.78))
                     pf.line_spacing = Pt(line_height_pt)
@@ -328,7 +317,6 @@ class MainWindowExportRenderersMixin:
                     run.font.size = Pt(9)
                 except Exception:
                     pass
-
             try:
                 document.save(path)
             except PermissionError as e:
@@ -336,14 +324,12 @@ class MainWindowExportRenderersMixin:
                     f"DOCX konnte nicht gespeichert werden:\n{path}\n\n"
                     "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
                 ) from e
-
         def _render_file(self, path: str, fmt: str, item: TaskItem):
             if not item.results:
                 return
             text, kr_records, pil_image, record_views = item.results
             export_image = _load_image_color(item.path)
             if pil_image is None:
-                # Ergebnisse großer Batches halten kein PIL-Bild mehr im RAM.
                 pil_image = export_image
             if fmt == "txt":
                 self._write_plain_txt_export(path, record_views)

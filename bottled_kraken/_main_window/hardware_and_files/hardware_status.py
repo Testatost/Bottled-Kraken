@@ -1,18 +1,24 @@
-"""Mixin für MainWindow: hardware status and file drop."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import _help_html
+from bottled_kraken.common import (
+    Dict,
+    Optional,
+    QMessageBox,
+    QTextBrowser,
+    QThread,
+    QTimer,
+    Signal,
+    html,
+    isValid,
+)
+from bottled_kraken.workers import (
+    clear_external_ocr_backend_cache,
+)
 class HardwareSnapshotWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
-
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-
     def run(self):
         try:
             try:
@@ -23,7 +29,6 @@ class HardwareSnapshotWorker(QThread):
             self.done.emit(snapshot)
         except Exception as exc:
             self.failed.emit(repr(exc))
-
 class MainWindowHardwareStatusMixin:
         def _build_hardware_requirements_loading_html(self) -> str:
             return (
@@ -40,10 +45,7 @@ class MainWindowHardwareStatusMixin:
                 f'                <div class="small" style="margin-top:8px;">{self._tr("help_hw_check_background")}</div>\n'
                 '            </div>\n'
             )
-
         def _build_hardware_requirements_help_html(self, hw: Optional[Dict[str, object]] = None, *, refresh_backends: bool = False) -> str:
-            # Wenn hw bereits übergeben wird, wurde die Hardwareprüfung schon im
-            # Hintergrund erledigt. Dadurch blockiert der Hinweise-Dialog nicht.
             if hw is None:
                 try:
                     if refresh_backends:
@@ -117,18 +119,14 @@ class MainWindowHardwareStatusMixin:
                 f'                <div class="small" style="margin-top:4px;">{self._tr("help_hw_note")}</div>\n'
                 '            </div>\n'
             )
-
         def _start_help_hardware_refresh(self, quick_browser: QTextBrowser):
-            """Startet die Hardwareprüfung für den Hinweise-Dialog verzögert im Hintergrund."""
             worker = HardwareSnapshotWorker(self)
             self._help_hardware_worker = worker
-
             def _browser_alive() -> bool:
                 try:
                     return bool(quick_browser is not None and isValid(quick_browser))
                 except Exception:
                     return False
-
             def _cleanup():
                 try:
                     worker.deleteLater()
@@ -136,7 +134,6 @@ class MainWindowHardwareStatusMixin:
                     pass
                 if getattr(self, "_help_hardware_worker", None) is worker:
                     self._help_hardware_worker = None
-
             def _finish(hw: Dict[str, object]):
                 try:
                     if _browser_alive():
@@ -148,11 +145,9 @@ class MainWindowHardwareStatusMixin:
                 except Exception:
                     pass
                 _cleanup()
-
             def _failed(_msg: str):
                 try:
                     if _browser_alive():
-                        # Leichter Fallback ohne externe Backend-Aktualisierung, damit auch Fehlerfälle nicht blockieren.
                         html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(
                             refresh_backends=False,
                         )
@@ -160,11 +155,9 @@ class MainWindowHardwareStatusMixin:
                 except Exception:
                     pass
                 _cleanup()
-
             worker.done.connect(_finish)
             worker.failed.connect(_failed)
             QTimer.singleShot(120, worker.start)
-
         def _refresh_hw_menu_availability(self):
             caps = self._gpu_capabilities()
             for dev, act in self.hw_actions.items():
@@ -181,7 +174,6 @@ class MainWindowHardwareStatusMixin:
                     self.device_str = "cpu"
                     if "cpu" in self.hw_actions:
                         self.hw_actions["cpu"].setChecked(True)
-
         def set_device(self, dev: str):
             caps = self._gpu_capabilities()
             ok, detail = caps.get(dev, (False, ""))
@@ -199,6 +191,5 @@ class MainWindowHardwareStatusMixin:
                     "cpu": "msg_device_cpu",
                     "cuda": "msg_device_cuda",
                     "rocm": "msg_device_rocm",
-                    "mps": "msg_device_mps",
                 }.get(dev, "msg_device_cpu")
                 self.status_bar.showMessage(self._tr("msg_device", self._tr(label_key)))

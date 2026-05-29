@@ -1,26 +1,7 @@
-"""Menüverhalten für offen bleibende Hauptmenüs und Untermenüs.
-
-Die Menü-Kette bleibt geöffnet, solange sich der Mauszeiger auf einem der
-folgenden Bereiche befindet:
-
-* auf dem auslösenden Menüleisten-Reiter oder Toolbutton,
-* auf einem geöffneten Menü,
-* auf einem geöffneten Untermenü,
-* auf dem Menüeintrag, der ein Untermenü auslöst.
-
-Zusätzlich wird nach dem Anklicken normaler Menüeinträge die sichtbare
-Menüfamilie kurz wieder geöffnet. Dadurch lassen sich mehrere Optionen
-hintereinander setzen, ohne dass der Benutzer den Menüpfad jedes Mal neu
-ausklappen muss.
-"""
-
 from PySide6.QtCore import QPoint, QRect, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QMenu
-
 class BKStayOpenMenu(QMenu):
-    """QMenu mit stabiler Hover- und Reopen-Logik für verschachtelte Menüs."""
-
     _BK_CLOSE_INTERVAL_MS = 120
     _BK_CLOSE_GRACE_TICKS = 2
     _BK_HIT_PADDING = 5
@@ -53,7 +34,6 @@ class BKStayOpenMenu(QMenu):
             margin: 4px 7px 4px 7px;
         }
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._bk_hover_close_timer = QTimer(self)
@@ -67,7 +47,6 @@ class BKStayOpenMenu(QMenu):
             self.setToolTipsVisible(True)
         except Exception:
             pass
-
     def _bk_apply_compact_style(self) -> None:
         try:
             existing = self.styleSheet().strip()
@@ -76,7 +55,6 @@ class BKStayOpenMenu(QMenu):
                 self.setStyleSheet((existing + "\n" + compact).strip())
         except Exception:
             pass
-
     @staticmethod
     def _dedupe_menus(menus):
         result = []
@@ -90,7 +68,6 @@ class BKStayOpenMenu(QMenu):
             seen.add(key)
             result.append(menu)
         return result
-
     @staticmethod
     def _parent_menu(menu):
         try:
@@ -98,7 +75,6 @@ class BKStayOpenMenu(QMenu):
             return parent if isinstance(parent, QMenu) else None
         except Exception:
             return None
-
     def _ancestor_chain(self):
         chain = []
         menu = self
@@ -106,7 +82,6 @@ class BKStayOpenMenu(QMenu):
             chain.append(menu)
             menu = BKStayOpenMenu._parent_menu(menu)
         return BKStayOpenMenu._dedupe_menus(reversed(chain))
-
     @staticmethod
     def _visible_child_menus(menu):
         children = []
@@ -119,14 +94,12 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         return BKStayOpenMenu._dedupe_menus(children)
-
     def _menu_family(self):
         family = []
         for menu in self._ancestor_chain():
             family.append(menu)
             family.extend(BKStayOpenMenu._visible_child_menus(menu))
         return BKStayOpenMenu._dedupe_menus(family)
-
     @staticmethod
     def _remember_family_positions(family):
         for menu in family or []:
@@ -135,7 +108,6 @@ class BKStayOpenMenu(QMenu):
             except Exception:
                 pass
         return family
-
     @staticmethod
     def _reopen_menu_family(family):
         for menu in family or []:
@@ -145,9 +117,7 @@ class BKStayOpenMenu(QMenu):
                     menu.popup(pos)
             except Exception:
                 pass
-
     def _fit_to_contents(self) -> None:
-        """Korrigiert nur Mindestbreiten; Qt darf die Popup-Breite final bestimmen."""
         try:
             self._bk_apply_compact_style()
             self.ensurePolished()
@@ -155,7 +125,6 @@ class BKStayOpenMenu(QMenu):
             self.setMaximumWidth(16777215)
         except Exception:
             pass
-
         try:
             fm = self.fontMetrics()
             text_width = 0
@@ -170,7 +139,6 @@ class BKStayOpenMenu(QMenu):
                 if action.menu() is not None:
                     width += 18
                 text_width = max(text_width, width)
-
             hint_width = max(self.sizeHint().width(), text_width + self._BK_TEXT_PADDING)
             screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
             if screen is not None:
@@ -181,7 +149,6 @@ class BKStayOpenMenu(QMenu):
             self.adjustSize()
         except Exception:
             pass
-
     @staticmethod
     def _global_widget_rect(widget):
         try:
@@ -189,7 +156,6 @@ class BKStayOpenMenu(QMenu):
             return QRect(top_left, widget.size())
         except Exception:
             return None
-
     @staticmethod
     def _cursor_inside_menu_window(menu, global_pos):
         try:
@@ -199,7 +165,6 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         return False
-
     @staticmethod
     def _action_rect_in_widget(action, widget):
         try:
@@ -211,7 +176,6 @@ class BKStayOpenMenu(QMenu):
             return QRect(widget.mapToGlobal(rect.topLeft()), rect.size())
         except Exception:
             return None
-
     @staticmethod
     def _cursor_on_qmenubar_action(menu, widget, global_pos):
         try:
@@ -222,7 +186,6 @@ class BKStayOpenMenu(QMenu):
             return rect.adjusted(-pad, -pad, pad, pad).contains(global_pos)
         except Exception:
             return False
-
     @staticmethod
     def _cursor_on_qtoolbutton_menu(menu, widget, global_pos):
         try:
@@ -237,7 +200,6 @@ class BKStayOpenMenu(QMenu):
             return rect.adjusted(-pad, -pad, pad, pad).contains(global_pos)
         except Exception:
             return False
-
     @staticmethod
     def _cursor_on_parent_menu_action(menu, global_pos):
         try:
@@ -251,7 +213,6 @@ class BKStayOpenMenu(QMenu):
             return rect.adjusted(-pad, -pad, pad, pad).contains(global_pos)
         except Exception:
             return False
-
     @staticmethod
     def _cursor_between_parent_action_and_submenu(menu, global_pos):
         try:
@@ -271,7 +232,6 @@ class BKStayOpenMenu(QMenu):
             return bridge.contains(global_pos)
         except Exception:
             return False
-
     @staticmethod
     def _associated_widgets(action):
         try:
@@ -281,25 +241,21 @@ class BKStayOpenMenu(QMenu):
             return list(widgets)
         except Exception:
             return []
-
     @staticmethod
     def _cursor_on_known_trigger(menu, global_pos):
         try:
             action = menu.menuAction()
         except Exception:
             return False
-
         if BKStayOpenMenu._cursor_on_parent_menu_action(menu, global_pos):
             return True
         if BKStayOpenMenu._cursor_between_parent_action_and_submenu(menu, global_pos):
             return True
-
         for widget in BKStayOpenMenu._associated_widgets(action):
             if BKStayOpenMenu._cursor_on_qmenubar_action(menu, widget, global_pos):
                 return True
             if BKStayOpenMenu._cursor_on_qtoolbutton_menu(menu, widget, global_pos):
                 return True
-
         try:
             widget = QApplication.widgetAt(global_pos)
         except Exception:
@@ -314,7 +270,6 @@ class BKStayOpenMenu(QMenu):
             except Exception:
                 break
         return False
-
     @staticmethod
     def _cursor_inside_any_menu(family):
         try:
@@ -327,7 +282,6 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         return False
-
     @staticmethod
     def _close_family_if_cursor_outside(family, force=False):
         try:
@@ -340,7 +294,6 @@ class BKStayOpenMenu(QMenu):
             return True
         except Exception:
             return False
-
     def _bk_check_hover_close(self) -> None:
         family = self._menu_family()
         if BKStayOpenMenu._cursor_inside_any_menu(family):
@@ -349,7 +302,6 @@ class BKStayOpenMenu(QMenu):
         self._bk_outside_ticks += 1
         if self._bk_outside_ticks >= self._BK_CLOSE_GRACE_TICKS:
             BKStayOpenMenu._close_family_if_cursor_outside(family, force=True)
-
     def leaveEvent(self, event):
         try:
             family = self._menu_family()
@@ -360,7 +312,6 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         return super().leaveEvent(event)
-
     def showEvent(self, event):
         try:
             self._bk_last_popup_pos = self.pos()
@@ -371,7 +322,6 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         super().showEvent(event)
-
     def hideEvent(self, event):
         try:
             self._bk_hover_close_timer.stop()
@@ -379,7 +329,6 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         super().hideEvent(event)
-
     def popup(self, pos, action=None):
         try:
             self._bk_last_popup_pos = pos
@@ -388,14 +337,12 @@ class BKStayOpenMenu(QMenu):
         except Exception:
             pass
         return super().popup(pos, action)
-
     def mouseReleaseEvent(self, event):
         action = self.activeAction()
         if action is None or not action.isEnabled() or action.isSeparator():
             return super().mouseReleaseEvent(event)
         if action.menu() is not None:
             return super().mouseReleaseEvent(event)
-
         family = BKStayOpenMenu._remember_family_positions(self._menu_family())
         try:
             action.trigger()

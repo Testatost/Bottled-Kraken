@@ -1,8 +1,0 @@
-from .history_and_gray_contrast import ImageEditDialogHistoryGrayContrastMixin
-from .selection_crop_erase import ImageEditDialogSelectionCropEraseMixin
-from .filters_rotation_transform import ImageEditDialogFiltersRotationTransformMixin
-
-class ImageEditDialogActionsMixin(ImageEditDialogHistoryGrayContrastMixin, ImageEditDialogSelectionCropEraseMixin, ImageEditDialogFiltersRotationTransformMixin):
-    pass
-
-__all__ = ['ImageEditDialogActionsMixin', 'ImageEditDialogHistoryGrayContrastMixin', 'ImageEditDialogSelectionCropEraseMixin', 'ImageEditDialogFiltersRotationTransformMixin']

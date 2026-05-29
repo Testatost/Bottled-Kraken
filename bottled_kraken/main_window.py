@@ -1,31 +1,68 @@
-"""Hauptfenster der Anwendung."""
-
-from .shared import *
-from .ui_components import *
-from .workers import *
-from .dialogs import *
-from .image_edit import *
+from bottled_kraken.common import _serialize_ocr_auto_revision_replacements
+from bottled_kraken.common import (
+    Dict,
+    KRAKEN_MODELS_DIR,
+    List,
+    Optional,
+    QAction,
+    QActionGroup,
+    QApplication,
+    QAbstractItemView,
+    QHeaderView,
+    QIcon,
+    QKeySequence,
+    QLabel,
+    QMainWindow,
+    QPlainTextEdit,
+    QProgressBar,
+    QProgressDialog,
+    QPushButton,
+    QSettings,
+    QStatusBar,
+    QStyle,
+    QTimer,
+    QToolButton,
+    Qt,
+    READING_MODES,
+    TaskItem,
+    translation,
+)
+from bottled_kraken.ui_components import (
+    DropQueueTable,
+    ImageCanvas,
+    LinesTreeWidget,
+)
+from bottled_kraken.workers import (
+    AIBatchRevisionWorker,
+    AIRevisionWorker,
+    ExportWorker,
+    OCRWorker,
+    PDFRenderWorker,
+    VoiceLineFillWorker,
+)
+from bottled_kraken.dialogs import (
+    ProgressStatusDialog,
+    VoiceRecordDialog,
+)
 import math
-
-from ._main_window.initialization_and_shutdown import MainWindowInitializationAndShutdownMixin
-from ._main_window.whisper_setup_and_model_selection import MainWindowWhisperSetupAndModelSelectionMixin
-from ._main_window.voice_input_selection_and_ai_selected_lines import MainWindowVoiceInputSelectionAndAiSelectedLinesMixin
-from ._main_window.ai_server_urls_and_model_selection import MainWindowAiServerUrlsAndModelSelectionMixin
-from ._main_window.project_persistence_and_queue_selection import MainWindowProjectPersistenceAndQueueSelectionMixin
-from ._main_window.toolbar_icons_and_local_server_models import MainWindowToolbarIconsAndLocalServerModelsMixin
-from ._main_window.undo_voice_fill_and_ai_revision import MainWindowUndoVoiceFillAndAiRevisionMixin
-from ._main_window.ui_build import MainWindowUiBuildMixin
-from ._main_window.ai_batch_callbacks import MainWindowAiBatchCallbacksMixin
-from ._main_window.menu_setup_and_queue_headers import MainWindowMenuSetupAndQueueHeadersMixin
-from ._main_window.theme_language_and_reading_direction import MainWindowThemeLanguageAndReadingDirectionMixin
-from ._main_window.hardware_status_and_file_drop import MainWindowHardwareStatusAndFileDropMixin
-from ._main_window.queue_context_preview_and_model_loading import MainWindowQueueContextPreviewAndModelLoadingMixin
-from ._main_window.import_lines_and_ocr_batch import MainWindowImportLinesAndOcrBatchMixin
-from ._main_window.line_editing_and_overlay_sync import MainWindowLineEditingAndOverlaySyncMixin
-from ._main_window.export_rendering_and_paths import MainWindowExportRenderingAndPathsMixin
-from ._main_window.whisper_download_help_and_image_edit_queue import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
-from ._main_window.image_edit_application_and_close import MainWindowImageEditApplicationAndCloseMixin
-
+from bottled_kraken._main_window.initialization_and_shutdown import MainWindowInitializationAndShutdownMixin
+from bottled_kraken._main_window.whisper_setup_and_model_selection import MainWindowWhisperSetupAndModelSelectionMixin
+from bottled_kraken._main_window.voice_input_selection_and_ai_selected_lines import MainWindowVoiceInputSelectionAndAiSelectedLinesMixin
+from bottled_kraken._main_window.ai_server_urls_and_model_selection import MainWindowAiServerUrlsAndModelSelectionMixin
+from bottled_kraken._main_window.project_persistence_and_queue_selection import MainWindowProjectPersistenceAndQueueSelectionMixin
+from bottled_kraken._main_window.toolbar_icons_and_local_server_models import MainWindowToolbarIconsAndLocalServerModelsMixin
+from bottled_kraken._main_window.undo_voice_fill_and_ai_revision import MainWindowUndoVoiceFillAndAiRevisionMixin
+from bottled_kraken._main_window.ui_build import MainWindowUiBuildMixin
+from bottled_kraken._main_window.ai_batch_callbacks import MainWindowAiBatchCallbacksMixin
+from bottled_kraken._main_window.menu_setup_and_queue_headers import MainWindowMenuSetupAndQueueHeadersMixin
+from bottled_kraken._main_window.theme_language_and_reading_direction import MainWindowThemeLanguageAndReadingDirectionMixin
+from bottled_kraken._main_window.hardware_status_and_file_drop import MainWindowHardwareStatusAndFileDropMixin
+from bottled_kraken._main_window.queue_context_preview_and_model_loading import MainWindowQueueContextPreviewAndModelLoadingMixin
+from bottled_kraken._main_window.import_lines_and_ocr_batch import MainWindowImportLinesAndOcrBatchMixin
+from bottled_kraken._main_window.line_editing_and_overlay_sync import MainWindowLineEditingAndOverlaySyncMixin
+from bottled_kraken._main_window.export_rendering_and_paths import MainWindowExportRenderingAndPathsMixin
+from bottled_kraken._main_window.whisper_download_help_and_image_edit_queue import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
+from bottled_kraken._main_window.image_edit_application_and_close import MainWindowImageEditApplicationAndCloseMixin
 class MainWindow(
     MainWindowInitializationAndShutdownMixin,
     MainWindowWhisperSetupAndModelSelectionMixin,
@@ -67,12 +104,10 @@ class MainWindow(
             self._detect_system_lang(),
             str
         )
-        # Log-Ausgaben folgen der aktuell eingestellten UI-Sprache.
         self.log_lang = translation.normalize_language_code(self.current_lang)
         self.temp_dirs_created = set()
         QApplication.instance().installEventFilter(self)
         self.ai_worker: Optional[AIRevisionWorker] = None
-        # LM / localhost
         self.ai_model_id = ""
         self.ai_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
         self.ai_base_url = None
@@ -81,7 +116,6 @@ class MainWindow(
         self.ai_mode = ""
         self._ai_single_line_context: Optional[dict] = None
         self.project_file_path = ""
-        # OCR-Korrektur: konservativ und stabil
         self.ai_enable_thinking = False
         self.ai_temperature = 0.0
         self.ai_top_p = 0.2
@@ -89,8 +123,6 @@ class MainWindow(
         self.ai_presence_penalty = 0.0
         self.ai_repetition_penalty = 1.0
         self.ai_min_p = 0.0
-        # Harte Obergrenze für die normale LM-Überarbeitung.
-        # Lokale JSON-Erzeugung und LM OCR setzen weiterhin eigene Mindestwerte.
         self.ai_max_tokens = 1200
         self.ai_model_actions: Dict[str, QAction] = {}
         self.ai_model_group: Optional[QActionGroup] = None
@@ -127,7 +159,6 @@ class MainWindow(
         self.kraken_unknown_models: List[str] = []
         self.current_export_dir = ""
         self.current_theme = self.settings.value("ui/theme", "bright", str)
-        # Dynamisches Verhältnis der Queue-Spaltenbreiten
         self.queue_col_ratio = 0.75
         self._resizing_cols = False
         self.status_bar = QStatusBar()
@@ -145,7 +176,6 @@ class MainWindow(
         self.ai_progress_dialog: Optional[ProgressStatusDialog] = None
         self.hf_download_worker = None
         self.hf_download_dialog = None
-        # Canvas (Bildanzeige)
         self.canvas = ImageCanvas(tr_func=self._tr)
         self.canvas.rect_clicked.connect(self.on_rect_clicked)
         self.canvas.rect_changed.connect(self.on_overlay_rect_changed)
@@ -157,7 +187,6 @@ class MainWindow(
         self.canvas.overlay_select_requested.connect(self.on_canvas_select_line)
         self.canvas.overlay_multi_selected.connect(self.on_canvas_multi_selected)
         self.canvas.box_split_requested.connect(self.on_canvas_split_box)
-        # Wartebereich-Tabelle
         self.queue_table = DropQueueTable()
         self.queue_table.setColumnCount(4)
         self.queue_table.verticalHeader().setVisible(False)
@@ -180,17 +209,14 @@ class MainWindow(
         header.sectionResized.connect(self._on_queue_header_resized)
         header.sectionClicked.connect(self._on_queue_header_clicked)
         self.queue_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # Header-Schrift im Wartebereich nicht fett
         header_font = header.font()
         header_font.setBold(False)
         header.setFont(header_font)
-        # Hinweis-Overlay für den Wartebereich
         self.queue_hint = QLabel(self._tr("queue_drop_hint"), self.queue_table.viewport())
         self.queue_hint.setAlignment(Qt.AlignCenter)
         self.queue_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.queue_hint.setStyleSheet("color: rgba(180,180,180,180); font-style: italic;")
         self.queue_hint.hide()
-        # Zeilenliste
         self.list_lines = LinesTreeWidget(tr_func=self._tr)
         self.list_lines.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_lines.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
@@ -202,17 +228,15 @@ class MainWindow(
         self.list_lines.delete_pressed.connect(self.delete_current_context)
         self.list_lines.reorder_committed.connect(self.on_lines_reordered)
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)  # idle = normale Prozentanzeige
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        # Log (unter Queue)
         self.log_visible = False
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
-        self.log_edit.setMaximumBlockCount(5000)  # damit es nicht endlos wächst
+        self.log_edit.setMaximumBlockCount(5000)
         self.log_edit.hide()
         self.lbl_queue = QLabel(self._tr("lbl_queue"))
         self.lbl_lines = QLabel(self._tr("lbl_lines"))
-        # Toolbar-Aktionen
         self.act_add = QAction(
             self._themed_or_standard_icon("document-open", QStyle.SP_DialogOpenButton),
             self._tr("act_add_files"),
@@ -261,7 +285,6 @@ class MainWindow(
         self.act_toggle_log.setCheckable(True)
         self.act_toggle_log.setChecked(False)
         self.act_toggle_log.toggled.connect(self.toggle_log_area)
-        # Undo-/Redo-Aktionen
         self.act_undo = QAction(self._tr("act_undo"), self)
         self.act_undo.triggered.connect(self.undo)
         self.act_redo = QAction(self._tr("act_redo"), self)
@@ -274,9 +297,6 @@ class MainWindow(
         self.act_redo_sc.triggered.connect(self.redo)
         self.addAction(self.act_undo_sc)
         self.addAction(self.act_redo_sc)
-        # -----------------------------
-        # Globale Shortcuts
-        # -----------------------------
         self.act_project_save_sc = QAction(self)
         self.act_project_save_sc.setShortcut(QKeySequence("Ctrl+S"))
         self.act_project_save_sc.triggered.connect(self.save_project)
@@ -364,7 +384,6 @@ class MainWindow(
         self.btn_theme_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_theme_toggle.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.btn_theme_toggle.clicked.connect(self.toggle_theme)
-
         self.btn_lang_menu = QToolButton()
         self.btn_lang_menu.setPopupMode(QToolButton.InstantPopup)
         self.btn_lang_menu.setCursor(Qt.PointingHandCursor)

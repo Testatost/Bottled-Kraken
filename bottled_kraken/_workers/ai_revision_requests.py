@@ -1,6 +1,20 @@
-"""Anfrage-Methoden für den AI-Revision-Worker."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    _extract_json_payload,
+    _extract_text_lines,
+    _force_text,
+    _load_image_color,
+    _normalize_bbox,
+)
+from bottled_kraken.common import (
+    List,
+    Optional,
+    RecordView,
+    http,
+    json,
+    re,
+    socket,
+    urllib,
+)
 class AIRevisionRequestsMixin:
     def _request_page_ocr_with_fixed_linecount(self, page_data_url: str, recs: List[RecordView]) -> List[str]:
         img_w, img_h = _load_image_color(self.path).size
@@ -18,7 +32,6 @@ class AIRevisionRequestsMixin:
             len(recs) - 1,
             json.dumps(line_specs, ensure_ascii=False)
         )
-
         def _extract_out_lines(content: str):
             obj = _extract_json_payload(content)
             if not isinstance(obj, dict):
@@ -35,14 +48,12 @@ class AIRevisionRequestsMixin:
                 if isinstance(idx, int) and 0 <= idx < len(recs):
                     out[idx] = txt
             return out
-
         max_tokens_candidates = []
         primary_tokens = self._effective_revision_max_tokens("page", len(recs))
         max_tokens_candidates.append(primary_tokens)
         retry_tokens = min(12000, max(primary_tokens * 2, 2400, 180 * len(recs) + 600))
         if retry_tokens not in max_tokens_candidates:
             max_tokens_candidates.append(retry_tokens)
-
         last_content = ""
         last_data = None
         for attempt_no, max_tokens in enumerate(max_tokens_candidates, start=1):
@@ -103,7 +114,6 @@ class AIRevisionRequestsMixin:
             )
             if attempt_no >= len(max_tokens_candidates) or not looks_truncated:
                 break
-
         if isinstance(last_data, dict):
             lines = None
             try:
@@ -121,7 +131,6 @@ class AIRevisionRequestsMixin:
         raise ValueError(
             self._tr("ai_err_page_invalid_json", last_content[:3000] if last_content else "<leer>")
         )
-
     def _request_single_line_reread(
             self,
             line_data_url: str,
@@ -179,7 +188,6 @@ class AIRevisionRequestsMixin:
         if lines:
             return lines[0].strip()
         return ""
-
     def _request_line_decision(
             self,
             idx: int,
@@ -237,14 +245,11 @@ class AIRevisionRequestsMixin:
         lines = _extract_text_lines(content)
         if lines:
             return lines[0].strip()
-        # sehr konservativer Fallback:
-        # BOX > KRAKEN > PAGE
         if _force_text(box_text).strip():
             return _force_text(box_text).strip()
         if _force_text(kraken_text).strip():
             return _force_text(kraken_text).strip()
         return _force_text(page_text).strip()
-
     def _effective_revision_max_tokens(self, request_kind: str = "generic", item_count: int = 1) -> int:
         requested = max(1, int(self.max_tokens or 0))
         item_count = max(1, int(item_count or 1))
@@ -264,7 +269,6 @@ class AIRevisionRequestsMixin:
             return min(max(requested, recommended), hard_cap)
         cap = 1200
         return min(requested, cap)
-
     def _build_sampling_payload(self, response_format: Optional[dict] = None, override_max_tokens: Optional[int] = None) -> dict:
         payload = {
             "temperature": self.temperature,
@@ -282,7 +286,6 @@ class AIRevisionRequestsMixin:
         if self.repetition_penalty != 1.0:
             payload["repetition_penalty"] = self.repetition_penalty
         return payload
-
     def _response_format_lines(self) -> dict:
         return {
             "type": "json_schema",
@@ -309,7 +312,6 @@ class AIRevisionRequestsMixin:
                 }
             }
         }
-
     def _response_format_single_text(self) -> dict:
         return {
             "type": "json_schema",
@@ -325,7 +327,6 @@ class AIRevisionRequestsMixin:
                 }
             }
         }
-
     def _normalize_lines(self, revised: list, original: list) -> list:
         revised = [str(x).strip() for x in revised]
         if len(revised) == len(original):
@@ -335,7 +336,6 @@ class AIRevisionRequestsMixin:
         fixed = list(revised)
         fixed.extend(original[len(revised):])
         return fixed
-
     def _post_json(self, payload: dict) -> dict:
         if self._cancelled or self.isInterruptionRequested():
             raise RuntimeError(self._tr("msg_ai_cancelled"))

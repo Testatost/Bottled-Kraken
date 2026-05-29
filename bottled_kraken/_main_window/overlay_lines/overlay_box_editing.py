@@ -1,11 +1,23 @@
-"""Mixin für MainWindow: line editing and overlay sync."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import _safe_int
+from bottled_kraken.common import (
+    BBox,
+    List,
+    Optional,
+    QDialog,
+    QInputDialog,
+    QMessageBox,
+    QPointF,
+    QRectF,
+    READING_MODES,
+    RecordView,
+    STATUS_DONE,
+    TaskItem,
+    isValid,
+)
+from bottled_kraken.ui_components import (
+    OverlayBoxDialog,
+)
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QWidget
-
 class MainWindowOverlayBoxEditingMixin:
         def _reapply_preset_bboxes_to_recs(
                 self,
@@ -14,7 +26,6 @@ class MainWindowOverlayBoxEditingMixin:
         ) -> List[RecordView]:
             if not preset_bboxes:
                 return recs
-            # Einfacher Fall: gleiche Anzahl -> nur Boxen ersetzen
             if len(preset_bboxes) == len(recs):
                 out = []
                 for i, rv in enumerate(recs):
@@ -32,13 +43,10 @@ class MainWindowOverlayBoxEditingMixin:
                 if not overlaps:
                     continue
                 overlaps.sort(key=lambda x: x[0])
-                # genau ein Ziel -> ganzer Text dorthin
                 if len(overlaps) == 1:
                     pi = overlaps[0][0]
                     target_texts[pi] = (target_texts[pi] + " " + rv.text).strip()
                     continue
-                # mehrere Zielboxen -> Text proportional aufteilen
-                # bevorzugt horizontal (typischer Split links/rechts)
                 total_iw = sum(x[2] for x in overlaps)
                 total_ih = sum(x[3] for x in overlaps)
                 if total_iw >= total_ih:
@@ -56,21 +64,17 @@ class MainWindowOverlayBoxEditingMixin:
                     pi = ov[0]
                     if part.strip():
                         target_texts[pi] = (target_texts[pi] + " " + part.strip()).strip()
-            # Falls irgendwo nichts gelandet ist, leeren String behalten
             out = []
             for i, pbb in enumerate(preset_bboxes):
                 out.append(RecordView(i, target_texts[i].strip(), pbb))
             return out
-
         def _ensure_overlay_possible(self) -> Optional[TaskItem]:
             task = self._current_task()
             if not task or not task.results or task.status != STATUS_DONE:
                 QMessageBox.information(self, self._tr("info_title"), self._tr("overlay_only_after_ocr"))
                 return None
             return task
-
         def on_canvas_add_box_draw(self, scene_pos: QPointF):
-            # NEUES VERHALTEN: Eine neue Overlay-Box erzeugt eine NEUE Zeile am Ende.
             task = self._ensure_overlay_possible()
             if not task:
                 return
@@ -80,7 +84,6 @@ class MainWindowOverlayBoxEditingMixin:
             self._pending_box_for_row = None
             self._pending_new_line_box = True
             self.canvas.start_draw_box_mode()
-
         def on_canvas_edit_box(self, idx: int):
             task = self._ensure_overlay_possible()
             if not task:
@@ -100,7 +103,6 @@ class MainWindowOverlayBoxEditingMixin:
             recs[idx].bbox = dlg.get_bbox()
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=idx)
-
         def on_canvas_delete_box(self, idx: int):
             task = self._ensure_overlay_possible()
             if not task:
@@ -113,7 +115,6 @@ class MainWindowOverlayBoxEditingMixin:
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=idx)
             self._update_task_preset_bboxes(task)
-
         def on_canvas_split_box(self, idx: int, split_x: float):
             task = self._ensure_overlay_possible()
             if not task:
@@ -152,7 +153,6 @@ class MainWindowOverlayBoxEditingMixin:
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=idx)
             self._update_task_preset_bboxes(task)
-
         def on_box_drawn(self, rect: QRectF):
             task = self._ensure_overlay_possible()
             if not task:
@@ -173,11 +173,9 @@ class MainWindowOverlayBoxEditingMixin:
                     x1 = min(img_w, x0 + 1)
                 if y1 <= y0:
                     y1 = min(img_h, y0 + 1)
-            # Fall A: Neue Zeile am Ende erzeugen (Canvas-Zeichnen)
             if self._pending_new_line_box:
                 self._pending_new_line_box = False
                 self._pending_box_for_row = None
-                # Optional: Text abfragen (optional) – der Nutzer kann ihn später auch in der Liste bearbeiten.
                 new_txt, ok = QInputDialog.getText(self, self._tr("new_line_from_box_title"),
                                                    self._tr("new_line_from_box_label"))
                 if not ok:
@@ -190,7 +188,6 @@ class MainWindowOverlayBoxEditingMixin:
                 self._update_task_preset_bboxes(task)
                 self.list_lines.setFocus()
                 return
-            # Fall B: Box für eine bestimmte existierende Zeile zeichnen (Zeilen-Kontextmenü)
             if self._pending_box_for_row is None:
                 return
             row = self._pending_box_for_row
@@ -202,7 +199,6 @@ class MainWindowOverlayBoxEditingMixin:
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=row)
             self._update_task_preset_bboxes(task)
-
         def on_overlay_rect_changed(self, idx: int, scene_rect: QRectF):
             task = self._ensure_overlay_possible()
             if not task:
@@ -228,7 +224,6 @@ class MainWindowOverlayBoxEditingMixin:
                 recs
             )
             self._update_task_preset_bboxes(task)
-            # Label der Box direkt mitziehen, ohne kompletten Canvas-Neuaufbau
             lab = self.canvas._labels.get(idx)
             if lab and isValid(lab):
                 x0, y0, x1, y1 = new_bbox

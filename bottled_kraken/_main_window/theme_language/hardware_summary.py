@@ -1,20 +1,23 @@
-"""Mixin für MainWindow: theme language and reading direction."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    Dict,
+    Tuple,
+    ctypes,
+    html,
+    os,
+    platform,
+    subprocess,
+    sys,
+    torch,
+)
+from bottled_kraken.workers import (
+    get_external_ocr_backend,
+)
 def _no_console_kwargs() -> dict:
-    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
     if not sys.platform.startswith("win"):
         return {}
-
     kwargs = {}
-
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -22,15 +25,10 @@ def _no_console_kwargs() -> dict:
         kwargs["startupinfo"] = startupinfo
     except Exception:
         pass
-
     return kwargs
-
 class MainWindowHardwareSummaryMixin:
         def _gpu_capabilities(self, *, refresh: bool = False) -> Dict[str, Tuple[bool, str]]:
             caps: Dict[str, Tuple[bool, str]] = {"cpu": (True, "CPU")}
-
-            # 1) Internes Torch der Onefile-App prüfen. Bei der CPU-Release-Version
-            # ist das normalerweise torch==...+cpu und damit ohne CUDA/ROCm.
             cuda_avail = False
             cuda_name = ""
             try:
@@ -40,18 +38,12 @@ class MainWindowHardwareSummaryMixin:
             except Exception:
                 cuda_avail = False
                 cuda_name = ""
-
             hip_ver = getattr(torch.version, "hip", None)
             cuda_ver = getattr(torch.version, "cuda", None)
-
             rocm_avail = bool(cuda_avail and hip_ver is not None)
             rocm_details = f"{cuda_name} (HIP {hip_ver})" if rocm_avail and cuda_name else (f"HIP {hip_ver}" if rocm_avail else "ROCm")
-
             cuda_true = bool(cuda_avail and cuda_ver is not None)
             cuda_true_details = f"{cuda_name} (CUDA {cuda_ver})" if cuda_true and cuda_name else (f"CUDA {cuda_ver}" if cuda_true else "CUDA")
-
-            # 2) Externe Backend-Installer prüfen. Diese sind für die CPU-Onefile-App
-            # relevant, weil die GPU-fähige Torch-Umgebung getrennt liegt.
             try:
                 ext_cuda = get_external_ocr_backend("nvidia-cuda", refresh=refresh)
                 if ext_cuda and ext_cuda.ok:
@@ -59,7 +51,6 @@ class MainWindowHardwareSummaryMixin:
                     cuda_true_details = ext_cuda.detail or "NVIDIA CUDA Backend"
             except Exception:
                 pass
-
             try:
                 ext_rocm = get_external_ocr_backend("amd-rocm", refresh=refresh)
                 if ext_rocm and ext_rocm.ok:
@@ -67,18 +58,9 @@ class MainWindowHardwareSummaryMixin:
                     rocm_details = ext_rocm.detail or "AMD ROCm Backend"
             except Exception:
                 pass
-
-            try:
-                mps_avail = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-            except Exception:
-                mps_avail = False
-            mps_details = "Apple MPS" if mps_avail else "MPS"
-
             caps["cuda"] = (cuda_true, cuda_true_details)
             caps["rocm"] = (rocm_avail, rocm_details)
-            caps["mps"] = (mps_avail, mps_details)
             return caps
-
         def _total_ram_bytes(self) -> int:
             try:
                 if sys.platform.startswith("win"):
@@ -109,13 +91,11 @@ class MainWindowHardwareSummaryMixin:
             except Exception:
                 pass
             return 0
-
         def _total_ram_gb(self) -> float:
             ram_bytes = self._total_ram_bytes()
             if ram_bytes <= 0:
                 return 0.0
             return round(ram_bytes / (1024 ** 3), 1)
-
         def _cpu_summary(self) -> Tuple[str, int]:
             logical = os.cpu_count() or 1
             name = ""
@@ -177,7 +157,6 @@ class MainWindowHardwareSummaryMixin:
             if not name:
                 name = "CPU"
             return name, logical
-
         def _gpu_summary(self, *, refresh_backends: bool = False) -> Dict[str, object]:
             caps = self._gpu_capabilities(refresh=refresh_backends)
             info = {
@@ -186,7 +165,6 @@ class MainWindowHardwareSummaryMixin:
                 "gpu_vram_gb": 0.0,
                 "gpu_vram_text": self._tr("help_hw_vram_unknown"),
             }
-
             def _apply_vram_from_bytes(total_memory) -> bool:
                 try:
                     total_memory = int(total_memory or 0)
@@ -198,18 +176,15 @@ class MainWindowHardwareSummaryMixin:
                 info["gpu_vram_gb"] = vram_gb
                 info["gpu_vram_text"] = self._tr("help_hw_fmt_gb", vram_gb)
                 return True
-
             def _apply_vram_from_external_backend(kind: str) -> bool:
                 try:
                     backend = get_external_ocr_backend(kind, refresh=False)
                     data = getattr(backend, "self_test", None) if backend else None
                     if not isinstance(data, dict):
                         return False
-
                     total_memory = data.get("cuda_device_total_memory") or data.get("vram_bytes")
                     if _apply_vram_from_bytes(total_memory):
                         return True
-
                     total_gb = data.get("cuda_device_total_memory_gb") or data.get("vram_gb")
                     try:
                         total_gb = float(total_gb or 0.0)
@@ -222,8 +197,7 @@ class MainWindowHardwareSummaryMixin:
                 except Exception:
                     pass
                 return False
-
-            for key in ("cuda", "rocm", "mps"):
+            for key in ("cuda", "rocm"):
                 ok, detail = caps.get(key, (False, ""))
                 if not ok:
                     continue
@@ -231,28 +205,21 @@ class MainWindowHardwareSummaryMixin:
                 info["gpu_label"] = detail if detail else key.upper()
                 if key in ("cuda", "rocm"):
                     got_vram = False
-
-                    # Interner Torch-Check: funktioniert nur, wenn die Haupt-App selbst
-                    # ein CUDA/ROCm-fähiges Torch enthält.
                     try:
                         if torch.cuda.is_available() and torch.cuda.device_count() > 0:
                             props = torch.cuda.get_device_properties(0)
                             got_vram = _apply_vram_from_bytes(getattr(props, "total_memory", 0))
                     except Exception:
                         got_vram = False
-
-                    # CPU-Onefile-Fall: GPU-Torch liegt im externen Backend.
                     if not got_vram:
                         backend_kind = "nvidia-cuda" if key == "cuda" else "amd-rocm"
                         got_vram = _apply_vram_from_external_backend(backend_kind)
-
                     if not got_vram:
                         info["gpu_vram_text"] = self._tr("help_hw_vram_unknown")
                 else:
                     info["gpu_vram_text"] = self._tr("help_hw_vram_shared")
                 break
             return info
-
         def _hardware_snapshot(self, *, refresh_backends: bool = False) -> Dict[str, object]:
             cpu_name, cpu_threads = self._cpu_summary()
             ram_gb = self._total_ram_gb()
@@ -266,7 +233,6 @@ class MainWindowHardwareSummaryMixin:
                 "gpu_vram_gb": gpu["gpu_vram_gb"],
                 "gpu_vram_text": gpu["gpu_vram_text"],
             }
-
         def _hardware_feature_status(self, hw: Dict[str, object], feature: str) -> Tuple[str, str]:
             cpu_threads = int(hw.get("cpu_threads", 1) or 1)
             ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
@@ -296,7 +262,6 @@ class MainWindowHardwareSummaryMixin:
                     return "yellow", "help_hw_status_usable_slow"
                 return "red", "help_hw_status_weak"
             return "red", "help_hw_status_weak"
-
         def _hardware_component_status(self, hw: Dict[str, object], component: str) -> Tuple[str, str]:
             cpu_threads = int(hw.get("cpu_threads", 1) or 1)
             ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
@@ -322,7 +287,6 @@ class MainWindowHardwareSummaryMixin:
                     return "yellow", "help_hw_component_borderline"
                 return "red", "help_hw_component_not_enough"
             return "red", "help_hw_component_not_enough"
-
         def _status_dot_html(self, level: str) -> str:
             colors = {
                 "green": "#16a34a",
@@ -335,7 +299,6 @@ class MainWindowHardwareSummaryMixin:
                 f'border-radius:50%; background:{color}; margin-right:8px; '
                 f'vertical-align:middle;"></span>'
             )
-
         def _status_chip_html(self, level: str, text: str) -> str:
             bg = {
                 "green": "#dcfce7",

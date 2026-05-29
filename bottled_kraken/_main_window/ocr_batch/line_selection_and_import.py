@@ -1,10 +1,16 @@
-"""Mixin für MainWindow: import lines and ocr batch."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import _load_image_color
+from bottled_kraken.common import (
+    Optional,
+    QAbstractItemView,
+    QItemSelectionModel,
+    QMenu,
+    QTreeWidgetItem,
+    STATUS_DONE,
+    TaskItem,
+    Tuple,
+    os,
+    re,
+)
 class MainWindowLineSelectionAndImportMixin:
         def on_line_selected(self, current, previous=None):
             row = self.list_lines.currentRow()
@@ -22,7 +28,6 @@ class MainWindowLineSelectionAndImportMixin:
                 return
             if 0 <= row < len(recs):
                 self.canvas.select_idx(row)
-
         def on_lines_selection_changed(self):
             task = self._current_task()
             if not task or not task.results:
@@ -34,7 +39,6 @@ class MainWindowLineSelectionAndImportMixin:
                 self.canvas.select_indices([], center=False)
                 return
             self.canvas.select_indices(rows, center=False)
-
         def on_canvas_multi_selected(self, indices: list):
             self.list_lines.blockSignals(True)
             self.list_lines.clearSelection()
@@ -58,9 +62,7 @@ class MainWindowLineSelectionAndImportMixin:
                     pass
                 self.list_lines.setFocus()
             self.list_lines.blockSignals(False)
-            # Canvas-Farben konsistent halten
             self.canvas.select_indices(clean, center=False)
-
         def on_rect_clicked(self, idx):
             if 0 <= idx < self.list_lines.count():
                 self.list_lines.blockSignals(True)
@@ -72,7 +74,6 @@ class MainWindowLineSelectionAndImportMixin:
                 self.list_lines.blockSignals(False)
                 self.canvas.select_indices([idx], center=False)
                 self.list_lines.setFocus()
-
         @staticmethod
         def _parse_line_item_full(text: str) -> Tuple[Optional[int], str]:
             t = (text or "").rstrip("\n")
@@ -82,7 +83,6 @@ class MainWindowLineSelectionAndImportMixin:
             num = int(m.group(1))
             rest = (m.group(2) or "").strip()
             return num - 1, rest
-
         def on_line_item_edited(self, item: QTreeWidgetItem, column: int):
             if column != 1:
                 return
@@ -102,7 +102,6 @@ class MainWindowLineSelectionAndImportMixin:
             recs[row].text = new_text
             task.edited = True
             self._sync_ui_after_recs_change(task, keep_row=row)
-
         def _delete_current_line_via_key(self):
             task = self._current_task()
             if not task or not task.results or task.status != STATUS_DONE:
@@ -110,7 +109,6 @@ class MainWindowLineSelectionAndImportMixin:
             row = self.list_lines.currentRow()
             if row >= 0:
                 self._delete_line(task, row)
-
         def on_lines_reordered(self, order: list, current_row_after_drop: int):
             task = self._current_task()
             if not task or not task.results or task.status != STATUS_DONE:
@@ -119,11 +117,6 @@ class MainWindowLineSelectionAndImportMixin:
             if not order or len(order) != len(recs):
                 return
             keep_row = max(0, min(len(recs) - 1, int(current_row_after_drop)))
-            # Bei manuellem Drag-and-Drop baut _reorder_lines_keep_box_slots()
-            # die Zeilenliste neu auf. Dadurch ging die Mehrfachauswahl nach dem
-            # Drop verloren, obwohl LinesTreeWidget die verschobenen Quellzeilen
-            # bereits kennt. Die Auswahl wird deshalb anhand der alten Quell-IDs
-            # nach dem neuen order[]-Mapping wiederhergestellt.
             moved_source_rows = []
             try:
                 moved_source_rows = [
@@ -173,7 +166,6 @@ class MainWindowLineSelectionAndImportMixin:
                 self.list_lines._pending_reselect_new_rows = []
             except Exception:
                 pass
-
         def lines_context_menu(self, pos):
             item = self.list_lines.itemAt(pos)
             if item is None:
@@ -214,7 +206,6 @@ class MainWindowLineSelectionAndImportMixin:
                 self._pending_new_line_box = False
                 self._pending_box_for_row = row
                 self.canvas.start_draw_box_mode()
-
         def _sync_ui_after_recs_change(self, task: TaskItem, keep_row: Optional[int] = None):
             if not task.results:
                 return
@@ -223,8 +214,6 @@ class MainWindowLineSelectionAndImportMixin:
                 rv.idx = i
             new_text = "\n".join([r.text for r in recs]).strip()
             task.results = (new_text, kr_records, im, recs)
-            # WICHTIG:
-            # Immer den aktuellsten Box-Stand zentral synchron halten.
             self._update_task_preset_bboxes(task)
             self._populate_lines_list(recs, keep_row=keep_row)
             if os.path.exists(task.path):
@@ -235,10 +224,8 @@ class MainWindowLineSelectionAndImportMixin:
             else:
                 self.canvas.clear_all()
                 self.canvas.set_overlay_enabled(False)
-
         def _move_line(self, task: TaskItem, row: int, direction: int):
             self._move_selected_lines(task, [row], direction)
-
         def _move_selected_lines(self, task: TaskItem, rows: list, direction: int):
             if not task.results:
                 return

@@ -1,19 +1,40 @@
-"""Mixin für MainWindow: voice input selection and ai selected lines."""
-# Test-Contract-Marker: globale Zielzeilen bleiben im Kontext; produktiv bleibt RecordView lokal. idx=row
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import (
+    AI_SCRIPT_HANDWRITING,
+    AI_SCRIPT_MIXED,
+    AI_SCRIPT_PRINT,
+    Dict,
+    List,
+    Optional,
+    QApplication,
+    QCoreApplication,
+    QEvent,
+    QKeySequence,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QTextEdit,
+    RecordView,
+    STATUS_DONE,
+    TaskItem,
+    VOICE_SAMPLE_RATE,
+    os,
+    re,
+    sd,
+    shutil,
+    socket,
+)
+from bottled_kraken.workers import (
+    AIRevisionWorker,
+)
+from bottled_kraken.dialogs import (
+    ProgressStatusDialog,
+)
 class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
     def _cancel_voice_record_dialog(self):
         if self.voice_worker and self.voice_worker.isRunning():
             self.voice_worker.cancel()
-
     def _audio_backend_priority(self, hostapi_name: str) -> int:
         n = (hostapi_name or "").lower()
-        # Linux
         if "pipewire" in n:
             return 500
         if "pulse" in n or "pulseaudio" in n:
@@ -22,7 +43,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             return 350
         if "jack" in n:
             return 250
-        # Windows
         if "wasapi" in n:
             return 400
         if "directsound" in n:
@@ -31,27 +51,21 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             return 200
         if "wdm-ks" in n:
             return 100
-        # macOS
         if "core audio" in n:
             return 450
         return 0
-
     def _normalize_audio_device_name(self, name: str) -> str:
         txt = (name or "").strip()
-        # Backend-Suffixe entfernen
         txt = re.sub(
             r"\s+\((MME|Windows DirectSound|Windows WASAPI|Windows WDM-KS)\)\s*$",
             "",
             txt,
             flags=re.IGNORECASE
         )
-        # typische Dopplungen säubern
         txt = re.sub(r"\s+", " ", txt).strip()
-        # System-Default hübscher anzeigen
         if txt.lower() in ("microsoft soundmapper - input", "primärer soundaufnahmetreiber"):
             return self._tr("audio_device_default_mic")
         return txt
-
     def _get_input_audio_devices(self) -> List[dict]:
         out = []
         try:
@@ -91,7 +105,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
                 "default_samplerate": int(float(dev.get("default_samplerate", VOICE_SAMPLE_RATE))),
                 "max_input_channels": max_in,
             }
-            # pro Hauptgerät nur die beste Variante behalten
             old = grouped.get(clean_name)
             if old is None or candidate["score"] > old["score"]:
                 grouped[clean_name] = candidate
@@ -104,10 +117,8 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             )
         )
         return out
-
     def _selected_line_rows(self) -> List[int]:
         return self.list_lines.selected_line_rows()
-
     def _choose_ai_script_mode(self) -> Optional[str]:
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Question)
@@ -131,7 +142,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
         if clicked == btn_mixed:
             return AI_SCRIPT_MIXED
         return None
-
     def run_ai_revision_for_selected_lines(self):
         task = self._current_task()
         self._persist_live_canvas_bboxes(task)
@@ -207,7 +217,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
         self.ai_worker.finished_revision.connect(self.on_ai_selected_lines_revision_done)
         self.ai_worker.failed_revision.connect(self.on_ai_selected_lines_revision_failed)
         self.ai_worker.start()
-
     def on_ai_selected_lines_revision_done(self, path: str, revised_lines: list):
         ctx = getattr(self, "_ai_multi_line_context", None) or {}
         self._ai_multi_line_context = None
@@ -271,7 +280,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             self._tr_log("log_ai_multi_done", os.path.basename(path), ", ".join(str(r + 1) for r in rows))
         )
         self._close_ai_progress_dialog()
-
     def on_ai_selected_lines_revision_failed(self, path: str, msg: str):
         self._ai_multi_line_context = None
         self.act_ai_revise.setEnabled(True)
@@ -283,7 +291,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             self._log(self._tr_log("log_ai_multi_failed", os.path.basename(path), msg))
             QMessageBox.warning(self, self._tr("warn_title"), msg)
         self._close_ai_progress_dialog()
-
     def _cleanup_temp_dirs(self):
         for d in list(self.temp_dirs_created):
             try:
@@ -292,7 +299,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             except Exception:
                 pass
         self.temp_dirs_created.clear()
-
     def eventFilter(self, obj, event):
         if getattr(self, "_is_closing", False):
             return False
@@ -311,14 +317,12 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
         except Exception:
             pass
         return super().eventFilter(obj, event)
-
     def _is_local_port_open(self, host: str, port: int, timeout: float = 0.12) -> bool:
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True
         except Exception:
             return False
-
     def _reorder_lines_keep_box_slots(self, task: TaskItem, order: List[int], keep_row: Optional[int] = None):
         if not task or not task.results:
             return
@@ -334,7 +338,6 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             return
         self._push_undo(task)
         old_recs = list(recs)
-        # GANZE Records verschieben, nicht nur Texte
         new_recs = [
             RecordView(i, old_recs[src_idx].text, old_recs[src_idx].bbox)
             for i, src_idx in enumerate(order)
@@ -342,10 +345,8 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
         task.edited = True
         task.results = (text, kr_records, im, new_recs)
         self._sync_ui_after_recs_change(task, keep_row=keep_row)
-
     def _get_active_ai_model_display(self) -> str:
         return (self.ai_model_id or "").strip() or "-"
-
     def _update_ai_model_ui(self):
         display = self._get_active_ai_model_display()
         mode_label = self._current_ai_mode_label()
@@ -360,10 +361,8 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             self.act_lm_mode.setText(self._tr("lm_mode_value", mode_label))
         if hasattr(self, "act_lm_base_url"):
             self.act_lm_base_url.setText(self._tr("lm_server_value", base_url))
-
     def _process_ui(self):
         QCoreApplication.processEvents()
-
     def _fetch_loaded_llm_models(self, force: bool = False) -> List[str]:
         if self.ai_mode == "manual" and self.ai_manual_base_url:
             base_url = self._normalize_ai_base_url(self.ai_manual_base_url)

@@ -1,15 +1,17 @@
-"""Mixin für MainWindow: queue context preview and model loading."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    Optional,
+    QInputDialog,
+    QMenu,
+    QUEUE_COL_FILE,
+    QUrl,
+    Qt,
+    TaskItem,
+    ZENODO_URL,
+)
 class MainWindowQueueContextActionsMixin:
         def open_download_link(self):
             from PySide6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl(ZENODO_URL))
-
         def queue_context_menu(self, pos):
             menu = QMenu()
             start_ocr_act = menu.addAction(self._tr("act_start_ocr"))
@@ -53,16 +55,12 @@ class MainWindowQueueContextActionsMixin:
                     self.queue_table.item(row, QUEUE_COL_FILE).setText(new_name)
             elif action == delete_act:
                 self.delete_selected_queue_items()
-
         def check_all_queue_items(self):
             self._set_all_queue_checkmarks(True)
-
         def uncheck_all_queue_items(self):
             self._set_all_queue_checkmarks(False)
-
         def delete_selected_queue_items(self, reset_preview: bool = False):
             checked_rows = self._checked_queue_rows()
-            # Priorität: Checkmarks vor Auswahl.
             rows = checked_rows if checked_rows else sorted(
                 set(index.row() for index in self.queue_table.selectedIndexes()),
                 reverse=True
@@ -111,7 +109,6 @@ class MainWindowQueueContextActionsMixin:
             self.queue_table.selectRow(target_row)
             if target_path:
                 self.preview_image(target_path, persist_current=False)
-
         def clear_queue(self):
             self.queue_items.clear()
             self.queue_table.setRowCount(0)
@@ -124,22 +121,13 @@ class MainWindowQueueContextActionsMixin:
             self._update_queue_hint()
             self._cleanup_temp_dirs()
             self._log(self._tr_log("log_queue_cleared"))
-
         def _task_by_path(self, path: Optional[str]) -> Optional[TaskItem]:
             if not path:
                 return None
             return next((i for i in self.queue_items if i.path == path), None)
-
         def _loaded_preview_task(self) -> Optional[TaskItem]:
             return self._task_by_path(getattr(self, "_loaded_preview_path", None))
-
         def _persist_loaded_preview_bboxes(self):
-            """Speichert die gerade sichtbaren Overlay-Boxen, bevor die Canvas geleert wird.
-
-            Beim Queue-Seitenwechsel zeigt currentRow bereits auf die neue Seite, während
-            die Canvas noch die vorherige Seite enthält. Deshalb wird der zuletzt geladene
-            Preview-Pfad statt _current_task() verwendet.
-            """
             task = self._loaded_preview_task()
             if task and task.results:
                 self._persist_live_canvas_bboxes(task)

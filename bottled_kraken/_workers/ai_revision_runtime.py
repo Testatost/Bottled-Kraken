@@ -1,6 +1,16 @@
-"""Mixin-Methoden für den AI-Revision-Worker."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    _ai_script_crop_profile,
+    _clean_ocr_text,
+    _crop_block_to_data_url_context,
+    _crop_single_line_to_data_url,
+)
+from bottled_kraken.common import (
+    List,
+    os,
+    socket,
+    traceback,
+    urllib,
+)
 class AIRevisionRuntimeMixin:
     def run(self):
         if self._cancelled or self.isInterruptionRequested():
@@ -14,9 +24,6 @@ class AIRevisionRuntimeMixin:
             self.status_changed.emit(self._tr("ai_status_start_free_ocr", os.path.basename(self.path)))
             self.progress_changed.emit(0)
             crop_profile = _ai_script_crop_profile(self.script_mode)
-            # -------------------------------------------------
-            # 1/3 BOX-OCR zuerst = Primärquelle
-            # -------------------------------------------------
             self.status_changed.emit(self._tr("ai_status_step1_title", os.path.basename(self.path)))
             box_lines: List[str] = []
             total = max(1, len(self.recs))
@@ -49,9 +56,6 @@ class AIRevisionRuntimeMixin:
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError(self._tr("msg_ai_cancelled"))
             is_form_like = self._looks_like_form_layout()
-            # -------------------------------------------------
-            # 2/3 Block-OCR als Kontext (statt kompletter Seite)
-            # -------------------------------------------------
             if is_form_like:
                 self.status_changed.emit(
                     self._tr("ai_status_step2_form", os.path.basename(self.path))
@@ -60,9 +64,7 @@ class AIRevisionRuntimeMixin:
                 self.status_changed.emit(
                     self._tr("ai_status_step2_plain", os.path.basename(self.path))
                 )
-            # Startwert: Kraken-Zeilen als Fallback
             page_lines = [rv.text for rv in self.recs]
-            # kleine Blöcke halten den Prompt sicher unter dem Kontextlimit
             chunks = self._chunk_records(self.recs, block_size=3)
             for chunk_idx, (start, end) in enumerate(chunks, start=1):
                 if self._cancelled or self.isInterruptionRequested():
@@ -92,13 +94,9 @@ class AIRevisionRuntimeMixin:
                                 page_lines[start + local_i] = txt
                 except Exception as e:
                     print(f"BLOCK OCR ERROR {start}-{end}: {e}")
-                # leichter Fortschritt im Kontext-Schritt
                 self.progress_changed.emit(55 + int((chunk_idx / max(1, len(chunks))) * 15))
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError(self._tr("msg_ai_cancelled"))
-            # -------------------------------------------------
-            # 3/3 Merge: aktive LM-Überarbeitung pro Zielzeile
-            # -------------------------------------------------
             self.status_changed.emit(
                 self._tr("ai_status_step3_merge", os.path.basename(self.path))
             )
@@ -108,17 +106,12 @@ class AIRevisionRuntimeMixin:
                 box_text = str(box_lines[i] if i < len(box_lines) else "").strip()
                 page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
                 prev_final = final_lines[i - 1] if i > 0 else ""
-
-                # Eine vorhandene Overlay-Box darf die Textüberarbeitung nicht blockieren.
-                # Die Geometrie bleibt erhalten, aber der Text wird aktiv aus Kraken-,
-                # Box- und Kontext-OCR neu entschieden.
                 best_text = self._request_line_decision(
                     idx=i,
                     kraken_text=kraken_text,
                     page_text=page_text,
                     box_text=box_text,
                 ).strip()
-
                 if not best_text:
                     best_text = self._choose_final_line_text(
                         kraken_text=kraken_text,
@@ -126,10 +119,8 @@ class AIRevisionRuntimeMixin:
                         page_text=page_text,
                         prev_final_text=prev_final,
                     )
-
                 if not best_text:
                     best_text = _clean_ocr_text(box_text or kraken_text or page_text)
-
                 final_lines.append(_clean_ocr_text(best_text))
                 self.progress_changed.emit(55 + int(((i + 1) / total) * 45))
             if len(final_lines) != len(self.recs):

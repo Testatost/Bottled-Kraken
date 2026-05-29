@@ -1,6 +1,30 @@
-"""Kleinere Queue- und Overlay-Widgets."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    Callable,
+    Optional,
+    QAbstractItemView,
+    QApplication,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QEvent,
+    QFontMetricsF,
+    QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
+    QIcon,
+    QPen,
+    QPointF,
+    QRectF,
+    QStyle,
+    QStyleOptionButton,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
+    QTableWidget,
+    Qt,
+    Signal,
+    Tuple,
+    is_supported_drop_or_paste_file,
+    os,
+)
 class QueueCheckDelegate(QStyledItemDelegate):
     def _checkbox_rect(self, option, widget):
         style = widget.style() if widget else QApplication.style()
@@ -17,7 +41,6 @@ class QueueCheckDelegate(QStyledItemDelegate):
         if value is None:
             super().paint(painter, option, index)
             return
-        # Zellenhintergrund / Selektion normal von Qt zeichnen lassen
         view_opt = QStyleOptionViewItem(option)
         self.initStyleOption(view_opt, index)
         view_opt.text = ""
@@ -39,17 +62,14 @@ class QueueCheckDelegate(QStyledItemDelegate):
         flags = index.flags()
         if not (flags & Qt.ItemIsUserCheckable) or not (flags & Qt.ItemIsEnabled):
             return False
-        # Tastatur
         if event.type() == QEvent.KeyPress:
             if event.key() in (Qt.Key_Space, Qt.Key_Select):
                 current = index.data(Qt.CheckStateRole)
                 new_state = Qt.Unchecked if int(current) == int(Qt.Checked) else Qt.Checked
                 return model.setData(index, new_state, Qt.CheckStateRole)
             return False
-        # Doppelklick nicht separat toggeln
         if event.type() == QEvent.MouseButtonDblClick:
             return True
-        # Maus nur innerhalb der zentrierten Checkbox
         if event.type() == QEvent.MouseButtonRelease:
             if event.button() != Qt.LeftButton:
                 return False
@@ -60,25 +80,21 @@ class QueueCheckDelegate(QStyledItemDelegate):
             new_state = Qt.Unchecked if int(current) == int(Qt.Checked) else Qt.Checked
             return model.setData(index, new_state, Qt.CheckStateRole)
         return False
-
 class OutlinedSimpleTextItem(QGraphicsSimpleTextItem):
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self._fill_color = QColor("#000000")
         self._outline_color = QColor("#ffffff")
         self._outline_width = 1.0
-
     def set_text_style(self, fill: QColor, outline: QColor, outline_width: float = 1.0):
         self._fill_color = QColor(fill)
         self._outline_color = QColor(outline)
         self._outline_width = max(0.5, float(outline_width))
         self.update()
-
     def boundingRect(self):
         br = super().boundingRect()
         pad = self._outline_width + 1.0
         return br.adjusted(-pad, -pad, pad, pad)
-
     def paint(self, painter, option, widget=None):
         text = self.text()
         if not text:
@@ -99,7 +115,6 @@ class OutlinedSimpleTextItem(QGraphicsSimpleTextItem):
         painter.setPen(QPen(self._fill_color, 1.0))
         painter.drawText(QPointF(0.0, ascent), text)
         painter.restore()
-
 class ResizableRectItem(QGraphicsRectItem):
     HANDLE_PAD = 6.0
     def __init__(
@@ -119,7 +134,7 @@ class ResizableRectItem(QGraphicsRectItem):
         self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsRectItem.ItemIsMovable, True)
         self._mode = "none"
-        self._resize_edges = (False, False, False, False)  # L,T,R,B
+        self._resize_edges = (False, False, False, False)
         self._press_scene_pos: Optional[QPointF] = None
         self._press_rect: Optional[QRectF] = None
         self._press_item_pos: Optional[QPointF] = None
@@ -210,7 +225,6 @@ class ResizableRectItem(QGraphicsRectItem):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
-
 class DropQueueTable(QTableWidget):
     files_dropped = Signal(list)
     table_resized = Signal()

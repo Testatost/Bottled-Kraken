@@ -1,9 +1,7 @@
-from .menu_behavior import BKStayOpenMenu
-from .queue_headers import MainWindowQueueHeadersMixin
-from .theme_toolbar import MainWindowThemeToolbarMixin
-from .menus import MainWindowMenuConstructionMixin
-
+from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
+from bottled_kraken._main_window.menu_and_queue.queue_headers import MainWindowQueueHeadersMixin
+from bottled_kraken._main_window.menu_and_queue.theme_toolbar import MainWindowThemeToolbarMixin
+from bottled_kraken._main_window.menu_and_queue.menus import MainWindowMenuConstructionMixin
 class MainWindowMenuSetupAndQueueHeadersMixin(MainWindowQueueHeadersMixin, MainWindowThemeToolbarMixin, MainWindowMenuConstructionMixin):
     pass
-
 __all__ = ['MainWindowMenuSetupAndQueueHeadersMixin', 'MainWindowQueueHeadersMixin', 'MainWindowThemeToolbarMixin', 'MainWindowMenuConstructionMixin', 'BKStayOpenMenu']

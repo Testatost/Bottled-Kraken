@@ -1,8 +1,6 @@
-from .tool_buttons import ImageEditDialogToolButtonsMixin
-from .layout_and_init import ImageEditDialogLayoutAndInitMixin
-from .options_and_navigation import ImageEditDialogOptionsAndNavigationMixin
-
+from bottled_kraken._image_edit.dialog_setup_group.tool_buttons import ImageEditDialogToolButtonsMixin
+from bottled_kraken._image_edit.dialog_setup_group.layout_and_init import ImageEditDialogLayoutAndInitMixin
+from bottled_kraken._image_edit.dialog_setup_group.options_and_navigation import ImageEditDialogOptionsAndNavigationMixin
 class ImageEditDialogSetupMixin(ImageEditDialogToolButtonsMixin, ImageEditDialogLayoutAndInitMixin, ImageEditDialogOptionsAndNavigationMixin):
     pass
-
 __all__ = ['ImageEditDialogSetupMixin', 'ImageEditDialogToolButtonsMixin', 'ImageEditDialogLayoutAndInitMixin', 'ImageEditDialogOptionsAndNavigationMixin']

@@ -1,7 +1,11 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
-
+from bottled_kraken.common import (
+    Optional,
+    QApplication,
+    QPointF,
+    QRectF,
+    Qt,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 class ImageEditCanvasCursorAndRectHelpersMixin:
         def _clamp_rect(self, rect: QRectF) -> QRectF:
             if self.view_image is None:
@@ -10,7 +14,6 @@ class ImageEditCanvasCursorAndRectHelpersMixin:
             x1 = max(0, min(rect.left(), w - 5)); y1 = max(0, min(rect.top(), h - 5))
             x2 = max(x1 + 5, min(rect.right(), w)); y2 = max(y1 + 5, min(rect.bottom(), h))
             return QRectF(x1, y1, x2 - x1, y2 - y1)
-
         def _update_cursor(self, p: QPointF):
             if self.rotation_mode:
                 self.setCursor(Qt.OpenHandCursor)
@@ -67,7 +70,6 @@ class ImageEditCanvasCursorAndRectHelpersMixin:
                     self.setCursor(Qt.SizeAllCursor)
                     return
             self.setCursor(Qt.CrossCursor)
-
         def _rect_edge_at(self, rect: Optional[QRectF], p: QPointF) -> Optional[str]:
             if rect is None:
                 return None

@@ -1,8 +1,24 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ...shared import *
-
+from bottled_kraken.common import (
+    _clean_ocr_text_for_kraken_display,
+    _is_noise_line,
+    _is_symbol_only_line,
+)
+from bottled_kraken.common import (
+    BBox,
+    Image,
+    List,
+    Optional,
+    RecordView,
+    Tuple,
+    clamp_bbox,
+    os,
+    recognize_with_kraken,
+    segment_with_kraken,
+    sort_records_handwriting_simple,
+    sort_records_reading_order,
+    torch,
+)
 MAX_KRAKEN_OCR_LINES = 500
-
 class OCRWorkerPresetBoxesMixin:
         def _ocr_using_preset_bboxes(
                 self,
@@ -12,11 +28,6 @@ class OCRWorkerPresetBoxesMixin:
                 file_idx: int,
                 total_files: int
         ) -> Tuple[str, List[RecordView]]:
-            """
-            Führt OCR direkt auf den vorhandenen Overlay-/Split-Boxen aus.
-            Es wird KEINE neue Seitensegmentierung erzeugt.
-            Jede Box ist genau eine Zielzeile.
-            """
             page_w, page_h = im.size
             record_views: List[RecordView] = []
             valid_boxes: List[BBox] = []

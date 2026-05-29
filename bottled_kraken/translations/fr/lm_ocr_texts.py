@@ -26,7 +26,9 @@ BK_LM_OCR_TRANSLATIONS_FR = {
     'ai_status_fix46_fullpage_context': '1/3 : l’OCR LM de page complète est lue uniquement comme contexte : {}',
     'ai_status_fix46_overlay_line': '2/3 : la boîte de superposition {}/{} est envoyée au modèle local avec l’OCR Kraken : {}',
     'ai_prompt_overlay_compare_system': 'Tu es un assistant précis d’OCR et de correction. Tu reçois exactement un extrait d’image : la boîte de superposition d’une seule ligne sélectionnée. Relis uniquement cet extrait. Compare ton propre résultat OCR avec la ligne OCR Kraken existante. L’OCR Kraken et ton OCR de boîte sont des sources équivalentes. Ajoute uniquement les informations manquantes à la bonne position. Ne raccourcis jamais les noms, lieux, dates, âges ou nombres. Retourne uniquement du JSON valide : {"text":"..."}.',
-    'ai_prompt_overlay_compare_user': 'ID de ligne : {}\n\nLigne OCR Kraken existante :\n{}\n\nOCR LM de page complète uniquement comme contexte, pas comme remplacement :\n{}\n\nTâche :\n1. Relis toi-même la boîte de superposition transmise.\n2. Compare ton OCR de boîte avec la ligne OCR Kraken.\n3. Si Kraken manque des informations, insère-les à la bonne position.\n4. Si ton OCR de boîte est incertain ou plus court, conserve la ligne Kraken.\n5. Retourne exactement une ligne complète, sans explication ni Markdown.\n\nImportant : les marques de répétition sont uniquement de vrais guillemets comme " ou "" ou -"-. Les points ou suites de points ne sont pas des marques de répétition. Une marque de répétition signifie : copier la valeur située verticalement au-dessus à la même position dans l’image.',
+    'ai_prompt_overlay_compare_user': (
+        'ID de ligne : {}\n\nLigne OCR Kraken existante :\n{}\n\nOCR LM de page complète uniquement comme contexte, pas comme remplacement :\n{}\n\nTâche :\n1. Relis toi-même la boîte de superposition transmise.\n2. Compare ton OCR de boîte avec la ligne OCR Kraken.\n3. Si Kraken manque des informations, insère-les à la bonne position.\n4. Si ton OCR de boîte est incertain ou plus court, conserve la ligne Kraken.\n5. Retourne exactement une ligne complète, sans explication ni Markdown.\n\nImportant : les marques de répétition sont uniquement de vrais guillemets comme " ou "" ou -"-. Les points ou suites de points ne sont pas des marques de répétition. Une marque de répétition signifie : copier la valeur située verticalement au-dessus à la même position dans l’image.'
+),
     'ai_status_fix48_mandatory_page_ocr': '1/3 Étape obligatoire : OCR LM complet de la page comme contexte pour {0}',
     'export_format_odt': 'LibreOffice Writer (.odt)',
     'msg_odt_export_done': 'ODT exporté : {}',
@@ -35,7 +37,9 @@ BK_LM_OCR_TRANSLATIONS_FR = {
     'prompt_desc_sqlite_system': 'Instruction système pour l’extraction locale par IA de données de personnes et de registres compatibles SQLite.',
     'prompt_desc_sqlite_user': 'Instruction utilisateur pour SQLite : extrait personnes, entrées, âges, lieux, années et preuves dans des tables JSON plates.',
     'ai_prompt_sqlite_system': 'Tu es un assistant d’extraction précis. Retourne uniquement du JSON valide pour un export SQLite. Aucune explication Markdown.',
-    'ai_prompt_sqlite_user': 'Extrais du texte OCR une structure compatible SQLite avec documents, persons et entries. Chaque personne/inscription détectée doit avoir son propre enregistrement. Conserve les noms, âges, lieux, années, dates et le justificatif original. Texte OCR :\n{}',
+    'ai_prompt_sqlite_user': (
+        'Extrais du texte OCR une structure compatible SQLite avec documents, persons et entries. Chaque personne/inscription détectée doit avoir son propre enregistrement. Conserve les noms, âges, lieux, années, dates et le justificatif original. Texte OCR :\n{}'
+),
     'busy_queue_ref': 'File d’attente #{}',
     'lm_menu_lm_ocr_boxes': 'OCR de page LM + boîtes',
     'dlg_ai_ocr_boxes_title': 'OCR de page LM + boîtes',
@@ -47,5 +51,7 @@ BK_LM_OCR_TRANSLATIONS_FR = {
     'ai_status_page_boxes_done': 'OCR de page LM + boîtes terminé : {}',
     'info_lm_ocr_boxes_done_hint': 'L’OCR de page LM + boîtes est terminé. Les boîtes de superposition existantes ont été conservées. Une seule nouvelle ligne de texte issue de l’OCR de page LM a été attribuée à chaque boîte existante. Aucune ligne supplémentaire n’a été créée et aucune ligne existante n’a été supprimée.',
     'ai_prompt_page_boxes_align_system': 'Tu es un assistant précis d’alignement OCR. Associe les lignes d’une OCR complète de page LM exactement aux boîtes de superposition existantes. Les textes OCR des boîtes et les anciens textes servent uniquement d’ancres d’alignement. Les textes finaux doivent provenir de l’OCR complète de page. Retourne uniquement du JSON valide.',
-    'ai_prompt_page_boxes_align_user': 'Il existe exactement {0} boîtes de superposition. Retourne exactement {0} lignes de résultat : une pour chaque boîte avec idx 0 à {1}. Ne crée aucune ligne supplémentaire et n’omets aucune boîte. Utilise les textes OCR des boîtes uniquement pour l’alignement ; le texte final doit provenir de l’OCR de page LM. Si aucune ligne OCR de page ne correspond, utilise le meilleur texte de boîte/ancien texte.\n\nLignes OCR de page LM :\n{2}\n\nAncres des boîtes :\n{3}\n\nFormat de réponse uniquement JSON : {{"lines":[{{"idx":0,"text":"..."}}]}}',
+    'ai_prompt_page_boxes_align_user': (
+        'Il existe exactement {0} boîtes de superposition. Retourne exactement {0} lignes de résultat : une pour chaque boîte avec idx 0 à {1}. Ne crée aucune ligne supplémentaire et n’omets aucune boîte. Utilise les textes OCR des boîtes uniquement pour l’alignement ; le texte final doit provenir de l’OCR de page LM. Si aucune ligne OCR de page ne correspond, utilise le meilleur texte de boîte/ancien texte.\n\nLignes OCR de page LM :\n{2}\n\nAncres des boîtes :\n{3}\n\nFormat de réponse uniquement JSON : {{"lines":[{{"idx":0,"text":"..."}}]}}'
+),
 }

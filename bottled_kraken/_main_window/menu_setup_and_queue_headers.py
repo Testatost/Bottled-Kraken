@@ -1,4 +1,3 @@
-from .menu_and_queue import MainWindowMenuSetupAndQueueHeadersMixin
-from .menu_and_queue.queue_headers import BKStayOpenMenu
-
+from bottled_kraken._main_window.menu_and_queue import MainWindowMenuSetupAndQueueHeadersMixin
+from bottled_kraken._main_window.menu_and_queue.queue_headers import BKStayOpenMenu
 __all__ = ["MainWindowMenuSetupAndQueueHeadersMixin", "BKStayOpenMenu"]

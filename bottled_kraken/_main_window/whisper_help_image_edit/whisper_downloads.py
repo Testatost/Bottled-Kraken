@@ -1,10 +1,14 @@
-"""Mixin für MainWindow: whisper download help and image edit queue."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    QMessageBox,
+    os,
+    sys,
+)
+from bottled_kraken.workers import (
+    HFDownloadWorker,
+)
+from bottled_kraken.dialogs import (
+    ProgressStatusDialog,
+)
 class MainWindowWhisperDownloadsMixin:
         def _whisper_system_hint(self, platform_name: str) -> str:
             name = (platform_name or "").strip().lower()
@@ -19,9 +23,7 @@ class MainWindowWhisperDownloadsMixin:
             if name == "windows":
                 return self._tr("whisper_hint_windows")
             return self._tr("whisper_hint_generic")
-
         def download_whisper_model_from_help_dialog(self, platform_name: str, dialog_parent=None):
-            # 1) zuerst prüfen, ob large-v3 schon vorhanden ist
             existing_model_dir = self._find_existing_whisper_large_v3_model()
             if existing_model_dir:
                 base_dir = os.path.dirname(existing_model_dir)
@@ -48,7 +50,6 @@ class MainWindowWhisperDownloadsMixin:
                 "Der eigentliche Download läuft trotzdem nur über eine eigene "
                 "Python-Umgebung (.venv) und die Python-API von huggingface_hub."
             )
-            # Prüfen, ob bereits ein Download läuft
             if self.hf_download_worker and self.hf_download_worker.isRunning():
                 if self.hf_download_dialog is not None:
                     self.hf_download_dialog.show()
@@ -87,7 +88,6 @@ class MainWindowWhisperDownloadsMixin:
                 prepare_cmds = [
                     self._system_python_for_venv_cmd() + ["-m", "venv", venv_dir],
                 ]
-
                 install_cmd = [
                     venv_python,
                     "-m",
@@ -101,7 +101,6 @@ class MainWindowWhisperDownloadsMixin:
                     "faster-whisper",
                     "sounddevice",
                 ]
-
                 hf_exe = self._hf_cli_executable(platform_key)
                 download_cmd = [
                     hf_exe,
@@ -132,7 +131,6 @@ class MainWindowWhisperDownloadsMixin:
                     self._tr("msg_whisper_download_start_failed", e)
                 )
                 self.status_bar.showMessage(self._tr("msg_whisper_download_start_failed"))
-
         def on_hf_download_finished(self, local_dir: str):
             self.status_bar.showMessage(self._tr("msg_whisper_model_loaded", local_dir))
             self.whisper_models_base_dir = self._normalize_whisper_base_dir(os.path.dirname(local_dir))
@@ -153,7 +151,6 @@ class MainWindowWhisperDownloadsMixin:
                 self._tr("info_whisper_model_downloaded") + "\n\n"
                 f"Zielordner:\n{local_dir}"
             )
-
         def on_hf_download_failed(self, msg: str):
             self.status_bar.showMessage(self._tr("msg_whisper_download_failed"))
             if hasattr(self, "hf_download_dialog") and self.hf_download_dialog:

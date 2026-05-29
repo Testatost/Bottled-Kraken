@@ -1,10 +1,8 @@
-"""Small theme-independent close widget for OCR tabs."""
-
 try:
     from PySide6.QtCore import Qt, QSize, QTimer
     from PySide6.QtGui import QColor, QPainter, QPen
     from PySide6.QtWidgets import QWidget, QTabBar
-except Exception:  # pragma: no cover
+except Exception:
     Qt = None
     QSize = None
     QTimer = None
@@ -13,10 +11,7 @@ except Exception:  # pragma: no cover
     QPen = None
     QWidget = object
     QTabBar = None
-
 class OCRTabCloseWidget(QWidget):
-    """Drawn × button used as a QTabBar tab button."""
-
     def __init__(self, tab_bar, on_delete, tooltip="", parent=None):
         super().__init__(parent or tab_bar)
         self._tab_bar = tab_bar
@@ -31,10 +26,8 @@ class OCRTabCloseWidget(QWidget):
             self.setFocusPolicy(Qt.NoFocus)
         except Exception:
             pass
-
     def sizeHint(self):
         return QSize(16, 16) if QSize is not None else super().sizeHint()
-
     def tab_index(self) -> int:
         try:
             for index in range(self._tab_bar.count()):
@@ -49,7 +42,6 @@ class OCRTabCloseWidget(QWidget):
         except Exception:
             pass
         return -1
-
     def enterEvent(self, event):
         self._hover = True
         self.update()
@@ -57,7 +49,6 @@ class OCRTabCloseWidget(QWidget):
             super().enterEvent(event)
         except Exception:
             pass
-
     def leaveEvent(self, event):
         self._hover = False
         self._pressed = False
@@ -66,7 +57,6 @@ class OCRTabCloseWidget(QWidget):
             super().leaveEvent(event)
         except Exception:
             pass
-
     def mousePressEvent(self, event):
         try:
             if Qt is None or event.button() == Qt.LeftButton:
@@ -80,7 +70,6 @@ class OCRTabCloseWidget(QWidget):
             super().mousePressEvent(event)
         except Exception:
             pass
-
     def mouseReleaseEvent(self, event):
         was_pressed = self._pressed
         self._pressed = False
@@ -107,7 +96,6 @@ class OCRTabCloseWidget(QWidget):
             super().mouseReleaseEvent(event)
         except Exception:
             pass
-
     def paintEvent(self, event):
         if QPainter is None or QPen is None:
             return

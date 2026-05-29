@@ -1,10 +1,17 @@
-"""Mixin für MainWindow: ai server urls and model selection."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import (
+    QAction,
+    QActionGroup,
+    QDialog,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
+    RecordView,
+    STATUS_WAITING,
+    TaskItem,
+    os,
+    re,
+    urllib,
+)
 class MainWindowAiServerUrlsAndModelSelectionMixin:
     def _looks_like_ssh_input(self, raw: str) -> bool:
         txt = (raw or "").strip()
@@ -15,11 +22,8 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             return True
         if low.startswith("ssh://"):
             return True
-        # klassisches user@host
         if re.fullmatch(r"[^@\s]+@[^:\s/]+", txt):
             return True
-        # host:22 allein soll NICHT automatisch als URL gelten,
-        # ist oft ein SSH-Hinweis
         if re.fullmatch(r"[^/\s:]+:\d+", txt):
             try:
                 port = int(txt.rsplit(":", 1)[1])
@@ -28,18 +32,14 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             except Exception:
                 pass
         return False
-
     def _normalize_ai_base_url(self, raw: str) -> str:
         url = (raw or "").strip()
         if not url:
             return ""
-        # Quotes / Whitespace säubern
         url = url.strip().strip('"').strip("'")
         url = re.sub(r"\s+", "", url)
-        # SSH-Eingaben hier bewusst NICHT "erraten"
         if self._looks_like_ssh_input(url):
             return ""
-        # Fehlendes Schema ergänzen
         if not re.match(r"^https?://", url, flags=re.IGNORECASE):
             url = "http://" + url
         try:
@@ -55,7 +55,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         port = parsed.port
         path = (parsed.path or "").strip()
         path = re.sub(r"/+", "/", path)
-        # Häufige Fehlformen auf Base-URL zurückführen
         low_path = path.lower().rstrip("/")
         strip_suffixes = [
             "/v1/chat/completions",
@@ -70,20 +69,15 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
                 path = path[:len(path) - len(suffix)]
                 break
         path = path.rstrip("/")
-        # Wenn gar kein API-Pfad da ist -> /v1 anhängen
-        # Wenn bereits /v1 vorhanden -> so lassen
-        # Wenn ein anderer Pfad da ist -> /v1 anhängen
         if not path:
             path = "/v1"
         elif path.lower() != "/v1" and not path.lower().endswith("/v1"):
             path = path + "/v1"
-        # Netloc sauber neu aufbauen
         netloc = host
         if port is not None:
             netloc = f"{host}:{port}"
         normalized = urllib.parse.urlunparse((scheme, netloc, path, "", "", ""))
         return normalized
-
     def set_manual_ai_base_url_dialog(self):
         dlg = QInputDialog(self)
         dlg.setInputMode(QInputDialog.TextInput)
@@ -129,11 +123,9 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             self.status_bar.showMessage(self._tr("msg_lm_no_models_url", normalized))
         self._rebuild_ai_model_submenu()
         self.refresh_models_menu_status()
-
     def _fetch_server_active_model_id(self, base_url: str, timeout: float = 0.6) -> str:
         _, active = self._fetch_models_from_base_url(base_url, timeout=timeout)
         return active
-
     def clear_manual_ai_base_url(self):
         self.ai_manual_base_url = ""
         self.ai_mode = "auto"
@@ -144,7 +136,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         self._rebuild_ai_model_submenu()
         self._update_ai_model_ui()
         self.refresh_models_menu_status()
-
     def scan_ai_models_now(self):
         self._ai_server_cache = {
             "ts": 0.0,
@@ -181,7 +172,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             self.status_bar.showMessage(self._tr("msg_lm_server_not_found"))
         self._rebuild_ai_model_submenu()
         self.refresh_models_menu_status()
-
     def _rebuild_ai_model_submenu(self):
         if not hasattr(self, "ai_models_submenu"):
             return
@@ -210,7 +200,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         self.act_clear_ai_model.triggered.connect(self.clear_ai_model)
         self.act_clear_ai_model.setEnabled(bool(self.ai_model_id or self.ai_available_models))
         self.ai_models_submenu.addAction(self.act_clear_ai_model)
-
     def choose_ai_model_dialog(self):
         models = self._fetch_loaded_llm_models(force=True)
         if not models:
@@ -229,12 +218,10 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             return
         self._set_ai_model(selected)
         self.refresh_models_menu_status()
-
     def _current_ai_mode_label(self) -> str:
         if not (self.ai_model_id or "").strip():
             return "-"
         return "Manuell" if self.ai_mode == "manual" else "Auto"
-
     def _set_ai_model(self, model_id: str):
         self.ai_model_id = (model_id or "").strip()
         for mid, act in self.ai_model_actions.items():
@@ -246,11 +233,9 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             self.status_bar.showMessage(self._tr("msg_ai_model_set", self.ai_model_id))
         else:
             self.status_bar.showMessage(self._tr("msg_ai_model_choice_cleared"))
-
     def clear_ai_model(self):
         self.ai_model_id = ""
         self.ai_available_models = []
-        # alles zurücksetzen
         self.ai_base_url = None
         self.ai_manual_base_url = ""
         self.ai_endpoint = "http://127.0.0.1:1234/v1/chat/completions"
@@ -264,7 +249,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         self._update_ai_model_ui()
         self.refresh_models_menu_status()
         self.status_bar.showMessage(self._tr("msg_ai_model_removed"))
-
     def _swap_lines(self, task: TaskItem, row_a: int, row_b: int):
         if not task or not task.results:
             return
@@ -277,7 +261,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         order = list(range(len(recs)))
         order[row_a], order[row_b] = order[row_b], order[row_a]
         self._reorder_lines_keep_box_slots(task, order, keep_row=row_b)
-
     def _swap_line_with_dialog(self, task: TaskItem, row: int):
         if not task or not task.results:
             return
@@ -288,67 +271,54 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             self,
             self._tr("dlg_swap_title"),
             self._tr("dlg_swap_label"),
-            row + 1,  # value
-            1,  # minValue
-            max(1, len(recs)),  # maxValue
-            1  # step
+            row + 1,
+            1,
+            max(1, len(recs)),
+            1
         )
         if not ok:
             return
         self._swap_lines(task, row, target - 1)
-
     def _project_base_dir(self) -> str:
         if self.project_file_path:
             return os.path.dirname(os.path.abspath(self.project_file_path))
         return os.getcwd()
-
     def _make_hybrid_paths_for_task(self, task: TaskItem) -> tuple[str, str]:
         abs_path = os.path.abspath(task.path)
         rel_path = ""
         try:
             base_dir = self._project_base_dir()
             rel_candidate = os.path.relpath(abs_path, base_dir)
-            # nur sinnvoll, wenn wirklich relativ und nicht auf anderes Laufwerk springt
             if not os.path.isabs(rel_candidate) and not rel_candidate.startswith(".."):
                 rel_path = rel_candidate
             else:
-                # auch '../...' ist als relativer Pfad technisch gültig,
-                # wenn du das erlauben willst, nimm stattdessen einfach:
-                # rel_path = rel_candidate
                 rel_path = rel_candidate
         except Exception:
             rel_path = os.path.basename(abs_path)
         return abs_path, rel_path
-
     def _resolve_hybrid_task_path(self, data: dict) -> str:
         absolute_path = str(data.get("absolute_path", "")).strip()
         relative_path = str(data.get("relative_path", "")).strip()
         legacy_path = str(data.get("path", "")).strip()
-        # 1) absoluter Pfad
         if absolute_path and os.path.exists(absolute_path):
             return os.path.abspath(absolute_path)
-        # 2) relativer Pfad zum Projektordner
         if relative_path:
             candidate = os.path.normpath(os.path.join(self._project_base_dir(), relative_path))
             if os.path.exists(candidate):
                 return candidate
-        # 3) alter path-Eintrag als Fallback
         if legacy_path and os.path.exists(legacy_path):
             return os.path.abspath(legacy_path)
-        # 4) best effort: absoluten Pfad zurückgeben, sonst relativen Kandidaten, sonst legacy
         if absolute_path:
             return os.path.abspath(absolute_path)
         if relative_path:
             return os.path.normpath(os.path.join(self._project_base_dir(), relative_path))
         return legacy_path
-
     def _recordview_to_dict(self, rv: RecordView) -> dict:
         return {
             "idx": int(rv.idx),
             "text": rv.text,
             "bbox": list(rv.bbox) if rv.bbox else None,
         }
-
     def _recordview_from_dict(self, data: dict) -> RecordView:
         bbox = data.get("bbox")
         if bbox is not None:
@@ -358,13 +328,12 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             text=str(data.get("text", "")),
             bbox=bbox
         )
-
     def _task_to_dict(self, task: TaskItem) -> dict:
         abs_path, rel_path = self._make_hybrid_paths_for_task(task)
         payload = {
-            "path": abs_path,  # Legacy/Fallback
-            "absolute_path": abs_path,  # neu
-            "relative_path": rel_path,  # neu: echter relativer Pfad
+            "path": abs_path,
+            "absolute_path": abs_path,
+            "relative_path": rel_path,
             "display_name": task.display_name,
             "status": int(task.status),
             "edited": bool(task.edited),
@@ -377,7 +346,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             text, kr_records, im, recs = task.results
             payload["results"] = {"text": text, "records": [self._recordview_to_dict(rv) for rv in recs], }
         return payload
-
     def _task_from_dict(self, data: dict) -> TaskItem:
         resolved_path = self._resolve_hybrid_task_path(data)
         display_name_default = os.path.basename(resolved_path) if resolved_path else os.path.basename(
@@ -395,11 +363,8 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
         if results:
             recs = [self._recordview_from_dict(x) for x in results.get("records", [])]
             text = str(results.get("text", "\n".join(rv.text for rv in recs).strip()))
-            # Große Projekte/PDFs nicht beim Laden komplett in den Speicher ziehen.
-            # Preview/Export laden die Bilddatei bei Bedarf über task.path.
             task.results = (text, [], None, recs)
         return task
-
     def _project_to_dict(self) -> dict:
         try:
             self._persist_loaded_preview_bboxes()

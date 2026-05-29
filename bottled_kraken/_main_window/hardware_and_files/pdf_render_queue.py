@@ -1,18 +1,37 @@
-"""Mixin für MainWindow: hardware status and file drop."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QCoreApplication,
+    QMessageBox,
+    QProgressDialog,
+    QTableWidgetItem,
+    QThread,
+    QUEUE_COL_CHECK,
+    QUEUE_COL_FILE,
+    QUEUE_COL_NUM,
+    QUEUE_COL_STATUS,
+    Qt,
+    STATUS_ICONS,
+    STATUS_WAITING,
+    Signal,
+    TaskItem,
+    is_project_file,
+    is_supported_input,
+    os,
+)
+from bottled_kraken.workers import (
+    PDFRenderWorker,
+    clear_external_ocr_backend_cache,
+)
+from bottled_kraken.dialogs import (
+    BusyStatusDialog,
+)
 class HardwareSnapshotWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
-
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-
     def run(self):
         try:
             try:
@@ -23,10 +42,8 @@ class HardwareSnapshotWorker(QThread):
             self.done.emit(snapshot)
         except Exception as exc:
             self.failed.emit(repr(exc))
-
 class MainWindowPdfRenderQueueMixin:
         def _start_pdf_render_async(self, pdf_path: str, dpi: int = 300):
-            # falls schon ein PDF gerendert wird: optional blockieren oder queue’n
             if self.pdf_worker and self.pdf_worker.isRunning():
                 QMessageBox.information(self, self._tr("info_title"),
                                         self._tr("msg_pdf_render_already_running"))
@@ -34,8 +51,6 @@ class MainWindowPdfRenderQueueMixin:
             self._pending_pdf_path = pdf_path
             self._set_progress_busy()
             base_name = os.path.basename(pdf_path)
-            # Freundlicher Warte-Dialog mit animiertem Kreis statt statischem ProgressDialog.
-            # Die eigentlichen Seitenfortschritte bleiben zusätzlich in Statusleiste und Haupt-Fortschrittsbalken sichtbar.
             dlg = BusyStatusDialog(
                 self._tr("pdf_render_title"),
                 self._tr("pdf_render_busy_message", base_name),
@@ -45,23 +60,19 @@ class MainWindowPdfRenderQueueMixin:
             dlg.cancel_requested.connect(self._cancel_pdf_render)
             dlg.show()
             self.pdf_progress_dlg = dlg
-            # Worker
             w = PDFRenderWorker(pdf_path, dpi=dpi, parent=self)
             w.progress.connect(self._on_pdf_render_progress)
             w.finished_pdf.connect(self._on_pdf_render_finished)
             w.failed_pdf.connect(self._on_pdf_render_failed)
             self.pdf_worker = w
             w.start()
-
         def _cancel_pdf_render(self):
             if self.pdf_worker and self.pdf_worker.isRunning():
                 self.pdf_worker.requestInterruption()
-
         def _on_pdf_render_progress(self, cur: int, total: int, pdf_path: str):
             dlg = self.pdf_progress_dlg
             base_name = os.path.basename(pdf_path)
             if dlg:
-                # Kompatibel zu altem QProgressDialog und neuem BusyStatusDialog.
                 if hasattr(dlg, "setMaximum") and hasattr(dlg, "maximum"):
                     try:
                         if dlg.maximum() != max(1, total):
@@ -90,9 +101,7 @@ class MainWindowPdfRenderQueueMixin:
             self.progress_bar.setRange(0, max(1, total))
             self.progress_bar.setValue(cur)
             self.status_bar.showMessage(self._tr("pdf_render_label", cur, total, base_name))
-
         def _on_pdf_render_finished(self, pdf_path: str, out_paths: list):
-            # Dialog schließen
             if self.pdf_progress_dlg:
                 try:
                     if hasattr(self.pdf_progress_dlg, "setValue") and hasattr(self.pdf_progress_dlg, "maximum"):
@@ -102,11 +111,9 @@ class MainWindowPdfRenderQueueMixin:
                 self.pdf_progress_dlg.close()
                 self.pdf_progress_dlg = None
             self._set_progress_idle(100)
-            # Worker cleanup
             self.pdf_worker = None
             if not out_paths:
                 return
-            # Seiten in Queue einfügen
             added_any = False
             last_added = None
             base_name = os.path.basename(pdf_path)
@@ -128,7 +135,6 @@ class MainWindowPdfRenderQueueMixin:
             self._refresh_queue_numbers()
             self._fit_queue_columns_exact()
             self._update_queue_hint()
-
         def _on_pdf_render_failed(self, pdf_path: str, msg: str):
             if self.pdf_progress_dlg:
                 self.pdf_progress_dlg.close()
@@ -136,7 +142,6 @@ class MainWindowPdfRenderQueueMixin:
             self.pdf_worker = None
             self._set_progress_idle(0)
             QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_pdf_render_failed", msg))
-
         def add_files_to_queue(self, paths: List[str]):
             added_any = False
             last_added = None
@@ -150,7 +155,6 @@ class MainWindowPdfRenderQueueMixin:
                     project_files.append(p)
                 elif is_supported_input(p):
                     normal_files.append(p)
-            # Projektdatei hat Vorrang
             if project_files:
                 self.load_project_from_path(project_files[0])
                 return
@@ -210,7 +214,6 @@ class MainWindowPdfRenderQueueMixin:
                 self._log(self._tr_log("log_added_files", added_count))
             self._fit_queue_columns_exact()
             self._update_queue_hint()
-
         def _add_file_to_queue_single(
                 self,
                 path: str,
@@ -244,7 +247,6 @@ class MainWindowPdfRenderQueueMixin:
             self.queue_table.selectRow(row)
             self._refresh_queue_numbers()
             self._update_queue_check_header()
-
         def on_item_changed(self, item: QTableWidgetItem):
             if item.column() == QUEUE_COL_CHECK:
                 self._update_queue_check_header()

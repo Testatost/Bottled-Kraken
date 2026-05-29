@@ -1,9 +1,7 @@
-from .line_actions import MainWindowLineActionsMixin
-from .overlay_box_editing import MainWindowOverlayBoxEditingMixin
-from .overlay_display import MainWindowOverlayDisplayMixin
-from .export_flow import MainWindowOverlayExportFlowMixin
-
+from bottled_kraken._main_window.overlay_lines.line_actions import MainWindowLineActionsMixin
+from bottled_kraken._main_window.overlay_lines.overlay_box_editing import MainWindowOverlayBoxEditingMixin
+from bottled_kraken._main_window.overlay_lines.overlay_display import MainWindowOverlayDisplayMixin
+from bottled_kraken._main_window.overlay_lines.export_flow import MainWindowOverlayExportFlowMixin
 class MainWindowLineEditingAndOverlaySyncMixin(MainWindowLineActionsMixin, MainWindowOverlayBoxEditingMixin, MainWindowOverlayDisplayMixin, MainWindowOverlayExportFlowMixin):
     pass
-
 __all__ = ['MainWindowLineEditingAndOverlaySyncMixin', 'MainWindowLineActionsMixin', 'MainWindowOverlayBoxEditingMixin', 'MainWindowOverlayDisplayMixin', 'MainWindowOverlayExportFlowMixin']

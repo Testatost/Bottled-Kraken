@@ -1,10 +1,10 @@
-"""Mixin für MainWindow: queue context preview and model loading."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    KRAKEN_MODELS_DIR,
+    QDateTime,
+    QFileDialog,
+    QMessageBox,
+    os,
+)
 class MainWindowModelSelectionAndLogsMixin:
         def choose_rec_model(self):
             start_dir = self.last_rec_model_dir or KRAKEN_MODELS_DIR or os.getcwd()
@@ -23,7 +23,6 @@ class MainWindowModelSelectionAndLogsMixin:
                 self.status_bar.showMessage(self._tr("msg_loaded_rec", name))
                 self._update_models_menu_labels()
                 self._update_model_clear_buttons()
-
         def choose_seg_model(self):
             start_dir = self.last_seg_model_dir or KRAKEN_MODELS_DIR or os.getcwd()
             p, _ = QFileDialog.getOpenFileName(
@@ -41,7 +40,6 @@ class MainWindowModelSelectionAndLogsMixin:
                 self.status_bar.showMessage(self._tr("msg_loaded_seg", name))
                 self._update_models_menu_labels()
                 self._update_model_clear_buttons()
-
         def _update_model_clear_buttons(self):
             has_rec = bool(self.model_path)
             has_seg = bool(self.seg_model_path)
@@ -53,21 +51,18 @@ class MainWindowModelSelectionAndLogsMixin:
                 self.act_clear_rec.setEnabled(has_rec)
             if hasattr(self, "act_clear_seg"):
                 self.act_clear_seg.setEnabled(has_seg)
-
         def clear_rec_model(self):
             self.model_path = ""
             self.btn_rec_model.setText(self._tr("btn_rec_model_empty"))
             self.status_bar.showMessage(self._tr("msg_loaded_rec", "-"))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
-
         def clear_seg_model(self):
             self.seg_model_path = ""
             self.btn_seg_model.setText(self._tr("btn_seg_model_empty"))
             self.status_bar.showMessage(self._tr("msg_loaded_seg", "-"))
             self._update_models_menu_labels()
             self._update_model_clear_buttons()
-
         def _log(self, msg: str):
             ts = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
             line = f"[{ts}] {msg}"
@@ -75,7 +70,6 @@ class MainWindowModelSelectionAndLogsMixin:
                 self.log_edit.appendPlainText(line)
             except Exception:
                 pass
-
         def toggle_log_area(self, checked: bool):
             self.log_visible = bool(checked)
             self.log_edit.setVisible(self.log_visible)
@@ -88,7 +82,6 @@ class MainWindowModelSelectionAndLogsMixin:
                 self.btn_toggle_log.setText(
                     self._tr("log_toggle_hide") if checked else self._tr("log_toggle_show")
                 )
-
         def export_log_txt(self):
             base_dir = self.current_export_dir or os.getcwd()
             dest_path, _ = QFileDialog.getSaveFileName(

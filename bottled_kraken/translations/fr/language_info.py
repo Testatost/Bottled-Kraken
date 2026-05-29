@@ -1,3 +1,6 @@
 NATIVE_NAME = 'Français'
 ENGLISH_NAME = 'French'
-__all__ = ["NATIVE_NAME", "ENGLISH_NAME"]
+__all__ = [
+    'NATIVE_NAME',
+    'ENGLISH_NAME',
+]

@@ -1,7 +1,20 @@
-"""Kleine Bildbearbeitungs-Hilfsklassen."""
-from ..shared import *
-from ..dialogs import *
-
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLabel,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    Qt,
+    Tuple,
+    dataclass,
+    field,
+    math,
+    translation,
+)
 @dataclass
 class ImageEditSeparator:
     cx: float
@@ -83,7 +96,6 @@ class ImageEditSeparator:
         px = math.cos(self.angle)
         py = math.sin(self.angle)
         return self.cx + px * self.ROT_OFFSET, self.cy + py * self.ROT_OFFSET
-
 @dataclass
 class ImageEditSettings:
     rotation_angle: float = 0.0
@@ -100,11 +112,11 @@ class ImageEditSettings:
     selection_enabled: bool = False
     selection_orig: Optional[Tuple[int, int, int, int]] = None
     split_enabled: bool = False
-    separator_norm: Optional[Tuple[float, float, float]] = None  # cx/w, cy/h, angle
+    separator_norm: Optional[Tuple[float, float, float]] = None
     smart_split_enabled: bool = False
     white_border_px: int = 0
     erase_enabled: bool = False
-    erase_shape: str = ""   # "", "rect", "ellipse"
+    erase_shape: str = ""
     erase_orig: Optional[Tuple[int, int, int, int]] = None
     erase_actions: List[Tuple[str, Tuple[int, int, int, int]]] = field(default_factory=list)
     free_transform_enabled: bool = False
@@ -116,7 +128,6 @@ class ImageEditSettings:
     transform_warp_x: float = 0.0
     transform_warp_y: float = 0.0
     transform_warp_grid_norm: Optional[List[Tuple[float, float]]] = None
-
 class WhiteBorderDialog(QDialog):
     def __init__(self, current_px: int = 0, parent=None):
         super().__init__(parent)
@@ -138,7 +149,6 @@ class WhiteBorderDialog(QDialog):
         lay.addWidget(bb)
     def get_value(self) -> int:
         return int(self.sp_px.value())
-
 class LiveValueDialog(QDialog):
     def __init__(self, title: str, label: str, minimum: int, maximum: int, value: int, parent=None):
         super().__init__(parent)
@@ -162,9 +172,7 @@ class LiveValueDialog(QDialog):
         lay.addWidget(bb)
         self.slider.valueChanged.connect(self._sync_label)
         self._sync_label(self.slider.value())
-
     def _sync_label(self, value: int):
         self.lbl.setText(f"{self._label_base}: {int(value)}")
-
     def value(self) -> int:
         return int(self.slider.value())

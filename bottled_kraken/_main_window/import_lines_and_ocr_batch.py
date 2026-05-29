@@ -1,3 +1,2 @@
-from .ocr_batch import MainWindowImportLinesAndOcrBatchMixin
-
+from bottled_kraken._main_window.ocr_batch import MainWindowImportLinesAndOcrBatchMixin
 __all__ = ['MainWindowImportLinesAndOcrBatchMixin']

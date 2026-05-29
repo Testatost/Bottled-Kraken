@@ -1,8 +1,19 @@
-"""Mixin-Methoden für die Bild-Canvas."""
-from ..shared import *
-from .queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
-from .overlay_dialogs import OverlayBoxDialog
-
+from bottled_kraken.common import (
+    Image,
+    ImageQt,
+    List,
+    Optional,
+    QApplication,
+    QColor,
+    QFont,
+    QPixmap,
+    QRectF,
+    Qt,
+    RecordView,
+    isValid,
+)
+from bottled_kraken._ui_components.queue_widgets import OutlinedSimpleTextItem, ResizableRectItem
+from bottled_kraken._ui_components.overlay_dialogs import OverlayBoxDialog
 class ImageCanvasRenderingMixin:
     def clear_all(self):
         self.stop_draw_box_mode()
@@ -19,19 +30,15 @@ class ImageCanvasRenderingMixin:
         self._zoom = 1.0
         self._fit_zoom = 1.0
         self._show_drop_hint()
-
     def _center_drop_hint_in_view(self):
         if not self._drop_text or self._pixmap_item:
             return
-        # Mittelpunkt des sichtbaren Viewports in Scene-Koordinaten
         center = self.mapToScene(self.viewport().rect().center())
         rect = self._drop_text.boundingRect()
         self._drop_text.setPos(center.x() - rect.width() / 2, center.y() - rect.height() / 2)
-        # Szene so setzen, dass der Text sicher enthalten ist (sonst kann Qt komisch scrollen)
         br = self.scene.itemsBoundingRect()
         if br.isValid():
             self.setSceneRect(br.adjusted(-50, -50, 50, 50))
-
     def _show_drop_hint(self):
         if self._pixmap_item:
             return
@@ -39,26 +46,21 @@ class ImageCanvasRenderingMixin:
         font.setItalic(True)
         txt = self.tr_func("drop_hint") if self.tr_func else ""
         c = QColor("#aaa") if self._bg_color.lightness() < 128 else QColor("#555")
-        # Wenn schon vorhanden: nur aktualisieren
         if self._drop_text and isValid(self._drop_text):
             self._drop_text.setFont(font)
             self._drop_text.setPlainText(txt)
             self._drop_text.setDefaultTextColor(c)
             self._center_drop_hint_in_view()
             return
-        # Sonst: neu erzeugen
         self._drop_text = self.scene.addText(txt, font)
         self._drop_text.setAcceptedMouseButtons(Qt.NoButton)
         self._drop_text.setDefaultTextColor(c)
         self._center_drop_hint_in_view()
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if not self._pixmap_item:
             self._center_drop_hint_in_view()
-
     def load_pil_image(self, im: Image.Image, preserve_view: bool = False):
-        # Aktuellen View-Status VOR dem Leeren speichern
         t = center = z = None
         if preserve_view:
             t, center, z = self._get_view_state()
@@ -69,7 +71,6 @@ class ImageCanvasRenderingMixin:
         self._labels.clear()
         self._selected_idx = None
         self._drop_text = None
-        # WICHTIG: Nicht immer reset/fitten, wenn wir die Ansicht beibehalten sollen
         if not preserve_view:
             self.resetTransform()
             self._zoom = 1.0
@@ -90,7 +91,6 @@ class ImageCanvasRenderingMixin:
             except Exception:
                 self._zoom = 1.0
                 self._fit_zoom = 1.0
-
     def _clear_overlay_items(self):
         for r in list(self._rects.values()):
             try:
@@ -106,21 +106,16 @@ class ImageCanvasRenderingMixin:
                 pass
         self._rects.clear()
         self._labels.clear()
-
     def refresh_overlays(self):
         if self._pixmap_item and hasattr(self, "_last_recs"):
             visible = getattr(self, "_last_overlay_visible_indices", None)
             self.draw_overlays(self._last_recs, visible_indices=visible)
-
     def _on_rect_item_changed(self, idx: int, scene_rect: QRectF):
         self.rect_changed.emit(idx, scene_rect)
-
     def _on_rect_item_clicked(self, idx: int):
         self.rect_clicked.emit(idx)
-
     def _on_rect_item_double_clicked(self, idx: int):
         self.rect_clicked.emit(idx)
-
     def draw_overlays(self, recs: List[RecordView], visible_indices: Optional[List[int]] = None):
         self._last_recs = recs
         if visible_indices is None:
@@ -129,9 +124,7 @@ class ImageCanvasRenderingMixin:
         else:
             visible_set = {int(i) for i in visible_indices if i is not None}
             self._last_overlay_visible_indices = sorted(visible_set)
-
         self._clear_overlay_items()
-
         font = QFont()
         font.setPointSize(10)
         font.setBold(True)
@@ -164,25 +157,18 @@ class ImageCanvasRenderingMixin:
             self._labels[rv.idx] = lab
         self._apply_overlay_item_interactivity()
         self._update_tool_cursor()
-
     def select_idx(self, idx: Optional[int], center: bool = True):
         if idx is None:
             self.select_indices([], center=False)
         else:
             self.select_indices([idx], center=center)
-
     def wheelEvent(self, event):
-        # Mausrad bleibt immer Zoom, auch im Handmodus und bei gedrückter Alt-Taste.
-        # Unter KDE/Wayland kann Alt+Wheel den vertikalen Radimpuls als X-Delta
-        # liefern; deshalb wird für Alt ohne Shift notfalls das X-Delta als
-        # Zoom-Richtung verwendet.
         dy = self._wheel_zoom_delta(event)
         if dy > 0:
             self._apply_zoom(1.25)
         elif dy < 0:
             self._apply_zoom(0.8)
         event.accept()
-
     def _wheel_zoom_delta(self, event) -> int:
         angle_delta = event.angleDelta()
         dy = int(angle_delta.y())
@@ -197,7 +183,6 @@ class ImageCanvasRenderingMixin:
             if dx != 0:
                 return dx
         return 0
-
     def _apply_zoom(self, factor: float):
         new_zoom = self._zoom * factor
         if 0.05 <= new_zoom <= 20.0:

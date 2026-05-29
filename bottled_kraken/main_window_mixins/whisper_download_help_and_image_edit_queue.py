@@ -1,3 +1,0 @@
-from .whisper_help_image_edit import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
-
-__all__ = ['MainWindowWhisperDownloadHelpAndImageEditQueueMixin']

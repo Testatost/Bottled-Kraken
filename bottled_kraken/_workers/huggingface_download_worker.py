@@ -1,16 +1,24 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ..shared import *
-
+from bottled_kraken.common import _force_text
+from bottled_kraken.common import (
+    List,
+    QThread,
+    Signal,
+    Tuple,
+    os,
+    queue,
+    re,
+    subprocess,
+    sys,
+    threading,
+    time,
+    translation,
+)
 def _no_console_kwargs() -> dict:
-    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
     if not sys.platform.startswith("win"):
         return {}
-
     kwargs = {}
-
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -18,9 +26,7 @@ def _no_console_kwargs() -> dict:
         kwargs["startupinfo"] = startupinfo
     except Exception:
         pass
-
     return kwargs
-
 class HFDownloadWorker(QThread):
     progress_changed = Signal(int)
     status_changed = Signal(str)
@@ -48,7 +54,7 @@ class HFDownloadWorker(QThread):
         self._last_status_line = ""
         self._current_file = ""
         self._last_finished_file = ""
-        self._repo_files: List[Tuple[str, int]] = []  # [(rel_path, size), ...]
+        self._repo_files: List[Tuple[str, int]] = []
         self._last_progress_percent = 0
     def cancel(self):
         self._cancel_requested = True
@@ -60,10 +66,6 @@ class HFDownloadWorker(QThread):
             except Exception:
                 pass
     def _stream_reader_to_queue(self, pipe, output_queue: "queue.Queue[str]"):
-        """
-        Liest stdout/stderr zeichenweise und splittet sowohl auf \\n als auch auf \\r.
-        Dadurch kommen auch tqdm-/hf-Fortschrittsupdates an.
-        """
         try:
             if pipe is None:
                 return
@@ -133,10 +135,6 @@ class HFDownloadWorker(QThread):
         current_file = self._extract_current_file_from_output(txt)
         if current_file:
             self._current_file = current_file
-        # WICHTIG:
-        # KEIN Prozentwert aus der hf-Ausgabe direkt für den ProgressBar übernehmen,
-        # weil das meist nur der Fortschritt der aktuellen Datei ist
-        # und NICHT des gesamten Modell-Downloads.
         if "still waiting to acquire lock" in txt.lower():
             self.status_changed.emit(self._tr("hf_status_waiting_for_lock"))
         else:
@@ -148,7 +146,6 @@ class HFDownloadWorker(QThread):
         for root, _dirs, files in os.walk(folder):
             for name in files:
                 full = os.path.join(root, name)
-                # Metadateien ignorieren
                 low = name.lower()
                 if low.endswith(".lock"):
                     continue
@@ -180,12 +177,6 @@ class HFDownloadWorker(QThread):
     def _repo_total_bytes(self) -> int:
         return sum(size for _rel, size in self._repo_files)
     def _scan_local_progress(self) -> Tuple[int, int, str]:
-        """
-        Returns:
-            downloaded_bytes,
-            finished_files_count,
-            last_finished_file
-        """
         downloaded = 0
         finished = 0
         last_finished = ""
@@ -227,25 +218,21 @@ class HFDownloadWorker(QThread):
             total_bytes = self._repo_total_bytes()
             total_files = len(self._repo_files)
             start_time = time.time()
-            # 1) Vorbereitende Befehle (z. B. venv) ausführen
             for cmd in self.prepare_cmds:
                 cmd_text = " ".join(cmd).lower()
                 if "-m venv" in cmd_text:
                     self._run_simple_command(cmd, self._tr("hf_status_create_whisper_env"))
                 else:
                     self._run_simple_command(cmd, self._tr("hf_status_prepare_whisper_env"))
-            # 2) Requirements installieren
             self._run_simple_command(
                 install_cmd,
                 self._tr("hf_status_install_requirements")
             )
-            # 3) Dateiliste/Gesamtgröße ermitteln
             self.status_changed.emit(self._tr("hf_status_fetch_file_list"))
             self._repo_files = self._fetch_repo_files()
             total_bytes = self._repo_total_bytes()
             total_files = len(self._repo_files)
             start_time = time.time()
-            # 3) Download starten
             self.status_changed.emit(self._tr("hf_status_start_download"))
             self._proc = subprocess.Popen(
                 download_cmd,
@@ -284,7 +271,7 @@ class HFDownloadWorker(QThread):
                     if last_finished:
                         self._last_finished_file = last_finished
                     if total_files > 0:
-                        percent_tenths = int((finished_files / total_files) * 1000)  # 0.1%-Schritte
+                        percent_tenths = int((finished_files / total_files) * 1000)
                     else:
                         percent_tenths = 0
                     percent_tenths = max(0, min(1000, percent_tenths))

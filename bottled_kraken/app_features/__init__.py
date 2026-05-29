@@ -1,0 +1,177 @@
+from bottled_kraken.module_registry import register_globals, seed_from_module, synchronize
+from bottled_kraken import common as _common
+from bottled_kraken import ui_components as _ui_components
+from bottled_kraken import workers as _workers
+from bottled_kraken import dialogs as _dialogs
+from bottled_kraken import image_edit as _image_edit
+from bottled_kraken import pointer_features as _pointer_features
+from bottled_kraken import export_layout as _export_layout
+for _base_module in (_common, _ui_components, _workers, _dialogs, _image_edit, _pointer_features, _export_layout):
+    seed_from_module("bk", _base_module)
+def _absorb(module):
+    names = [name for name in vars(module) if not name.startswith("__")]
+    register_globals("bk", vars(module), names)
+    for name in names:
+        globals()[name] = getattr(module, name)
+    return names
+__all__ = []
+from bottled_kraken.app_features import json_worker_and_preview_dialog as _json_worker_and_preview_dialog
+__all__.extend(_absorb(_json_worker_and_preview_dialog))
+from bottled_kraken.app_features import local_json_actions_and_menu_hooks as _local_json_actions_and_menu_hooks
+__all__.extend(_absorb(_local_json_actions_and_menu_hooks))
+from bottled_kraken.app_features import name_heuristics_and_json_payloads as _name_heuristics_and_json_payloads
+__all__.extend(_absorb(_name_heuristics_and_json_payloads))
+from bottled_kraken.app_features import local_json_worker_and_sorting as _local_json_worker_and_sorting
+__all__.extend(_absorb(_local_json_worker_and_sorting))
+from bottled_kraken.app_features import context_text_and_local_postgres as _context_text_and_local_postgres
+__all__.extend(_absorb(_context_text_and_local_postgres))
+from bottled_kraken.app_features import wait_dialog_and_name_expansion as _wait_dialog_and_name_expansion
+__all__.extend(_absorb(_wait_dialog_and_name_expansion))
+from bottled_kraken.app_features import local_json_and_notice_dialog as _local_json_and_notice_dialog
+__all__.extend(_absorb(_local_json_and_notice_dialog))
+from bottled_kraken.app_features import sorting_and_context as _sorting_and_context
+__all__.extend(_absorb(_sorting_and_context))
+from bottled_kraken.app_features import sorting_cancel_controls as _sorting_cancel_controls
+__all__.extend(_absorb(_sorting_cancel_controls))
+from bottled_kraken.app_features import sorting_and_local_json_http as _sorting_and_local_json_http
+__all__.extend(_absorb(_sorting_and_local_json_http))
+from bottled_kraken.app_features import cancel_generate_and_sorting as _cancel_generate_and_sorting
+__all__.extend(_absorb(_cancel_generate_and_sorting))
+from bottled_kraken.app_features import environment_secret_resolution as _environment_secret_resolution
+__all__.extend(_absorb(_environment_secret_resolution))
+from bottled_kraken.app_features import person_table_ai_dialog_hooks as _person_table_ai_dialog_hooks
+__all__.extend(_absorb(_person_table_ai_dialog_hooks))
+from bottled_kraken.app_features import overlay_lm_ocr_and_person_table_exports as _overlay_lm_ocr_and_person_table_exports
+__all__.extend(_absorb(_overlay_lm_ocr_and_person_table_exports))
+from bottled_kraken.app_features import dropdown_retranslation as _dropdown_retranslation
+__all__.extend(_absorb(_dropdown_retranslation))
+from bottled_kraken.app_features import native_file_dialogs as _native_file_dialogs
+__all__.extend(_absorb(_native_file_dialogs))
+from bottled_kraken.app_features import lm_queue_batch_selection_helpers as _lm_queue_batch_selection_helpers
+__all__.extend(_absorb(_lm_queue_batch_selection_helpers))
+from bottled_kraken.app_features import lm_queue_batch_workers as _lm_queue_batch_workers
+__all__.extend(_absorb(_lm_queue_batch_workers))
+from bottled_kraken.app_features import lm_page_ocr_box_alignment_worker as _lm_page_ocr_box_alignment_worker
+__all__.extend(_absorb(_lm_page_ocr_box_alignment_worker))
+from bottled_kraken.app_features import lm_queue_batch_result_handlers as _lm_queue_batch_result_handlers
+__all__.extend(_absorb(_lm_queue_batch_result_handlers))
+from bottled_kraken.app_features import lm_queue_batch_actions_and_dropdown as _lm_queue_batch_actions_and_dropdown
+__all__.extend(_absorb(_lm_queue_batch_actions_and_dropdown))
+from bottled_kraken.app_features import lm_queue_batch_mainwindow_hooks as _lm_queue_batch_mainwindow_hooks
+__all__.extend(_absorb(_lm_queue_batch_mainwindow_hooks))
+from bottled_kraken.app_features import lm_options_settings_helpers as _lm_options_settings_helpers
+__all__.extend(_absorb(_lm_options_settings_helpers))
+from bottled_kraken.app_features import lm_options_token_and_context_dialogs as _lm_options_token_and_context_dialogs
+__all__.extend(_absorb(_lm_options_token_and_context_dialogs))
+from bottled_kraken.app_features import lm_options_prompt_dialog as _lm_options_prompt_dialog
+__all__.extend(_absorb(_lm_options_prompt_dialog))
+from bottled_kraken.app_features import lm_options_menu_hooks as _lm_options_menu_hooks
+__all__.extend(_absorb(_lm_options_menu_hooks))
+from bottled_kraken.app_features import gedcom_initial_worker as _gedcom_initial_worker
+__all__.extend(_absorb(_gedcom_initial_worker))
+from bottled_kraken.app_features import gedcom_initial_menu_hooks as _gedcom_initial_menu_hooks
+__all__.extend(_absorb(_gedcom_initial_menu_hooks))
+from bottled_kraken.app_features import gedcom_vision_worker as _gedcom_vision_worker
+__all__.extend(_absorb(_gedcom_vision_worker))
+from bottled_kraken.app_features import gedcom_save_dialog_and_cleaning as _gedcom_save_dialog_and_cleaning
+__all__.extend(_absorb(_gedcom_save_dialog_and_cleaning))
+from bottled_kraken.app_features import gedcom_robust_text_pipeline as _gedcom_robust_text_pipeline
+__all__.extend(_absorb(_gedcom_robust_text_pipeline))
+from bottled_kraken.app_features import gedcom_structured_json_pipeline as _gedcom_structured_json_pipeline
+__all__.extend(_absorb(_gedcom_structured_json_pipeline))
+from bottled_kraken.app_features import gedcom_review_dialog as _gedcom_review_dialog
+__all__.extend(_absorb(_gedcom_review_dialog))
+from bottled_kraken.app_features import gedcom_prompt_ux_dialog as _gedcom_prompt_ux_dialog
+__all__.extend(_absorb(_gedcom_prompt_ux_dialog))
+from bottled_kraken.app_features import gedcom_registration_table_review as _gedcom_registration_table_review
+__all__.extend(_absorb(_gedcom_registration_table_review))
+from bottled_kraken.app_features import gedcom_registration_source_fallback as _gedcom_registration_source_fallback
+__all__.extend(_absorb(_gedcom_registration_source_fallback))
+from bottled_kraken.app_features import canonical_json_normalization as _canonical_json_normalization
+__all__.extend(_absorb(_canonical_json_normalization))
+from bottled_kraken.app_features import canonical_person_identity as _canonical_person_identity
+__all__.extend(_absorb(_canonical_person_identity))
+from bottled_kraken.app_features import canonical_graph_items_and_view as _canonical_graph_items_and_view
+__all__.extend(_absorb(_canonical_graph_items_and_view))
+from bottled_kraken.app_features import canonical_graph_dialog_setup as _canonical_graph_dialog_setup
+__all__.extend(_absorb(_canonical_graph_dialog_setup))
+from bottled_kraken.app_features import canonical_graph_dialog_ui_tables as _canonical_graph_dialog_ui_tables
+__all__.extend(_absorb(_canonical_graph_dialog_ui_tables))
+from bottled_kraken.app_features import canonical_graph_dialog_layout_and_render as _canonical_graph_dialog_layout_and_render
+__all__.extend(_absorb(_canonical_graph_dialog_layout_and_render))
+from bottled_kraken.app_features import canonical_graph_dialog_selection_and_save as _canonical_graph_dialog_selection_and_save
+__all__.extend(_absorb(_canonical_graph_dialog_selection_and_save))
+from bottled_kraken.app_features import canonical_graph_dialog as _canonical_graph_dialog
+__all__.extend(_absorb(_canonical_graph_dialog))
+from bottled_kraken.app_features import canonical_json_fallback_builder as _canonical_json_fallback_builder
+__all__.extend(_absorb(_canonical_json_fallback_builder))
+from bottled_kraken.app_features import canonical_json_local_menu_hooks as _canonical_json_local_menu_hooks
+__all__.extend(_absorb(_canonical_json_local_menu_hooks))
+from bottled_kraken.app_features import canonical_json_remote_person_table_hooks as _canonical_json_remote_person_table_hooks
+__all__.extend(_absorb(_canonical_json_remote_person_table_hooks))
+from bottled_kraken.app_features import origami_table_export as _origami_table_export
+__all__.extend(_absorb(_origami_table_export))
+from bottled_kraken.app_features import sqlite_json_export_and_ditto as _sqlite_json_export_and_ditto
+__all__.extend(_absorb(_sqlite_json_export_and_ditto))
+from bottled_kraken.app_features import database_generation_registration_fallback as _database_generation_registration_fallback
+__all__.extend(_absorb(_database_generation_registration_fallback))
+from bottled_kraken.app_features import spatial_text_export as _spatial_text_export
+__all__.extend(_absorb(_spatial_text_export))
+from bottled_kraken.app_features import lm_page_ocr_json_generation as _lm_page_ocr_json_generation
+__all__.extend(_absorb(_lm_page_ocr_json_generation))
+from bottled_kraken.app_features import structured_text_docx_export as _structured_text_docx_export
+__all__.extend(_absorb(_structured_text_docx_export))
+from bottled_kraken.app_features import lm_page_item_cleanup as _lm_page_item_cleanup
+__all__.extend(_absorb(_lm_page_item_cleanup))
+from bottled_kraken.app_features import lm_box_reread as _lm_box_reread
+__all__.extend(_absorb(_lm_box_reread))
+from bottled_kraken.app_features import cancellation_candidate_helpers as _cancellation_candidate_helpers
+__all__.extend(_absorb(_cancellation_candidate_helpers))
+from bottled_kraken.app_features import candidate_merge_and_ditto as _candidate_merge_and_ditto
+__all__.extend(_absorb(_candidate_merge_and_ditto))
+from bottled_kraken.app_features import dialog_position_bbox_shortcuts as _dialog_position_bbox_shortcuts
+__all__.extend(_absorb(_dialog_position_bbox_shortcuts))
+from bottled_kraken.app_features import single_line_revision_context as _single_line_revision_context
+__all__.extend(_absorb(_single_line_revision_context))
+from bottled_kraken.app_features import lm_revision_sanity_check as _lm_revision_sanity_check
+__all__.extend(_absorb(_lm_revision_sanity_check))
+from bottled_kraken.app_features import lm_behavior_options as _lm_behavior_options
+__all__.extend(_absorb(_lm_behavior_options))
+from bottled_kraken.app_features import lm_behavior_runtime_bridge as _lm_behavior_runtime_bridge
+__all__.extend(_absorb(_lm_behavior_runtime_bridge))
+from bottled_kraken.app_features import preview_shortcuts_table_exports as _preview_shortcuts_table_exports
+__all__.extend(_absorb(_preview_shortcuts_table_exports))
+from bottled_kraken.app_features import odt_export_line_shortcuts as _odt_export_line_shortcuts
+__all__.extend(_absorb(_odt_export_line_shortcuts))
+from bottled_kraken.app_features import overlay_bbox_persistence_csv as _overlay_bbox_persistence_csv
+__all__.extend(_absorb(_overlay_bbox_persistence_csv))
+from bottled_kraken.app_features import odt_csv_spatial_export as _odt_csv_spatial_export
+__all__.extend(_absorb(_odt_csv_spatial_export))
+from bottled_kraken.app_features import spatial_row_grouping as _spatial_row_grouping
+__all__.extend(_absorb(_spatial_row_grouping))
+from bottled_kraken.app_features import odt_txt_column_layout_export as _odt_txt_column_layout_export
+__all__.extend(_absorb(_odt_txt_column_layout_export))
+from bottled_kraken.app_features import office_export_layout_unified as _office_export_layout_unified
+__all__.extend(_absorb(_office_export_layout_unified))
+from bottled_kraken.app_features import office_export_order_final as _office_export_order_final
+__all__.extend(_absorb(_office_export_order_final))
+from bottled_kraken.app_features import csv_logical_column_layout_export as _csv_logical_column_layout_export
+__all__.extend(_absorb(_csv_logical_column_layout_export))
+from bottled_kraken.app_features import safe_cancellation_ai_jobs as _safe_cancellation_ai_jobs
+__all__.extend(_absorb(_safe_cancellation_ai_jobs))
+from bottled_kraken.app_features import safe_cancellation_pdf_rendering as _safe_cancellation_pdf_rendering
+__all__.extend(_absorb(_safe_cancellation_pdf_rendering))
+from bottled_kraken.app_features import safe_cancellation_export_and_ocr as _safe_cancellation_export_and_ocr
+__all__.extend(_absorb(_safe_cancellation_export_and_ocr))
+from bottled_kraken.app_features import safe_cancellation_thread_cleanup as _safe_cancellation_thread_cleanup
+__all__.extend(_absorb(_safe_cancellation_thread_cleanup))
+from bottled_kraken.app_features import lm_menu_sqlite_graph_ui as _lm_menu_sqlite_graph_ui
+__all__.extend(_absorb(_lm_menu_sqlite_graph_ui))
+from bottled_kraken.app_features import multi_ocr_dialog_selection as _multi_ocr_dialog_selection
+__all__.extend(_absorb(_multi_ocr_dialog_selection))
+from bottled_kraken.app_features import final_export_runtime as _final_export_runtime
+__all__.extend(_absorb(_final_export_runtime))
+from bottled_kraken.app_features import spreadsheet_export_runtime as _spreadsheet_export_runtime
+__all__.extend(_absorb(_spreadsheet_export_runtime))
+__all__ = sorted(set(__all__))
+synchronize("bk")

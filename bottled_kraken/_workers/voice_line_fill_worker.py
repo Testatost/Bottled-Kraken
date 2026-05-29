@@ -1,11 +1,25 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    Optional,
+    QThread,
+    Signal,
+    VOICE_BLOCKSIZE,
+    VOICE_CHANNELS,
+    VOICE_SAMPLE_RATE,
+    np,
+    os,
+    re,
+    sd,
+    sys,
+    time,
+    torch,
+    translation,
+    wave,
+)
 class VoiceLineFillWorker(QThread):
-    finished_line = Signal(str, int, str)  # path, line_index, text
-    failed_line = Signal(str, str)  # path, error_message
-    progress_changed = Signal(int)  # 0..100
-    status_changed = Signal(str)  # status text
+    finished_line = Signal(str, int, str)
+    failed_line = Signal(str, str)
+    progress_changed = Signal(int)
+    status_changed = Signal(str)
     def __init__(
             self,
             path: str,
@@ -34,16 +48,13 @@ class VoiceLineFillWorker(QThread):
         self._audio_chunks = []
         self._stream = None
     def stop(self):
-        # normales Ende der Aufnahme -> Worker beendet den Stream selbst
         self._finish_requested = True
     def cancel(self):
-        # echter Abbruch -> Worker beendet den Stream selbst
         self._cancel_requested = True
         self.requestInterruption()
         self._finish_requested = False
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
-            # optional für Debug
             try:
                 self.status_changed.emit(self._tr("voice_status_audio_status", status))
             except Exception:
@@ -146,7 +157,6 @@ class VoiceLineFillWorker(QThread):
         return tmp_path
     def _replace_spoken_punctuation_with_placeholders(self, text: str) -> str:
         txt = (text or "").strip()
-        # wichtig: längere Begriffe zuerst
         replacements = [
             (r"\bschräg\s*strich\b[.,;:!?]?", " <<SLASH>> "),
             (r"\bslash\b[.,;:!?]?", " <<SLASH>> "),
@@ -202,26 +212,16 @@ class VoiceLineFillWorker(QThread):
         }
         for placeholder, char in replacements.items():
             txt = txt.replace(placeholder, char)
-        # Punkt vor Doppelpunkt automatisch entfernen:
-        # "Ort.:" / "Ort. :" / "Ort :" -> "Ort:"
         txt = re.sub(r"\.\s*:", ":", txt)
-        # kein Leerzeichen vor klassischen Satzzeichen
         txt = re.sub(r"\s+([.,:;?!%€)\]])", r"\1", txt)
-        # kein Leerzeichen nach öffnenden Klammern
         txt = re.sub(r"([(\[\{])\s+", r"\1", txt)
-        # keine Leerzeichen um technische Zeichen
         txt = re.sub(r"\s*([/\-=+*_#])\s*", r"\1", txt)
-        # Doppelte Spaces glätten
         txt = re.sub(r"\s+", " ", txt).strip()
         return txt
     def _postprocess_transcript(self, text: str) -> str:
         txt = (text or "").strip()
-        # gesprochene Satzzeichen zuerst in Platzhalter umwandeln
         txt = self._replace_spoken_punctuation_with_placeholders(txt)
-        # automatische Satzendzeichen von Whisper nur entfernen,
-        # wenn sie NICHT aus einem Platzhalter entstanden sind
         txt = re.sub(r"[.!?]+$", "", txt).strip()
-        # Platzhalter zurückwandeln
         txt = self._restore_punctuation_placeholders(txt)
         return re.sub(r"\s+", " ", txt).strip()
     def run(self):

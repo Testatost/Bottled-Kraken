@@ -1,8 +1,7 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
+from bottled_kraken.common import List, Optional, QColor, QPainter, QPen, QPointF, QRectF, Qt, math
+from bottled_kraken._image_edit.common import ImageEditSeparator
 from PySide6.QtGui import QPolygonF
-from ..warp_mesh_utils import warp_map_uv
+from bottled_kraken._image_edit.warp_mesh_utils import warp_map_uv
 class ImageEditCanvasPaintingAndHitTestingMixin:
         def paintEvent(self, event):
             painter = QPainter(self)
@@ -123,9 +122,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
                 border_handle_indices = (0, 1, 2, 3, 5, 6, 7, 8)
             transformed_pts = self.transformed_selection_polygon() if hasattr(self, "transformed_selection_polygon") else None
             visible_outline = [QPointF(p) for p in (transformed_pts or [])] if transformed_pts and len(transformed_pts) >= 3 else [QPointF(p) for p in mesh_outline]
-            # Sichtbare Auswahlform beibehalten: Kreis/Freihand/Polygon soll auch im
-            # Warp-Modus als eigentliche Auswahlform erkennbar bleiben und nicht auf
-            # einen bloßen Rechteckrahmen reduziert werden.
             painter.setBrush(QColor(90, 163, 255, 24))
             painter.setPen(QPen(QColor("#5aa3ff"), 2, Qt.SolidLine))
             painter.drawPolygon(QPolygonF(visible_outline))
@@ -135,8 +131,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
                 painter.drawPolyline(QPolygonF([QPointF(*warp_map_uv(tuples, u, k / 32.0)) for k in range(33)]))
             for v in mesh_lines:
                 painter.drawPolyline(QPolygonF([QPointF(*warp_map_uv(tuples, k / 32.0, v)) for k in range(33)]))
-            # Randgriffe bleiben separat weiß. Die 9 inneren Kontrollpunkte sind blau
-            # und verformen nur das Innere, solange keine Randgriffe bewegt werden.
             painter.setPen(QPen(QColor("#0b3a75"), 1))
             for i in border_handle_indices:
                 pt = grid[i]
@@ -167,15 +161,9 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
                 return
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing, True)
-            # Sichtbarer Transformationsbereich: bevorzugt die echte erzeugte Auswahlform.
             painter.setPen(QPen(QColor("#5aa3ff"), 2))
             painter.setBrush(QColor(90, 163, 255, 25))
             painter.drawPolygon(QPolygonF(outline_pts))
-            # Die Griffe sitzen auf der sichtbaren Auswahlform. Bei gezielter/freier
-            # Vierpunkt-Auswahl waren sie vorher noch auf der internen Bounding-Box;
-            # dadurch lagen Eck- und Seitenpunkte neben dem tatsächlich transformierten
-            # Ausschnitt. Für freie/elliptische Auswahlformen mit vielen Punkten bleibt
-            # die interne Vierpunkt-Hülle als Steuergeometrie erhalten.
             painter.setPen(QPen(QColor("#0b3a75"), 1))
             painter.setBrush(QColor("#ffffff"))
             for idx, pt in enumerate(handle_quad):
@@ -185,9 +173,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
             for mid in self._transform_edge_midpoints():
                 painter.drawEllipse(mid, 5, 5)
             br = self._bounding_rect_from_points(handle_quad)
-            # Für Kreis-/Polygon-/Freihand-Auswahlen soll keine zusätzliche
-            # rechteckige Hilfshülle erscheinen. Die sichtbare Auswahlform selbst
-            # ist bereits die relevante Orientierung.
             if not getattr(self, "transform_src_polygon", None):
                 painter.setPen(QPen(QColor(90, 163, 255, 55), 1, Qt.DashLine))
                 painter.setBrush(Qt.NoBrush)
@@ -320,13 +305,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
             ys = [p.y() for p in points]
             return QRectF(min(xs), min(ys), max(5.0, max(xs) - min(xs)), max(5.0, max(ys) - min(ys)))
         def _transform_visual_outline_points(self, transformed_pts=None) -> List[QPointF]:
-            """Visible outline of the active free-transform selection.
-            The internal transform_quad is the rectangle/quadrilateral used for the
-            image mapping. If the user transformed a targeted four-point selection,
-            the actually visible selected area can differ from that internal helper
-            quad. Painting and hit-testing must follow the visible area so the corner
-            and edge handles stay attached to the transformed selection.
-            """
             pts = transformed_pts
             if pts is None and hasattr(self, "transformed_selection_polygon"):
                 try:
@@ -337,12 +315,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
                 return [QPointF(p) for p in pts]
             return [QPointF(p) for p in (self.transform_quad or [])]
         def _outline_handle_quad_from_points(self, pts: List[QPointF]) -> List[QPointF]:
-            """Approximate four transform handle positions on the visible outline.
-            For ellipse/freehand/polygon selections we still keep the internal
-            transform_quad as the mathematical transform basis, but visually the
-            handles should sit on the actual selected outline instead of on a plain
-            rectangular helper frame.
-            """
             if not pts or len(pts) < 3:
                 return [QPointF(p) for p in (self.transform_quad or [])]
             base_quad = [QPointF(p) for p in (self.transform_quad or [])]
@@ -361,12 +333,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
                 chosen.append(QPointF(available.pop(best_idx)))
             return chosen
         def _transform_visual_handle_quad(self, transformed_pts=None) -> List[QPointF]:
-            """Four points used for transform handles.
-            If the current selection has its own visible polygon/ellipse/freehand
-            outline, the transform handles should follow that outline instead of a
-            generic rectangular frame. Only plain rectangular selections fall back to
-            the internal transform_quad directly.
-            """
             pts = transformed_pts
             if pts is None and hasattr(self, "transformed_selection_polygon"):
                 try:
@@ -428,9 +394,6 @@ class ImageEditCanvasPaintingAndHitTestingMixin:
             mode = str(getattr(self, "transform_mode", "") or "")
             if mode == "warp":
                 grid = self._warp_grid_points() if hasattr(self, "_warp_grid_points") else []
-                # Im Warp-Modus sind die sichtbaren Randgriffe und die 9 inneren
-                # Kontrollpunkte gezielt greifbar. Ein Klick in die Fläche verschiebt
-                # den Rand nicht versehentlich.
                 if len(grid) == 25:
                     hit_indices = (6, 7, 8, 11, 12, 13, 16, 17, 18, 0, 2, 4, 10, 14, 20, 22, 24)
                     outline = [grid[i] for i in (0, 4, 24, 20)]

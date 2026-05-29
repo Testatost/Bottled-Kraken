@@ -1,9 +1,7 @@
-"""Mixin-Methoden für den Bildbearbeitungsdialog."""
-from ..shared import *
-from ..dialogs import *
-from .common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
-from .canvas import ImageEditCanvas
-from .warp_mesh_utils import legacy_sine_warp_rgba, scale_grid, warp_rgba_by_grid
+from bottled_kraken.common import Image, ImageDraw, QPointF, Tuple, clip_polygon_halfplane, math, np, polygon_area
+from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
+from bottled_kraken._image_edit.canvas import ImageEditCanvas
+from bottled_kraken._image_edit.warp_mesh_utils import legacy_sine_warp_rgba, scale_grid, warp_rgba_by_grid
 class ImageEditDialogProcessingMixin:
     def _get_effective_crop_area(self, img: Image.Image) -> Tuple[int, int, int, int]:
         if self.chk_crop.isChecked():
@@ -164,6 +162,28 @@ class ImageEditDialogProcessingMixin:
             x_bottom,
             oy2
         )]
+    def _adjust_smart_split_separator(self):
+        if not self.chk_split.isChecked() or not self.chk_smart_split.isChecked():
+            return False
+        if self.canvas.view_image is None:
+            return False
+        preview = self._apply_options(self.original_image)
+        if self.canvas.separator is None:
+            w, h = self.canvas.view_image.size
+            self.canvas.separator = ImageEditSeparator(cx=w / 2.0, cy=h / 2.0, angle=0.0)
+        crop_area = self._get_effective_crop_area(preview)
+        lines = self._separator_lines_for_processing(preview)
+        detected = self._auto_detect_smart_splits(preview, crop_area, guide_line_orig=lines)
+        if not detected:
+            return False
+        x1, y1, x2, y2 = detected[0]
+        vw, vh = self.canvas.view_image.size
+        bw, bh = preview.size
+        sx = vw / max(1.0, float(bw))
+        sy = vh / max(1.0, float(bh))
+        self.canvas.separator.set_from_points((x1 * sx, y1 * sy), (x2 * sx, y2 * sy))
+        self.canvas.update()
+        return True
     def _warp_pil_image_for_processing(self, crop: Image.Image, warp_x: float = 0.0, warp_y: float = 0.0) -> Image.Image:
         return legacy_sine_warp_rgba(crop, warp_x, warp_y)
     def _perspective_coefficients(self, dst_points, src_points):
@@ -193,7 +213,6 @@ class ImageEditDialogProcessingMixin:
             ImageDraw.Draw(mask).rectangle((0, 0, max(0, w - 1), max(0, h - 1)), fill=255)
         return mask
     def _rotate_mode_base_patch_orig(self, img, crop_rgba, src_mask, src_rect, x1, y1, x2, y2, sx: float, sy: float):
-        """Render the current pre-rotate transform basis for final apply."""
         try:
             crop_w = max(1, int(x2 - x1))
             crop_h = max(1, int(y2 - y1))

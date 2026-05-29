@@ -1,28 +1,32 @@
-"""Mixin für MainWindow: menu setup and queue headers."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import _serialize_ocr_auto_revision_replacements
+from bottled_kraken.common import (
+    Dict,
+    List,
+    QAction,
+    QActionGroup,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QKeySequence,
+    QLabel,
+    QPlainTextEdit,
+    QVBoxLayout,
+    READING_MODES,
+)
 import math
-
-from .menu_behavior import BKStayOpenMenu
-
+from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
 class MainWindowMenuConstructionMixin:
-
         def set_kraken_auto_revision_enabled(self, checked: bool):
             self.kraken_auto_revision_enabled = bool(checked)
             try:
                 self.settings.setValue("ocr/auto_revision_enabled", "true" if self.kraken_auto_revision_enabled else "false")
             except Exception:
                 pass
-
         def _kraken_auto_revision_default_text(self) -> str:
             try:
                 return _serialize_ocr_auto_revision_replacements()
             except Exception:
                 return "ſ=s\n⸗=-\n±=+/-"
-
         def _open_kraken_auto_revision_settings(self):
             dialog = QDialog(self)
             dialog.setWindowTitle(self._tr("kraken_revision_settings_title"))
@@ -65,7 +69,6 @@ class MainWindowMenuConstructionMixin:
                     self.settings.setValue("ocr/auto_revision_enabled", "true" if self.kraken_auto_revision_enabled else "false")
                 except Exception:
                     pass
-
         def _place_kraken_auto_revision_action_at_bottom(self):
             if not hasattr(self, "models_menu"):
                 return
@@ -81,16 +84,12 @@ class MainWindowMenuConstructionMixin:
                         pass
             self._kraken_auto_revision_separator = self.models_menu.addSeparator()
             self.models_menu.addAction(self.act_kraken_auto_revision_settings)
-
         def _shortcut_ctrl_label(self, suffix: str) -> str:
             lang = str(getattr(self, "current_lang", "") or "").lower()
             prefix = "Strg" if lang.startswith("de") else "Ctrl"
             return f"{prefix}+{str(suffix).lstrip('+')}"
-
         def _menu_text_with_shortcut(self, text: str, suffix: str) -> str:
-            # Tab trennt in Qt-Menüs den Beschriftungstext von der Shortcut-Spalte.
             return f"{str(text)}\t{self._shortcut_ctrl_label(suffix)}"
-
         def _init_menu(self):
             menubar = self.menuBar()
             self.file_menu = BKStayOpenMenu(self._tr("menu_file"), self)
@@ -150,8 +149,6 @@ class MainWindowMenuConstructionMixin:
             self.models_menu.addAction(self.act_seg)
             self.models_menu.addSeparator()
             self.kraken_models_submenu = BKStayOpenMenu(self._tr("submenu_available_kraken_models"), self.models_menu); self.models_menu.addMenu(self.kraken_models_submenu)
-            # Diese Aktionen werden nicht mehr direkt ins Hauptmenü gesetzt,
-            # sondern im Untermenü eingebaut.
             self.act_clear_rec = QAction(self._tr("act_clear_rec"), self)
             self.act_clear_rec.triggered.connect(self.clear_rec_model)
             self.act_clear_seg = QAction(self._tr("act_clear_seg"), self)
@@ -171,9 +168,6 @@ class MainWindowMenuConstructionMixin:
             self.models_menu.addAction(self.act_download)
             self._place_kraken_auto_revision_action_at_bottom()
             self.revision_models_menu = BKStayOpenMenu(self._tr("menu_lm_options"), self); menubar.addMenu(self.revision_models_menu)
-            # -----------------------------
-            # Whisper-Optionen
-            # -----------------------------
             self.whisper_menu = BKStayOpenMenu(self._tr("menu_whisper_options"), self); menubar.addMenu(self.whisper_menu)
             self.act_whisper_set_path = QAction(self._tr("act_whisper_set_path"), self)
             self.act_whisper_set_path.triggered.connect(self.set_whisper_base_dir_dialog)
@@ -227,14 +221,12 @@ class MainWindowMenuConstructionMixin:
             self.act_lm_base_url = QAction(self._tr("lm_server_value", "-"), self)
             self.act_lm_base_url.setEnabled(False)
             self.revision_models_menu.addAction(self.act_lm_base_url)
-            # Sprachen
             self._build_toolbar_language_theme_menus()
-            # Hardware-Menü
             self.options_menu.addSeparator()
             self.hw_menu = BKStayOpenMenu(self._tr("menu_hw"), self.options_menu); self.options_menu.addMenu(self.hw_menu)
             hw_group = QActionGroup(self)
             self.hw_actions: Dict[str, QAction] = {}
-            for key, dev in [("hw_cpu", "cpu"), ("hw_cuda", "cuda"), ("hw_rocm", "rocm"), ("hw_mps", "mps")]:
+            for key, dev in [("hw_cpu", "cpu"), ("hw_cuda", "cuda"), ("hw_rocm", "rocm")]:
                 act = QAction(self._tr(key), self)
                 act.setCheckable(True)
                 if dev == self.device_str:
@@ -243,7 +235,6 @@ class MainWindowMenuConstructionMixin:
                 hw_group.addAction(act)
                 self.hw_menu.addAction(act)
                 self.hw_actions[dev] = act
-
                 if dev == "cuda":
                     self.act_install_cuda_backend = QAction(self._tr("hw_install_cuda_backend"), self)
                     self.act_install_cuda_backend.triggered.connect(
@@ -256,7 +247,6 @@ class MainWindowMenuConstructionMixin:
                         lambda checked=False: self.open_integrated_backend_installer("amd-rocm")
                     )
                     self.hw_menu.addAction(self.act_install_rocm_backend)
-            # Leserichtung
             self.options_menu.addSeparator()
             self.reading_menu = BKStayOpenMenu(self._tr("menu_reading"), self.options_menu); self.options_menu.addMenu(self.reading_menu)
             read_group = QActionGroup(self)
@@ -275,13 +265,11 @@ class MainWindowMenuConstructionMixin:
                 read_group.addAction(act)
                 self.reading_menu.addAction(act)
                 self.read_actions.append(act)
-            # Overlay (Boxen)
             self.options_menu.addSeparator()
             self.overlay_menu = BKStayOpenMenu(self._tr("act_overlay_show"), self.options_menu); self.options_menu.addMenu(self.overlay_menu)
             self.overlay_display_group = QActionGroup(self)
             self.overlay_display_group.setExclusive(True)
             self.overlay_display_actions: Dict[str, QAction] = {}
-
             for key, mode in [
                 ("overlay_mode_none", "none"),
                 ("overlay_mode_current", "current"),
@@ -296,11 +284,8 @@ class MainWindowMenuConstructionMixin:
                 self.overlay_display_group.addAction(act)
                 self.overlay_menu.addAction(act)
                 self.overlay_display_actions[mode] = act
-
             self.act_overlay_resize_boxes = QAction(self._tr("overlay_resize_menu"), self)
             self.act_overlay_resize_boxes.triggered.connect(self.resize_overlay_boxes_dialog)
-
-            # Kompatibilitäts-Alias für ältere Runtime-Patches, die noch self.act_overlay erwarten.
             self.act_overlay = self.overlay_menu.menuAction()
             if self.device_str in self.hw_actions:
                 self.hw_actions[self.device_str].setChecked(True)

@@ -1,11 +1,19 @@
-"""Mixin für MainWindow: project persistence and queue selection."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
+from bottled_kraken.common import (
+    QFileDialog,
+    QMessageBox,
+    QProgressDialog,
+    QTableWidgetItem,
+    QUEUE_COL_CHECK,
+    QUEUE_COL_FILE,
+    QUEUE_COL_NUM,
+    QUEUE_COL_STATUS,
+    Qt,
+    STATUS_DONE,
+    json,
+    os,
+    translation,
+)
 import math
-
 class MainWindowProjectFilesMixin:
         def _remap_missing_project_files(self):
             missing = [t for t in self.queue_items if not os.path.exists(t.path)]
@@ -32,13 +40,10 @@ class MainWindowProjectFilesMixin:
                 candidates = []
                 rel = (task.relative_path or "").strip()
                 old_path = (task.path or "").strip()
-                # 1) echter relativer Pfad innerhalb des neuen Basisordners
                 if rel:
                     candidates.append(os.path.normpath(os.path.join(new_base_dir, rel)))
-                # 2) nur Dateiname als Fallback
                 if old_path:
                     candidates.append(os.path.normpath(os.path.join(new_base_dir, os.path.basename(old_path))))
-                # doppelte Kandidaten vermeiden
                 seen = set()
                 final_candidates = []
                 for c in candidates:
@@ -63,7 +68,6 @@ class MainWindowProjectFilesMixin:
                     self._tr("warn_title"),
                     self._tr("project_files_still_missing", "\n".join(unresolved[:20]))
                 )
-
         def _load_project_dict(self, data: dict):
             progress = QProgressDialog(self._tr("project_loading_progress"), None, 0, 100, self)
             progress.setWindowTitle(self._tr("dlg_project_loading_title"))
@@ -178,7 +182,6 @@ class MainWindowProjectFilesMixin:
                 self._process_ui()
             finally:
                 progress.close()
-
         def save_project_as(self):
             base_dir = self.current_export_dir or os.getcwd()
             path, _ = QFileDialog.getSaveFileName(
@@ -193,7 +196,6 @@ class MainWindowProjectFilesMixin:
                 path += ".json"
             self.project_file_path = path
             self.save_project()
-
         def save_project(self):
             if not self.project_file_path:
                 self.save_project_as()
@@ -210,7 +212,6 @@ class MainWindowProjectFilesMixin:
                 )
             except Exception as e:
                 QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_project_save_failed", str(e)))
-
         def load_project(self):
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -221,7 +222,6 @@ class MainWindowProjectFilesMixin:
             if not path:
                 return
             self.load_project_from_path(path)
-
         def load_project_from_path(self, path: str):
             if not path:
                 return

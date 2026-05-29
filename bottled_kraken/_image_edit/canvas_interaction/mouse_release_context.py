@@ -1,7 +1,7 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
-
+from bottled_kraken.common import (
+    QPointF,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 class ImageEditCanvasMouseReleaseContextMixin:
         def mouseReleaseEvent(self, event):
             if self.drag_mode == "img_rotate":
@@ -53,7 +53,6 @@ class ImageEditCanvasMouseReleaseContextMixin:
             self._update_cursor(self._widget_to_image(wp))
             self.update()
             self.changed.emit()
-
         def contextMenuEvent(self, event):
             parent = self.parent()
             if not parent:

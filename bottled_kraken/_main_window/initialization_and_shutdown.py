@@ -1,10 +1,13 @@
-"""Mixin für MainWindow: initialization and shutdown."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
-
+from bottled_kraken.common import _load_image_gray
+from bottled_kraken.common import (
+    BBox,
+    Image,
+    Optional,
+    QRectF,
+    TaskItem,
+    isValid,
+    os,
+)
 class MainWindowInitializationAndShutdownMixin:
     def _reset_ai_server_cache(self):
         self._ai_server_cache = {
@@ -12,19 +15,11 @@ class MainWindowInitializationAndShutdownMixin:
             "base_url": None,
             "model_id": None,
         }
-
     def _close_ai_progress_dialog(self):
         if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
             self.ai_progress_dialog.close()
             self.ai_progress_dialog = None
-
     def _task_geometry_image(self, task: Optional[TaskItem]) -> Optional[Image.Image]:
-        """Liefert ein Bildobjekt nur temporär für Geometrie/Clamping.
-
-        Nach dem Speicherfix werden große Batch-Ergebnisse ohne PIL-Bild in
-        task.results gehalten. Funktionen, die nur Breite/Höhe benötigen,
-        laden die Bilddatei deshalb bei Bedarf kurz vom Pfad.
-        """
         if not task:
             return None
         try:
@@ -40,7 +35,6 @@ class MainWindowInitializationAndShutdownMixin:
         except Exception:
             return None
         return None
-
     def _scene_rect_to_bbox(self, scene_rect: QRectF, im: Optional[Image.Image]) -> Optional[BBox]:
         if im is None:
             return None
@@ -55,7 +49,6 @@ class MainWindowInitializationAndShutdownMixin:
         if y1 <= y0:
             y1 = min(img_h, y0 + 1)
         return (x0, y0, x1, y1)
-
     def _persist_live_canvas_bboxes(self, task: Optional[TaskItem]):
         if not task or not task.results:
             return
@@ -80,7 +73,6 @@ class MainWindowInitializationAndShutdownMixin:
                 recs
             )
         self._update_task_preset_bboxes(task)
-
     def _all_workers(self):
         return [
             self.worker,
@@ -91,7 +83,6 @@ class MainWindowInitializationAndShutdownMixin:
             self.hf_download_worker,
             self.voice_worker,
         ]
-
     def _request_all_workers_stop(self):
         workers = []
         if self.worker and self.worker.isRunning():

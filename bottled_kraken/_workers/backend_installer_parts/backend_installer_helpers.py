@@ -1,70 +1,17 @@
-"""Integrated GPU backend installer for Bottled Kraken.
-
-The CPU one-file application stays unchanged. This module installs optional
-external GPU OCR backends into the user's data directory and writes the backend
-metadata that external_backend_ocr.py can discover.
-"""
-
 from __future__ import annotations
-
-import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-
-from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QDialog,
-    QDialogButtonBox,
-    QLabel,
-    QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QVBoxLayout,
+from bottled_kraken.version_config import (
+    APP_DIR_NAME,
+    APP_VERSION,
+    BACKEND_DEFS,
+    KRAKEN_REQUIREMENT,
+    PYTHON_BIDI_REQUIREMENT,
 )
-
-from ..external_backend_ocr import (
-    EXTERNAL_KRAKEN_WORKER_SOURCE,
-    clear_external_ocr_backend_cache,
-)
-
-APP_DIR_NAME = "BottledKraken"
-APP_VERSION = "3.3"
-
-BACKEND_DEFS: Dict[str, Dict[str, str]] = {
-    "nvidia-cuda": {
-        "name": "Bottled Kraken NVIDIA CUDA Backend",
-        "short_name": "NVIDIA CUDA",
-        "dir": "nvidia-cuda",
-        "torch_index": "cu128",
-        # Kraken 7.0.2 erlaubt aktuell maximal torch 2.10.x.
-        # Ohne feste Version zieht der PyTorch-CUDA-Index die neueste Wheel
-        # und kann dadurch eine zu neue, inkompatible torch-Version installieren.
-        "torch": "2.10.0",
-        "torchvision": "0.25.0",
-    },
-    "amd-rocm": {
-        "name": "Bottled Kraken AMD ROCm Backend",
-        "short_name": "AMD ROCm",
-        "dir": "amd-rocm",
-        "torch_index": "rocm6.4",
-        "torch": "",
-        "torchvision": "",
-    },
-}
-
-# Kraken 7.x depends on python-bidi. The backend installer installs it first
-# as a binary wheel, so users do not need Rust/C++ build tooling during backend
-# installation.
-PYTHON_BIDI_REQUIREMENT = "python-bidi>=0.6.7,<0.7"
-KRAKEN_REQUIREMENT = "kraken==7.0.2"
-
 def _fallback_tr(key: str, *args) -> str:
     fallback = {
         "backend_install_title_nvidia": "Install NVIDIA CUDA backend",
@@ -98,7 +45,6 @@ def _fallback_tr(key: str, *args) -> str:
         except Exception:
             return text
     return text
-
 def _call_tr(tr_func: Optional[Callable[..., str]], key: str, *args) -> str:
     if tr_func is None:
         return _fallback_tr(key, *args)
@@ -106,30 +52,24 @@ def _call_tr(tr_func: Optional[Callable[..., str]], key: str, *args) -> str:
         return tr_func(key, *args)
     except Exception:
         return _fallback_tr(key, *args)
-
 def backend_root() -> Path:
     custom = os.environ.get("BOTTLED_KRAKEN_BACKENDS_DIR", "").strip()
     if custom:
         return Path(custom).expanduser()
-
     if sys.platform.startswith("win"):
         base = os.environ.get("LOCALAPPDATA", "").strip()
         if base:
             return Path(base) / APP_DIR_NAME / "backends"
         return Path.home() / "AppData" / "Local" / APP_DIR_NAME / "backends"
-
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / APP_DIR_NAME / "backends"
-
     xdg = os.environ.get("XDG_DATA_HOME", "").strip()
     if xdg:
         return Path(xdg).expanduser() / APP_DIR_NAME / "backends"
     return Path.home() / ".local" / "share" / APP_DIR_NAME / "backends"
-
 def backend_dir(kind: str) -> Path:
     meta = BACKEND_DEFS.get(kind, BACKEND_DEFS["nvidia-cuda"])
     return backend_root() / meta["dir"]
-
 def detect_linux_distro() -> str:
     os_release = Path("/etc/os-release")
     data: Dict[str, str] = {}
@@ -151,7 +91,6 @@ def detect_linux_distro() -> str:
     if "ubuntu" in like or "debian" in like:
         return "linux-mint-debian"
     return "linux"
-
 def detect_platform_id() -> str:
     if sys.platform.startswith("win"):
         return "windows"
@@ -160,17 +99,12 @@ def detect_platform_id() -> str:
     if sys.platform.startswith("linux"):
         return detect_linux_distro()
     return sys.platform
-
 def _no_console_kwargs() -> Dict[str, object]:
-    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
     if not sys.platform.startswith("win"):
         return {}
-
     kwargs: Dict[str, object] = {}
-
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -178,9 +112,7 @@ def _no_console_kwargs() -> Dict[str, object]:
         kwargs["startupinfo"] = startupinfo
     except Exception:
         pass
-
     return kwargs
-
 def _run_capture(cmd: List[str], timeout: int = 15) -> Tuple[int, str]:
     try:
         p = subprocess.run(
@@ -197,19 +129,14 @@ def _run_capture(cmd: List[str], timeout: int = 15) -> Tuple[int, str]:
         return p.returncode, p.stdout.strip()
     except Exception as exc:
         return 1, repr(exc)
-
 def _python_candidates() -> List[List[str]]:
     forced = os.environ.get("BK_BACKEND_PYTHON", "").strip()
     if forced:
         return [[forced]]
-
     if sys.platform.startswith("win"):
         candidates: List[List[str]] = []
         py_launcher = shutil.which("py")
         if py_launcher:
-            # Für externe GPU-Backends bevorzugen wir unter Windows konservativ
-            # Python 3.12/3.11/3.10. Damit wird vermieden, dass Pip bei neueren
-            # Python-Versionen versehentlich eine CPU-only PyTorch-Wheel auswählt.
             for ver in ("3.12", "3.11", "3.10", "3.13"):
                 candidates.append([py_launcher, f"-{ver}"])
             candidates.append([py_launcher, "-3"])
@@ -218,14 +145,12 @@ def _python_candidates() -> List[List[str]]:
             if path:
                 candidates.append([path])
         return candidates
-
     candidates = []
-    for exe in ("python3.13", "python3.12", "python3.11", "python3.10", "python3"):
+    for exe in ("python3.12", "python3.11", "python3.10", "python3.13", "python3"):
         path = shutil.which(exe)
         if path:
             candidates.append([path])
     return candidates
-
 def _check_python(cmd: List[str]) -> Optional[str]:
     code = (
         "import sys; "
@@ -239,14 +164,12 @@ def _check_python(cmd: List[str]) -> Optional[str]:
     if rc == 0 and out:
         return out.strip()
     return "python"
-
 def choose_python() -> Tuple[Optional[List[str]], str]:
     for cmd in _python_candidates():
         ver = _check_python(cmd)
         if ver:
             return cmd, ver
     return None, ""
-
 def venv_python_path(venv_dir: Path) -> Path:
     if sys.platform.startswith("win"):
         return venv_dir / "Scripts" / "python.exe"

@@ -1,8 +1,6 @@
-from .dialogs_and_batch_flow import MainWindowExportDialogsAndBatchFlowMixin
-from .renderers import MainWindowExportRenderersMixin
-from .whisper_paths import MainWindowWhisperPathHelpersMixin
-
+from bottled_kraken._main_window.exporting.dialogs_and_batch_flow import MainWindowExportDialogsAndBatchFlowMixin
+from bottled_kraken._main_window.exporting.renderers import MainWindowExportRenderersMixin
+from bottled_kraken._main_window.exporting.whisper_paths import MainWindowWhisperPathHelpersMixin
 class MainWindowExportRenderingAndPathsMixin(MainWindowExportDialogsAndBatchFlowMixin, MainWindowExportRenderersMixin, MainWindowWhisperPathHelpersMixin):
     pass
-
 __all__ = ['MainWindowExportRenderingAndPathsMixin', 'MainWindowExportDialogsAndBatchFlowMixin', 'MainWindowExportRenderersMixin', 'MainWindowWhisperPathHelpersMixin']

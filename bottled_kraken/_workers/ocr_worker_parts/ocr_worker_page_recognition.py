@@ -1,8 +1,29 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ...shared import *
-
+from bottled_kraken.common import (
+    _clean_ocr_text_for_kraken_display,
+    _is_effectively_empty_ocr_text,
+    _is_noise_line,
+    _is_symbol_only_line,
+    _load_image_gray,
+)
+from bottled_kraken.common import (
+    Image,
+    List,
+    READING_MODES,
+    RecordView,
+    baseline_length,
+    clamp_bbox,
+    expand_segmentation_bbox,
+    os,
+    re,
+    recognize_with_kraken,
+    record_bbox,
+    segment_with_kraken,
+    sort_records_handwriting_simple,
+    sort_records_reading_order,
+    torch,
+    traceback,
+)
 MAX_KRAKEN_OCR_LINES = 500
-
 class OCRWorkerPageRecognitionMixin:
         def _ocr_one(self, img_path: str, file_idx: int, total_files: int):
             self.file_started.emit(img_path)
@@ -12,10 +33,8 @@ class OCRWorkerPageRecognitionMixin:
             kr_records = []
             kr_sorted = []
             try:
-                # --- Bild einmalig laden (Graustufe) ---
                 im_orig = _load_image_gray(img_path)
                 orig_w, orig_h = im_orig.size
-                # NEU: vorhandene Overlay-/Split-Boxen beim Re-OCR direkt verwenden
                 preset_bboxes = self.job.preset_bboxes_by_path.get(img_path, []) or []
                 if preset_bboxes:
                     text, record_views = self._ocr_using_preset_bboxes(
@@ -25,20 +44,16 @@ class OCRWorkerPageRecognitionMixin:
                         file_idx=file_idx,
                         total_files=total_files
                     )
-                    # kr_records bewusst leer; die Bildseite wird bei Preview/Export vom Pfad nachgeladen.
                     self.file_done.emit(img_path, text, [], None, record_views)
                     return
                 im = im_orig
                 scale_factor = 1.0
-                # --- FIX A: zu kleine Bilder hochskalieren (verhindert Baselines < 5px) ---
                 min_dim = min(im.size)
                 if min_dim < 1200:
                     scale_factor = 2 if min_dim >= 700 else 3
                     im = im.resize((im.size[0] * scale_factor, im.size[1] * scale_factor), Image.BICUBIC)
-                # --- Segmentierung ---
                 with torch.no_grad():
                     seg = segment_with_kraken(im, model=self._seg_model, device=self._device)
-                # --- FIX B: winzige/kaputte Baselines entfernen (Baseline length below minimum 5px) ---
                 try:
                     if hasattr(seg, "baselines") and hasattr(seg, "lines") and seg.baselines and seg.lines:
                         new_baselines = []
@@ -62,7 +77,6 @@ class OCRWorkerPageRecognitionMixin:
                         int(round(x1 / factor)),
                         int(round(y1 / factor)),
                     )
-                # --- Erkennung (Recognition) ---
                 kr_records = []
                 done = 0
                 try:
@@ -92,7 +106,6 @@ class OCRWorkerPageRecognitionMixin:
                         im.size[1],
                         self.job.reading_direction
                     )
-                # --- WIDE LINE SPLIT: nur echte 2-Spalten-Zeilen splitten, Header NICHT ---
                 def _is_header_like(bb, txt, page_w, page_h):
                     x0, y0, x1, y1 = bb
                     w = x1 - x0
@@ -165,9 +178,6 @@ class OCRWorkerPageRecognitionMixin:
                     filtered_lines.append(rv.text)
                 record_views = filtered_record_views
                 lines = filtered_lines
-
-                # Wenn die normale Ganzseiten-Segmentierung nahe an der alten praktischen
-                # Grenze von ca. 200 Linien liegt, zusätzlich gekachelt segmentieren.
                 if len(record_views) >= 190:
                     tiled = self._ocr_one_tiled_lines(img_path, im_orig, file_idx, total_files)
                     if tiled:
@@ -182,15 +192,11 @@ class OCRWorkerPageRecognitionMixin:
                         text = "\n".join(lines).strip()
                 else:
                     text = "\n".join(lines).strip()
-
                 self._emit_overall_progress(file_idx, total_files, 1.0)
-                # Speicherfix: Für große PDFs keine rohen Kraken-Records und keine PIL-Bildseite
-                # dauerhaft an die GUI übergeben. Für UI/Export reichen Text + RecordView-Bounding-Boxen.
                 self.file_done.emit(img_path, text, [], None, record_views)
             except Exception:
                 self.file_error.emit(img_path, traceback.format_exc())
             finally:
-                # PIL-Bilder und Kraken-Rohobjekte spätestens nach jeder Seite loslassen.
                 try:
                     if im is not None and im is not im_orig:
                         im.close()
@@ -205,7 +211,6 @@ class OCRWorkerPageRecognitionMixin:
                 kr_records = []
                 kr_sorted = []
                 self._soft_page_cleanup()
-
         def run(self):
             err = None
             ok = False
@@ -223,8 +228,6 @@ class OCRWorkerPageRecognitionMixin:
                     self._emit_overall_progress(i, total, 0.0)
                     self._ocr_one(path, i, total)
                     self._soft_page_cleanup()
-                    # Harter Langlauf-Fix: Modelle regelmäßig neu laden, damit native
-                    # Kraken/PyTorch-Ressourcen nicht bis Seite 100+ anwachsen.
                     if reset_every > 0 and (i + 1) < total and ((i + 1) % reset_every) == 0:
                         self.gpu_info.emit(self._tr("ocr_status_memory_reloaded", i + 1))
                         self._release_torch_resources()

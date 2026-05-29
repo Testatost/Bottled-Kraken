@@ -1,11 +1,18 @@
-"""Mixin für MainWindow: undo voice fill and ai revision."""
-# Test-Contract-Marker: globale Zielzeile bleibt im Kontext; produktiv bleibt RecordView lokal. idx=row
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QMessageBox,
+    RecordView,
+    TaskItem,
+    os,
+)
+from bottled_kraken.workers import (
+    AIBatchRevisionWorker,
+    AIRevisionWorker,
+)
+from bottled_kraken.dialogs import (
+    ProgressStatusDialog,
+)
 class MainWindowAiRevisionExecutionMixin:
         def run_ai_revision(self):
             target_tasks = self._ai_revision_queue_targets()
@@ -14,12 +21,8 @@ class MainWindowAiRevisionExecutionMixin:
                 if not items:
                     QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
                     return
-                # Auch eine einzelne im Wartebereich ausgewählte Datei über den Queue-Pfad ausführen.
-                # Dadurch verhalten sich Haken/Mehrfachauswahl immer gleich: Datei für Datei nacheinander.
                 self._run_ai_revision_batch(items)
                 return
-
-            # Fallback: aktuelle Vorschau-Datei.
             task = self._current_task()
             self._persist_live_canvas_bboxes(task)
             if not self._ai_revision_task_has_revisable_results(task):
@@ -77,7 +80,6 @@ class MainWindowAiRevisionExecutionMixin:
             self.ai_worker.finished_revision.connect(self.on_ai_revision_done)
             self.ai_worker.failed_revision.connect(self.on_ai_revision_failed)
             self.ai_worker.start()
-
         def run_ai_revision_for_single_line(self, row: int):
             task = self._current_task()
             self._persist_live_canvas_bboxes(task)
@@ -138,7 +140,6 @@ class MainWindowAiRevisionExecutionMixin:
             self.ai_worker.finished_revision.connect(self.on_ai_single_line_revision_done)
             self.ai_worker.failed_revision.connect(self.on_ai_single_line_revision_failed)
             self.ai_worker.start()
-
         def _run_ai_revision_batch(self, items: List[TaskItem], script_mode: Optional[str] = None):
             items = self._ai_revision_ready_tasks(items)
             if not items:
@@ -192,11 +193,9 @@ class MainWindowAiRevisionExecutionMixin:
             self.ai_batch_worker.file_failed.connect(self.on_ai_batch_file_failed)
             self.ai_batch_worker.finished_batch.connect(self.on_ai_batch_finished)
             self.ai_batch_worker.start()
-
         def _cancel_ai_revision(self):
             if self.ai_worker and self.ai_worker.isRunning():
                 self.ai_worker.cancel()
-
         def on_ai_revision_done(self, path: str, revised_lines: list):
             task = next((i for i in self.queue_items if i.path == path), None)
             if not task or not task.results:
@@ -216,8 +215,6 @@ class MainWindowAiRevisionExecutionMixin:
             self._log(self._tr_log("log_ai_batch_debug_new_first", revised_lines[0] if revised_lines else self._tr("empty_text_marker")))
             self._log(self._tr_log("log_ai_batch_debug_all", revised_lines))
             self._push_undo(task)
-            # WICHTIG:
-            # Texte ersetzen, aber die AKTUELLEN Boxen aus task.results behalten.
             new_recs = [
                 RecordView(i, revised_lines[i], recs[i].bbox)
                 for i in range(len(recs))
@@ -243,7 +240,6 @@ class MainWindowAiRevisionExecutionMixin:
             if hasattr(self, "ai_progress_dialog") and self.ai_progress_dialog:
                 self.ai_progress_dialog.close()
                 self.ai_progress_dialog = None
-
         def on_ai_single_line_revision_done(self, path: str, revised_lines: list):
             ctx = self._ai_single_line_context or {}
             self._ai_single_line_context = None
@@ -289,7 +285,6 @@ class MainWindowAiRevisionExecutionMixin:
             self.status_bar.showMessage(self._tr("msg_ai_single_done", row + 1))
             self._log(self._tr_log("log_ai_single_done", os.path.basename(path), row + 1))
             self._close_ai_progress_dialog()
-
         def on_ai_single_line_revision_failed(self, path: str, msg: str):
             self._ai_single_line_context = None
             self.act_ai_revise.setEnabled(True)
@@ -301,7 +296,6 @@ class MainWindowAiRevisionExecutionMixin:
                 self._log(self._tr_log("log_ai_single_failed", os.path.basename(path), msg))
                 QMessageBox.warning(self, self._tr("warn_title"), msg)
             self._close_ai_progress_dialog()
-
         def on_ai_revision_failed(self, path: str, msg: str):
             self.act_ai_revise.setEnabled(True)
             if "abgebrochen" in str(msg).lower():

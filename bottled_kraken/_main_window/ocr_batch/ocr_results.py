@@ -1,10 +1,25 @@
-"""Mixin für MainWindow: import lines and ocr batch."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QBrush,
+    QColor,
+    QMessageBox,
+    QUEUE_COL_FILE,
+    QUEUE_COL_STATUS,
+    Qt,
+    RecordView,
+    STATUS_AI_PROCESSING,
+    STATUS_DONE,
+    STATUS_ERROR,
+    STATUS_EXPORTING,
+    STATUS_ICONS,
+    STATUS_PROCESSING,
+    STATUS_VOICE_RECORDING,
+    STATUS_WAITING,
+    TaskItem,
+    os,
+    torch,
+)
 class MainWindowOcrResultsMixin:
         def on_file_started(self, path):
             item = next((i for i in self.queue_items if i.path == path), None)
@@ -12,31 +27,22 @@ class MainWindowOcrResultsMixin:
                 item.status = STATUS_PROCESSING
                 self._update_queue_row(path)
                 self._log(self._tr_log("log_file_started", os.path.basename(path)))
-
         def on_file_done(self, path, text, kr_records, im, recs):
             item = next((i for i in self.queue_items if i.path == path), None)
             if item:
-                # Normales OCR-Ergebnis direkt übernehmen
                 text = "\n".join(rv.text for rv in recs).strip()
                 item.status = STATUS_DONE
-                # FIX8.54: Nur frisch erzeugte Kraken-OCR-Ergebnisse dürfen automatisch
-                # in der Box-Höhe/-Breite angepasst werden. Projekt-Ladevorgänge setzen
-                # dieses Flag nicht; dadurch werden gespeicherte Boxen nicht nachträglich
-                # verkleinert.
                 try:
                     item._bk_fresh_kraken_ocr_result = True
                     item._bk_fix52_default_box_scale_applied = False
                     item._bk_fix53_default_box_scale_applied = False
                 except Exception:
                     pass
-                # Speicherfix für große Batches: keine komplette PIL-Seite und keine rohen Kraken-Records
-                # pro Queue-Eintrag behalten. Bilddaten werden bei Preview/Export aus item.path nachgeladen.
                 item.results = (text, [], None, recs)
                 item.edited = False
                 item.undo_stack.clear()
                 item.redo_stack.clear()
                 self._update_queue_row(path)
-                # nur nach erfolgreichem Anwenden leeren
                 item.preset_bboxes = []
                 if self.queue_table.currentRow() >= 0:
                     cur_path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
@@ -47,14 +53,12 @@ class MainWindowOcrResultsMixin:
                             self.list_lines.setFocus()
                             self.canvas.select_idx(0)
                 self._log(self._tr_log("log_file_done", os.path.basename(path), len(recs)))
-
         def on_file_error(self, path, msg):
             item = next((i for i in self.queue_items if i.path == path), None)
             if item:
                 item.status = STATUS_ERROR
                 self._update_queue_row(path)
                 self._log(self._tr_log("log_file_error", os.path.basename(path), msg))
-
         def on_batch_finished(self):
             cancelled = False
             try:
@@ -63,7 +67,6 @@ class MainWindowOcrResultsMixin:
                 ) or bool(getattr(getattr(self, "worker", None), "_bk_cancelled_by_user", False))
             except Exception:
                 cancelled = bool(getattr(self, "_ocr_cancel_requested", False))
-
             if cancelled:
                 if self.worker:
                     try:
@@ -78,7 +81,6 @@ class MainWindowOcrResultsMixin:
                 except Exception:
                     pass
                 return
-
             self.act_play.setEnabled(True)
             self.act_stop.setEnabled(False)
             self.status_bar.showMessage(self._tr("msg_finished"))
@@ -94,7 +96,6 @@ class MainWindowOcrResultsMixin:
                     torch.cuda.empty_cache()
             except Exception:
                 pass
-
         def on_failed(self, msg):
             msg_text = str(msg or "")
             cancelled = bool(getattr(self, "_ocr_cancel_requested", False)) or any(
@@ -119,7 +120,6 @@ class MainWindowOcrResultsMixin:
                     torch.cuda.empty_cache()
             except Exception:
                 pass
-
         def _update_queue_row(self, path):
             for row in range(self.queue_table.rowCount()):
                 item0 = self.queue_table.item(row, QUEUE_COL_FILE)
@@ -152,24 +152,20 @@ class MainWindowOcrResultsMixin:
                         else:
                             status_item.setForeground(QBrush(QColor("blue")))
                     break
-
         def _current_task(self) -> Optional[TaskItem]:
             if self.queue_table.currentRow() < 0:
                 return None
             path = self.queue_table.item(self.queue_table.currentRow(), QUEUE_COL_FILE).data(Qt.UserRole)
             return next((i for i in self.queue_items if i.path == path), None)
-
         def _update_task_preset_bboxes(self, task: TaskItem):
             if not task or not task.results:
                 task.preset_bboxes = []
                 return
             _, _, _, recs = task.results
             task.preset_bboxes = [rv.bbox for rv in recs]
-
         def _current_recs_for_ai(self, task: TaskItem) -> List[RecordView]:
             if not task or not task.results:
                 return []
-            # Sicherheitshalber die aktuell sichtbaren Canvas-Boxen zuerst ins Task-Modell ziehen
             self._persist_live_canvas_bboxes(task)
             _, _, _, recs = task.results
             out = []

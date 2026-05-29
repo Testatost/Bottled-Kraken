@@ -1,17 +1,9 @@
-"""Mixin für MainWindow: UI-Aufbau."""
-from ..shared import *
-from ..ui_components import *
-from ..workers import *
-from ..dialogs import *
-from ..image_edit import *
+from bottled_kraken.common import QAction, QBrush, QColor, QEvent, QHBoxLayout, QHeaderView, QIcon, QLineEdit, QPainter, QPen, QPixmap, QPointF, QPushButton, QSize, QSizePolicy, QSplitter, QStyle, QTimer, QToolBar, QToolButton, QUEUE_COL_CHECK, QUEUE_COL_FILE, QUEUE_COL_NUM, QUEUE_COL_STATUS, QVBoxLayout, QWidget, Qt
 from PySide6.QtWidgets import QSplitterHandle, QTabBar
 from PySide6.QtGui import QPainterPath
-from .menu_and_queue.menu_behavior import BKStayOpenMenu
-from .ocr_variant_tabs import OCRVariantTabBar, configure_ocr_variant_tab_buttons, delete_ocr_variant_tab, ocr_variant_tab_display_text, ocr_variant_tab_label, on_ocr_variant_current_changed, on_ocr_variant_tab_clicked, refresh_ocr_variant_tab_texts
-
+from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
+from bottled_kraken._main_window.ocr_variant_tabs import OCRVariantTabBar, configure_ocr_variant_tab_buttons, delete_ocr_variant_tab, ocr_variant_tab_display_text, ocr_variant_tab_label, on_ocr_variant_current_changed, on_ocr_variant_tab_clicked, refresh_ocr_variant_tab_texts
 class BKPreviewSplitterHandle(QSplitterHandle):
-    """Größerer, kontrastreicher Griff für den Haupt-Splitter."""
-
     def _owner_theme(self) -> str:
         try:
             splitter = self.splitter()
@@ -19,7 +11,6 @@ class BKPreviewSplitterHandle(QSplitterHandle):
             return getattr(owner, "current_theme", "bright")
         except Exception:
             return "bright"
-
     def event(self, event):
         try:
             if event.type() in (QEvent.PaletteChange, QEvent.StyleChange, QEvent.ApplicationPaletteChange):
@@ -27,7 +18,6 @@ class BKPreviewSplitterHandle(QSplitterHandle):
         except Exception:
             pass
         return super().event(event)
-
     def paintEvent(self, event):
         theme = self._owner_theme()
         if theme == "dark":
@@ -38,15 +28,12 @@ class BKPreviewSplitterHandle(QSplitterHandle):
             bg = QColor("#f0f0f0")
             line = QColor("#c8c8c8")
             dot = QColor("#000000")
-
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), bg)
-
         rect = self.rect()
         cx = rect.center().x()
         cy = rect.center().y()
-
         painter.setPen(QPen(line, 1))
         if self.orientation() == Qt.Horizontal:
             painter.drawLine(cx, rect.top(), cx, rect.bottom())
@@ -54,23 +41,19 @@ class BKPreviewSplitterHandle(QSplitterHandle):
         else:
             painter.drawLine(rect.left(), cy, rect.right(), cy)
             positions = [(cx - 8, cy), (cx, cy), (cx + 8, cy)]
-
         painter.setPen(Qt.NoPen)
         painter.setBrush(dot)
         radius = 2.4
         for x, y in positions:
             painter.drawEllipse(QPointF(float(x), float(y)), radius, radius)
         painter.end()
-
 class BKPreviewSplitter(QSplitter):
     def __init__(self, orientation, owner=None, parent=None):
         super().__init__(orientation, parent)
         self._bk_owner = owner
         self.setHandleWidth(12)
-
     def createHandle(self):
         return BKPreviewSplitterHandle(self.orientation(), self)
-
 class MainWindowUiBuildMixin:
     def set_preview_tool_mode(self, mode: str):
         mode = "pan" if str(mode or "").lower() == "pan" else "select"
@@ -80,20 +63,15 @@ class MainWindowUiBuildMixin:
             self.btn_preview_select.setChecked(mode == "select")
         if hasattr(self, "btn_preview_pan"):
             self.btn_preview_pan.setChecked(mode == "pan")
-
     def _preview_tool_icon_color(self) -> QColor:
         return QColor("#f8fafc" if getattr(self, "current_theme", "bright") == "dark" else "#111827")
-
     def _build_preview_tool_icon(self, tool: str) -> QIcon:
-        """Erzeugt kleine Vorschau-Werkzeugicons ohne Font-/Emoji-Abhängigkeit."""
         ink = self._preview_tool_icon_color()
         pix = QPixmap(24, 24)
         pix.fill(Qt.transparent)
-
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(QPen(ink, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-
         if tool == "pan":
             hand = QPainterPath()
             hand.moveTo(7.2, 16.2)
@@ -128,19 +106,16 @@ class MainWindowUiBuildMixin:
             cursor.closeSubpath()
             painter.setBrush(QBrush(ink))
             painter.drawPath(cursor)
-
         painter.end()
         icon = QIcon()
         icon.addPixmap(pix, QIcon.Normal, QIcon.Off)
         icon.addPixmap(pix, QIcon.Normal, QIcon.On)
         return icon
-
     def _refresh_preview_tool_button_icons(self):
         if hasattr(self, "btn_preview_select"):
             self.btn_preview_select.setIcon(self._build_preview_tool_icon("select"))
         if hasattr(self, "btn_preview_pan"):
             self.btn_preview_pan.setIcon(self._build_preview_tool_icon("pan"))
-
     def _preview_tool_button_qss(self) -> str:
         return """
             QToolButton {
@@ -161,7 +136,6 @@ class MainWindowUiBuildMixin:
                 background: rgba(59, 130, 246, 0.44);
             }
         """
-
     def _make_preview_tool_button(self, tool: str, tooltip_key: str) -> QToolButton:
         btn = QToolButton(self)
         btn.setText("")
@@ -175,7 +149,6 @@ class MainWindowUiBuildMixin:
         btn.setFixedSize(30, 28)
         btn.setStyleSheet(self._preview_tool_button_qss())
         return btn
-
     def _init_ui(self):
         self.toolbar = QToolBar(self._tr("toolbar_main"))
         self.addToolBar(self.toolbar)
@@ -251,7 +224,6 @@ class MainWindowUiBuildMixin:
         queue_head.addWidget(self.btn_toggle_log, 0, Qt.AlignRight)
         right.addLayout(queue_head)
         right.addWidget(self.queue_table, 2)
-        # NEU: Logbereich unter der Queue
         right.addWidget(self.log_edit, 1)
         right.addWidget(self.progress_bar)
         lines_head = QHBoxLayout()
@@ -317,9 +289,6 @@ class MainWindowUiBuildMixin:
         right.addLayout(lines_head)
         right.addWidget(self.line_search_inline_panel)
         right.addWidget(self.list_lines, 3)
-
-        # OCR-Varianten-Reiter: dauerhaft unter der normalen Zeilentabelle.
-        # Die Runtime-Erweiterung aus ptr_features hängt hier ihre Umschaltlogik ein.
         self.ocr_variant_tabs = OCRVariantTabBar(self, self)
         self.ocr_variant_tabs.setObjectName("ocr_variant_tabs")
         self.ocr_variant_tabs.setExpanding(False)
@@ -347,7 +316,6 @@ class MainWindowUiBuildMixin:
         except Exception:
             pass
         right.addWidget(self.ocr_variant_tabs, 0)
-
         right_widget = QWidget()
         right_widget.setLayout(right)
         left_layout = QVBoxLayout()
@@ -372,7 +340,6 @@ class MainWindowUiBuildMixin:
         header.setSectionResizeMode(QUEUE_COL_FILE, QHeaderView.Stretch)
         header.setSectionResizeMode(QUEUE_COL_STATUS, QHeaderView.Interactive)
         QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
-
     def _filter_lines_list(self, text: str = ""):
         needle = (text or "").strip().casefold()
         first_visible_row = None
@@ -410,10 +377,8 @@ class MainWindowUiBuildMixin:
                 self.canvas.select_idx(row, center=False)
             else:
                 self.canvas.select_indices([], center=False)
-
     def _position_line_search_popup(self):
         return
-
     def _toggle_line_search_popup(self):
         panel = getattr(self, "line_search_inline_panel", None)
         if panel is None:
@@ -424,13 +389,10 @@ class MainWindowUiBuildMixin:
         panel.show()
         if hasattr(self, "line_search_popup_edit"):
             self.line_search_popup_edit.setFocus(); self.line_search_popup_edit.selectAll()
-
     def _start_line_search_hover_close_timer(self):
         return
-
     def _close_line_search_popup_if_cursor_outside(self):
         return
-
     def _close_line_search_popup(self):
         panel = getattr(self, "line_search_inline_panel", None)
         if panel is not None and panel.isVisible():

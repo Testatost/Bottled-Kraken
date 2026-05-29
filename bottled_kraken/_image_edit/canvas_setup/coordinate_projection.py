@@ -1,9 +1,18 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
+from bottled_kraken.common import (
+    Image,
+    ImageDraw,
+    Optional,
+    QPixmap,
+    QPointF,
+    QRectF,
+    Tuple,
+    math,
+    np,
+    pil_to_qpixmap,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 from PySide6.QtGui import QPolygonF
-from ..warp_mesh_utils import legacy_sine_warp_rgba, warp_rgba_by_grid
-
+from bottled_kraken._image_edit.warp_mesh_utils import legacy_sine_warp_rgba, warp_rgba_by_grid
 class ImageEditCanvasCoordinateProjectionMixin:
         def _project_to_border(self, x: float, y: float) -> Tuple[float, float]:
             if self.view_image is None:
@@ -16,7 +25,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 (max(0.0, min(float(w), x)), float(h)),
             ]
             return min(candidates, key=lambda c: (x - c[0]) ** 2 + (y - c[1]) ** 2)
-
         def _mouse_angle_from_center(self, p: QPointF) -> float:
             if self.view_image is None:
                 return 0.0
@@ -24,38 +32,31 @@ class ImageEditCanvasCoordinateProjectionMixin:
             cx = w / 2.0
             cy = h / 2.0
             return math.degrees(math.atan2(p.y() - cy, p.x() - cx))
-
         def _pan_limits(self) -> Tuple[float, float]:
             if self.view_pixmap is None:
                 return 0.0, 0.0
             max_x = max(0.0, (float(self.view_pixmap.width()) - float(self.width())) / 2.0)
             max_y = max(0.0, (float(self.view_pixmap.height()) - float(self.height())) / 2.0)
             return max_x, max_y
-
         def _clamp_pan(self):
             if self.view_pixmap is None or self.zoom <= 1.001:
                 self._pan_x = 0.0
                 self._pan_y = 0.0
                 return
-
             view_w = float(self.view_pixmap.width())
             view_h = float(self.view_pixmap.height())
             widget_w = float(self.width())
             widget_h = float(self.height())
-
             if view_w <= widget_w:
                 self._pan_x = 0.0
             else:
                 self._pan_x = max(widget_w - view_w, min(0.0, float(self._pan_x)))
-
             if view_h <= widget_h:
                 self._pan_y = 0.0
             else:
                 self._pan_y = max(widget_h - view_h, min(0.0, float(self._pan_y)))
-
         def _can_pan_with_alt(self) -> bool:
             return self.view_pixmap is not None and self.zoom > 1.001
-
         def _update_image_offset(self):
             if self.view_pixmap is None:
                 self._img_offset_x = 0.0
@@ -66,13 +67,10 @@ class ImageEditCanvasCoordinateProjectionMixin:
             base_y = max(0.0, (self.height() - self.view_pixmap.height()) / 2.0)
             self._img_offset_x = base_x + self._pan_x
             self._img_offset_y = base_y + self._pan_y
-
         def _widget_to_image(self, p: QPointF) -> QPointF:
             return QPointF(p.x() - self._img_offset_x, p.y() - self._img_offset_y)
-
         def _image_to_widget(self, p: QPointF) -> QPointF:
             return QPointF(p.x() + self._img_offset_x, p.y() + self._img_offset_y)
-
         def _image_rect_in_widget(self) -> QRectF:
             if self.view_pixmap is None:
                 return QRectF()
@@ -82,10 +80,8 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 float(self.view_pixmap.width()),
                 float(self.view_pixmap.height())
             )
-
         def _warp_pil_image(self, crop: Image.Image, warp_x: float = 0.0, warp_y: float = 0.0) -> Image.Image:
             return legacy_sine_warp_rgba(crop, warp_x, warp_y)
-
         def _perspective_coefficients_for_preview(self, dst_points, src_points):
             matrix = []
             vector = []
@@ -99,7 +95,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 return tuple(float(v) for v in coeffs)
             except Exception:
                 return None
-
         def _build_transformed_view_pixmap(self) -> Optional[QPixmap]:
             if not self.has_active_transform() or self.view_image is None or not self.transform_quad or self.transform_src_rect is None:
                 return None
@@ -113,7 +108,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 sy2 = int(round(max(float(sy1 + 2), min(float(img.size[1]), src_rect.bottom()))))
                 if sx2 - sx1 < 2 or sy2 - sy1 < 2:
                     return None
-
                 if mode == "warp":
                     crop_rgba = img.crop((sx1, sy1, sx2, sy2)).convert("RGBA")
                     src_mask = self._selection_mask_for_rect(QRectF(sx1, sy1, sx2 - sx1, sy2 - sy1), (sx2 - sx1, sy2 - sy1))
@@ -128,7 +122,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                     out.paste(white, (sx1, sy1), src_mask)
                     out.paste(warped, (sx1, sy1), warped.split()[-1])
                     return pil_to_qpixmap(out.convert("RGB"))
-
                 src_corners = [(sx1, sy1), (sx2, sy1), (sx2, sy2), (sx1, sy2)]
                 order = list(getattr(self, "transform_source_order", [0, 1, 2, 3]) or [0, 1, 2, 3])
                 if len(order) != 4:
@@ -162,7 +155,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 return pil_to_qpixmap(out)
             except Exception:
                 return None
-
         def _transform_overlay_key(self):
             if not self.has_active_transform() or self.view_image is None:
                 return None
@@ -188,15 +180,7 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 tuple((round(p.x(), 2), round(p.y(), 2)) for p in (self._warp_grid_points() if str(getattr(self, "transform_mode", "")) == "warp" else [])),
                 tuple(getattr(self, "transform_source_order", [0, 1, 2, 3]) or [0, 1, 2, 3]),
             )
-
-
         def _rotate_mode_base_patch(self, img, crop_rgba, src_mask, sx1, sy1, sx2, sy2):
-            """Return (patch_rgba, x, y) for the current pre-rotate transform basis.
-
-            Rotate mode must not discard the state produced by Scale/Skew/
-            Perspective/Warp. Therefore the current quad/warp basis is rendered
-            first and the rotation is applied to that rendered patch afterwards.
-            """
             try:
                 q = [QPointF(pt) for pt in (getattr(self, "transform_quad", None) or [])]
                 crop_w = int(max(1, sx2 - sx1))
@@ -212,7 +196,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                     return warped.convert("RGBA"), int(wx), int(wy)
                 if not q or len(q) != 4 or is_identity_quad:
                     return crop_rgba.convert("RGBA"), int(sx1), int(sy1)
-
                 src_corners = [(0, 0), (crop_w, 0), (crop_w, crop_h), (0, crop_h)]
                 order = list(getattr(self, "_rotate_base_source_order", None) or getattr(self, "transform_source_order", [0, 1, 2, 3]) or [0, 1, 2, 3])
                 if len(order) != 4:
@@ -241,9 +224,7 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 return transformed, int(min_x), int(min_y)
             except Exception:
                 return crop_rgba.convert("RGBA"), int(sx1), int(sy1)
-
         def _build_transform_overlay(self):
-            """Erzeugt nur die transformierte Region als Overlay."""
             key = self._transform_overlay_key()
             if key is None:
                 self._transform_overlay_cache_key = None
@@ -251,30 +232,25 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 return None
             if getattr(self, "_transform_overlay_cache_key", None) == key:
                 return getattr(self, "_transform_overlay_cache", None)
-
             if not self.has_active_transform() or self.view_image is None or not self.transform_quad or self.transform_src_rect is None:
                 return None
             try:
                 img = self.view_image.convert("RGB")
                 mode = str(getattr(self, "transform_mode", "scale") or "scale")
                 src_rect = self.transform_src_rect
-
                 sx1 = int(round(max(0.0, min(float(img.size[0] - 1), src_rect.left()))))
                 sy1 = int(round(max(0.0, min(float(img.size[1] - 1), src_rect.top()))))
                 sx2 = int(round(max(float(sx1 + 2), min(float(img.size[0]), src_rect.right()))))
                 sy2 = int(round(max(float(sy1 + 2), min(float(img.size[1]), src_rect.bottom()))))
                 if sx2 - sx1 < 2 or sy2 - sy1 < 2:
                     return None
-
                 crop_size = (sx2 - sx1, sy2 - sy1)
                 src_rect_local = QRectF(sx1, sy1, crop_size[0], crop_size[1])
                 src_mask = self._selection_mask_for_rect(src_rect_local, crop_size)
-
                 clear_img = Image.new("RGBA", crop_size, (255, 255, 255, 0))
                 white = Image.new("RGBA", crop_size, (255, 255, 255, 255))
                 clear_img.paste(white, (0, 0), src_mask)
                 clear_pixmap = pil_to_qpixmap(clear_img)
-
                 if mode == "rotate":
                     crop = img.crop((sx1, sy1, sx2, sy2)).convert("RGBA")
                     crop.putalpha(src_mask)
@@ -294,7 +270,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                     self._transform_overlay_cache_key = key
                     self._transform_overlay_cache = result
                     return result
-
                 if mode == "warp":
                     crop_rgba = img.crop((sx1, sy1, sx2, sy2)).convert("RGBA")
                     crop_rgba.putalpha(src_mask)
@@ -303,7 +278,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                     self._transform_overlay_cache_key = key
                     self._transform_overlay_cache = result
                     return result
-
                 crop = img.crop((sx1, sy1, sx2, sy2)).convert("RGBA")
                 crop.putalpha(src_mask)
                 src_corners = [(0, 0), (sx2 - sx1, 0), (sx2 - sx1, sy2 - sy1), (0, sy2 - sy1)]
@@ -311,7 +285,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 if len(order) != 4:
                     order = [0, 1, 2, 3]
                 src_pts = [src_corners[int(idx) % 4] for idx in order]
-
                 dst_pts = [(float(pt.x()), float(pt.y())) for pt in self.transform_quad]
                 xs = [p[0] for p in dst_pts]
                 ys = [p[1] for p in dst_pts]
@@ -321,12 +294,10 @@ class ImageEditCanvasCoordinateProjectionMixin:
                 max_y = min(img.size[1], int(math.ceil(max(ys))))
                 if max_x - min_x < 2 or max_y - min_y < 2:
                     return None
-
                 dst_rel = [(x - min_x, y - min_y) for x, y in dst_pts]
                 coeffs = self._perspective_coefficients_for_preview(dst_rel, src_pts)
                 if coeffs is None:
                     return None
-
                 transformed = crop.transform(
                     (max_x - min_x, max_y - min_y),
                     Image.PERSPECTIVE,
@@ -334,7 +305,6 @@ class ImageEditCanvasCoordinateProjectionMixin:
                     resample=Image.BICUBIC,
                     fillcolor=(255, 255, 255, 0),
                 ).convert("RGBA")
-
                 result = (clear_pixmap, sx1, sy1, pil_to_qpixmap(transformed), min_x, min_y)
                 self._transform_overlay_cache_key = key
                 self._transform_overlay_cache = result

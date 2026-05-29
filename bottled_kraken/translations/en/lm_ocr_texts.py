@@ -26,7 +26,9 @@ BK_LM_OCR_TRANSLATIONS_EN = {
     'ai_status_fix46_fullpage_context': '1/3: Full-page LM OCR is read as context only: {}',
     'ai_status_fix46_overlay_line': '2/3: Overlay box {}/{} is sent to the local model together with Kraken OCR: {}',
     'ai_prompt_overlay_compare_system': 'You are a precise OCR and correction assistant. You receive exactly one image crop: the overlay box of one selected line. Re-read only this crop. Compare your own OCR result with the existing Kraken OCR line. Kraken OCR and your box OCR are equal sources. Only add missing information at the correct position. Never shorten names, places, dates, ages or numbers. Return valid JSON only: {"text":"..."}.',
-    'ai_prompt_overlay_compare_user': 'Line ID: {}\n\nExisting Kraken OCR line:\n{}\n\nFull-page LM OCR as context only, not as replacement:\n{}\n\nTask:\n1. Re-read the transmitted overlay box yourself.\n2. Compare your box OCR with the Kraken OCR line.\n3. If Kraken is missing information, insert it at the correct position.\n4. If your box OCR is uncertain or shorter, keep the Kraken line.\n5. Return exactly one complete line, no explanation, no Markdown.\n\nImportant: ditto marks are only real quotation marks such as " or "" or -"-. Dots or dotted runs are not ditto marks. A ditto mark means: copy the value vertically above at the same image position.',
+    'ai_prompt_overlay_compare_user': (
+        'Line ID: {}\n\nExisting Kraken OCR line:\n{}\n\nFull-page LM OCR as context only, not as replacement:\n{}\n\nTask:\n1. Re-read the transmitted overlay box yourself.\n2. Compare your box OCR with the Kraken OCR line.\n3. If Kraken is missing information, insert it at the correct position.\n4. If your box OCR is uncertain or shorter, keep the Kraken line.\n5. Return exactly one complete line, no explanation, no Markdown.\n\nImportant: ditto marks are only real quotation marks such as " or "" or -"-. Dots or dotted runs are not ditto marks. A ditto mark means: copy the value vertically above at the same image position.'
+),
     'ai_status_fix48_mandatory_page_ocr': '1/3 Required step: complete LM page OCR as context for {0}',
     'export_format_odt': 'LibreOffice Writer (.odt)',
     'msg_odt_export_done': 'ODT exported: {}',
@@ -35,7 +37,9 @@ BK_LM_OCR_TRANSLATIONS_EN = {
     'prompt_desc_sqlite_system': 'System instruction for local AI extraction of SQLite-compatible person and register data.',
     'prompt_desc_sqlite_user': 'User instruction for SQLite data: extracts persons, entries, ages, places, years and evidence into flat JSON tables.',
     'ai_prompt_sqlite_system': 'You are a precise extraction assistant. Return only valid JSON for an SQLite export. No Markdown explanation.',
-    'ai_prompt_sqlite_user': 'Extract an SQLite-compatible structure from the OCR text with documents, persons and entries. Each detected person/registration should get its own record. Preserve names, ages, places, years, dates and original evidence. OCR text:\n{}',
+    'ai_prompt_sqlite_user': (
+        'Extract an SQLite-compatible structure from the OCR text with documents, persons and entries. Each detected person/registration should get its own record. Preserve names, ages, places, years, dates and original evidence. OCR text:\n{}'
+),
     'busy_queue_ref': 'Queue #{}',
     'lm_menu_lm_ocr_boxes': 'LM Page OCR + Boxes',
     'dlg_ai_ocr_boxes_title': 'LM Page OCR + Boxes',
@@ -47,5 +51,7 @@ BK_LM_OCR_TRANSLATIONS_EN = {
     'ai_status_page_boxes_done': 'LM Page OCR + Boxes finished: {}',
     'info_lm_ocr_boxes_done_hint': 'LM Page OCR + Boxes has finished. Existing overlay boxes were preserved. Exactly one new text line from the LM page OCR was assigned to each existing box. No additional lines were created and no existing lines were deleted.',
     'ai_prompt_page_boxes_align_system': 'You are a precise OCR alignment assistant. Assign the lines from a complete LM page OCR exactly to the existing overlay boxes. Box OCR texts and previous texts are only alignment anchors. Final texts should come from the complete page OCR. Return valid JSON only.',
-    'ai_prompt_page_boxes_align_user': 'There are exactly {0} existing overlay boxes. Return exactly {0} result lines: one for every box with idx 0 to {1}. Do not create additional lines and do not omit any box. Use the box OCR texts only for alignment; the final text should come from the LM page OCR. If no matching page-OCR line exists, use the best box/old text.\n\nLM page OCR lines:\n{2}\n\nOverlay-box anchors:\n{3}\n\nResponse format JSON only: {{"lines":[{{"idx":0,"text":"..."}}]}}',
+    'ai_prompt_page_boxes_align_user': (
+        'There are exactly {0} existing overlay boxes. Return exactly {0} result lines: one for every box with idx 0 to {1}. Do not create additional lines and do not omit any box. Use the box OCR texts only for alignment; the final text should come from the LM page OCR. If no matching page-OCR line exists, use the best box/old text.\n\nLM page OCR lines:\n{2}\n\nOverlay-box anchors:\n{3}\n\nResponse format JSON only: {{"lines":[{{"idx":0,"text":"..."}}]}}'
+),
 }

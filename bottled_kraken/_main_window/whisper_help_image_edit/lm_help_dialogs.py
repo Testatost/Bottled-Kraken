@@ -1,10 +1,25 @@
-"""Mixin für MainWindow: whisper download help and image edit queue."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    _help_dialog_qss,
+    _help_html,
+    _help_pre,
+)
+from bottled_kraken.common import (
+    QDesktopServices,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QScrollArea,
+    QSize,
+    QSizePolicy,
+    QStackedWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+)
 class MainWindowLmHelpDialogsMixin:
         def show_lm_help_dialog(self):
             dlg = QDialog(self)
@@ -43,23 +58,18 @@ class MainWindowLmHelpDialogsMixin:
             nav_panel_layout = QVBoxLayout(nav_panel)
             nav_panel_layout.setContentsMargins(0, 0, 0, 0)
             nav_panel_layout.setSpacing(8)
-
             nav_list = QListWidget()
             nav_list.setSpacing(4)
             nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             nav_list.setTextElideMode(Qt.ElideNone)
-
             nav_bottom = QListWidget()
             nav_bottom.setSpacing(4)
             nav_bottom.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             nav_bottom.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             nav_bottom.setTextElideMode(Qt.ElideNone)
             nav_bottom.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            # Der untere Sonderreiter braucht unter Windows/Linux wegen Theme-Padding
-            # etwas mehr Höhe, sonst wird der Text abgeschnitten.
             nav_bottom.setMinimumHeight(74)
             nav_bottom.setFixedHeight(74)
-
             stack = QStackedWidget()
             quick_html = self._tr("help_html_quick") + self._build_hardware_requirements_loading_html()
             kraken_html = self._tr("help_html_kraken")
@@ -156,7 +166,6 @@ class MainWindowLmHelpDialogsMixin:
             bottom_item = nav_bottom.item(0)
             if bottom_item is not None:
                 bottom_item.setSizeHint(QSize(220, 44))
-
             def _select_top(row: int):
                 if row < 0:
                     return
@@ -167,7 +176,6 @@ class MainWindowLmHelpDialogsMixin:
                 finally:
                     nav_bottom.blockSignals(False)
                 stack.setCurrentIndex(row)
-
             def _select_bottom(row: int):
                 if row < 0:
                     return
@@ -178,7 +186,6 @@ class MainWindowLmHelpDialogsMixin:
                 finally:
                     nav_list.blockSignals(False)
                 stack.setCurrentIndex(9)
-
             nav_list.currentRowChanged.connect(_select_top)
             nav_bottom.currentRowChanged.connect(_select_bottom)
             nav_list.setCurrentRow(0)

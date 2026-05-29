@@ -1,18 +1,24 @@
-"""Mixin für MainWindow: hardware status and file drop."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    QApplication,
+    QDragEnterEvent,
+    QDropEvent,
+    QFileDialog,
+    QMessageBox,
+    QThread,
+    Signal,
+    is_supported_drop_or_paste_file,
+    os,
+    re,
+)
+from bottled_kraken.workers import (
+    clear_external_ocr_backend_cache,
+)
 class HardwareSnapshotWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
-
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-
     def run(self):
         try:
             try:
@@ -23,7 +29,6 @@ class HardwareSnapshotWorker(QThread):
             self.done.emit(snapshot)
         except Exception as exc:
             self.failed.emit(repr(exc))
-
 class MainWindowFileDropAndPasteMixin:
         def dragEnterEvent(self, event: QDragEnterEvent):
             if not event.mimeData().hasUrls():
@@ -35,7 +40,6 @@ class MainWindowFileDropAndPasteMixin:
                     event.acceptProposedAction()
                     return
             event.ignore()
-
         def dropEvent(self, event: QDropEvent):
             if not event.mimeData().hasUrls():
                 event.ignore()
@@ -50,19 +54,16 @@ class MainWindowFileDropAndPasteMixin:
                 event.acceptProposedAction()
             else:
                 event.ignore()
-
         def paste_files_from_clipboard(self):
             cb = QApplication.clipboard()
             md = cb.mimeData()
             files = []
             if md:
-                # Standardfall: Explorer-Dateien als URLs
                 if md.hasUrls():
                     for url in md.urls():
                         p = url.toLocalFile()
                         if p and os.path.exists(p) and is_supported_drop_or_paste_file(p):
                             files.append(p)
-                # Fallback: Textliste mit Dateipfaden
                 if not files and md.hasText():
                     raw = md.text().strip()
                     if raw:
@@ -70,7 +71,6 @@ class MainWindowFileDropAndPasteMixin:
                         for p in parts:
                             if os.path.exists(p) and is_supported_drop_or_paste_file(p):
                                 files.append(p)
-                # Windows-Fallback: rohe Mime-Formate prüfen
                 if not files:
                     for fmt in md.formats():
                         try:
@@ -86,7 +86,6 @@ class MainWindowFileDropAndPasteMixin:
                                     files.append(candidate)
                         except Exception:
                             pass
-            # doppelte entfernen, Reihenfolge behalten
             unique = []
             seen = set()
             for p in files:
@@ -102,7 +101,6 @@ class MainWindowFileDropAndPasteMixin:
                     self._tr("info_title"),
                     self._tr("msg_clipboard_no_supported_files")
                 )
-
         def choose_files(self):
             file_filter = (
                 f"{self._tr('dlg_filter_img')};;"

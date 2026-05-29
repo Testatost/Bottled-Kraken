@@ -1,3 +1,2 @@
-from .queue_preview_models import MainWindowQueueContextPreviewAndModelLoadingMixin
-
+from bottled_kraken._main_window.queue_preview_models import MainWindowQueueContextPreviewAndModelLoadingMixin
 __all__ = ['MainWindowQueueContextPreviewAndModelLoadingMixin']

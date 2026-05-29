@@ -1,3 +1,2 @@
-from .whisper_help_image_edit import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
-
+from bottled_kraken._main_window.whisper_help_image_edit import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
 __all__ = ['MainWindowWhisperDownloadHelpAndImageEditQueueMixin']

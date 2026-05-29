@@ -1,20 +1,22 @@
-"""Mixin für MainWindow: theme language and reading direction."""
-from ...shared import *
-from ...ui_components import *
-from ...workers import *
-from ...dialogs import *
-from ...image_edit import *
-
+from bottled_kraken.common import (
+    QHeaderView,
+    QKeySequence,
+    QTimer,
+    QUEUE_COL_CHECK,
+    QUEUE_COL_FILE,
+    QUEUE_COL_NUM,
+    QUEUE_COL_STATUS,
+    Qt,
+    os,
+    subprocess,
+    sys,
+)
 def _no_console_kwargs() -> dict:
-    """Verhindert kurz aufpoppende CMD-Fenster bei subprocess-Aufrufen unter Windows."""
     if not sys.platform.startswith("win"):
         return {}
-
     kwargs = {}
-
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
     try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -22,11 +24,8 @@ def _no_console_kwargs() -> dict:
         kwargs["startupinfo"] = startupinfo
     except Exception:
         pass
-
     return kwargs
-
 class MainWindowReadingDirectionAndRetranslateMixin:
-
         def _apply_localized_menu_shortcut_texts(self):
             if not hasattr(self, "_menu_text_with_shortcut"):
                 return
@@ -52,10 +51,8 @@ class MainWindowReadingDirectionAndRetranslateMixin:
                 self.export_menu.setTitle(self._menu_text_with_shortcut(self._tr("menu_export"), "E"))
             if hasattr(self, "act_exit"):
                 self.act_exit.setText(self._menu_text_with_shortcut(self._tr("menu_exit"), "Q"))
-
         def set_reading_direction(self, mode):
             self.reading_direction = mode
-
         def retranslate_ui(self):
             self.setWindowTitle(self._tr("app_title"))
             self.file_menu.setTitle(self._tr("menu_file"))
@@ -193,7 +190,7 @@ class MainWindowReadingDirectionAndRetranslateMixin:
                 self.btn_seg_model.setText(self._tr("btn_seg_model_value", os.path.basename(self.seg_model_path)))
             else:
                 self.btn_seg_model.setText(self._tr("btn_seg_model_empty"))
-            mapping = {"cpu": "hw_cpu", "cuda": "hw_cuda", "rocm": "hw_rocm", "mps": "hw_mps"}
+            mapping = {"cpu": "hw_cpu", "cuda": "hw_cuda", "rocm": "hw_rocm"}
             for dev, key in mapping.items():
                 if dev in self.hw_actions:
                     self.hw_actions[dev].setText(self._tr(key))
@@ -213,7 +210,6 @@ class MainWindowReadingDirectionAndRetranslateMixin:
             self._set_primary_toolbar_icons()
             self._set_secondary_button_icons()
             QTimer.singleShot(0, self._normalize_toolbar_button_sizes)
-            # Models menu actions
             if hasattr(self, "act_rec"):
                 self.act_rec.setText(self._tr("act_load_rec_model"))
             if hasattr(self, "act_seg"):
@@ -257,11 +253,9 @@ class MainWindowReadingDirectionAndRetranslateMixin:
             header.setSectionResizeMode(QUEUE_COL_CHECK, QHeaderView.Fixed)
             header.setSectionResizeMode(QUEUE_COL_FILE, QHeaderView.Stretch)
             header.setSectionResizeMode(QUEUE_COL_STATUS, QHeaderView.Interactive)
-            # Header-Schrift im Wartebereich normal halten
             header_font = header.font()
             header_font.setBold(False)
             header.setFont(header_font)
-
         def _retranslate_queue_rows(self):
             for it in self.queue_items:
                 self._update_queue_row(it.path)

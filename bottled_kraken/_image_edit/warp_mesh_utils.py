@@ -1,13 +1,13 @@
-"""Photoshop-ähnliche Mesh-Verkrümmung für die Bildbearbeitung."""
-from ..shared import *
-
-
+from bottled_kraken.common import (
+    Image,
+    ImageDraw,
+    math,
+    np,
+)
 def default_warp_grid(x1: float, y1: float, x2: float, y2: float):
     cx = (float(x1) + float(x2)) / 2.0
     cy = (float(y1) + float(y2)) / 2.0
     return [(x1, y1), (cx, y1), (x2, y1), (x1, cy), (cx, cy), (x2, cy), (x1, y2), (cx, y2), (x2, y2)]
-
-
 def _bilinear_point(c00, c10, c11, c01, u: float, v: float):
     u = max(0.0, min(1.0, float(u)))
     v = max(0.0, min(1.0, float(v)))
@@ -24,14 +24,10 @@ def _bilinear_point(c00, c10, c11, c01, u: float, v: float):
         + (1.0 - u) * v * float(c01[1])
     )
     return (x, y)
-
-
 def _grid_point(grid, col: int, row: int):
     col = max(0, min(2, int(col)))
     row = max(0, min(2, int(row)))
     return grid[row * 3 + col]
-
-
 def _lagrange_basis_3(t: float):
     t = max(0.0, min(1.0, float(t)))
     return (
@@ -39,8 +35,6 @@ def _lagrange_basis_3(t: float):
         4.0 * t * (1.0 - t),
         2.0 * t * (t - 0.5),
     )
-
-
 def _lagrange_surface_point(grid, u: float, v: float):
     bu = _lagrange_basis_3(u)
     bv = _lagrange_basis_3(v)
@@ -53,10 +47,6 @@ def _lagrange_surface_point(grid, u: float, v: float):
             x += w * float(px)
             y += w * float(py)
     return (x, y)
-
-
-
-
 def _lagrange_basis_5(t: float):
     t = max(0.0, min(1.0, float(t)))
     nodes = (0.0, 0.25, 0.5, 0.75, 1.0)
@@ -71,14 +61,10 @@ def _lagrange_basis_5(t: float):
             den *= (xi - xj)
         basis.append(num / den if abs(den) > 1e-12 else 0.0)
     return tuple(basis)
-
-
 def _grid_point_5(grid, col: int, row: int):
     col = max(0, min(4, int(col)))
     row = max(0, min(4, int(row)))
     return grid[row * 5 + col]
-
-
 def _lagrange_surface_point_5(grid, u: float, v: float):
     bu = _lagrange_basis_5(u)
     bv = _lagrange_basis_5(v)
@@ -91,18 +77,7 @@ def _lagrange_surface_point_5(grid, u: float, v: float):
             x += w * float(px)
             y += w * float(py)
     return (x, y)
-
-
 def _piecewise_bilinear_surface_point_5(grid, u: float, v: float):
-    """Lokaler 5x5-Mesh-Warp.
-
-    Im UI hat der Warp ein festes Randgitter und 9 innere Kontrollpunkte.
-    Die alte globale Lagrange-Interpolation ließ beim Ziehen eines einzelnen
-    inneren Punkts auch weit entfernte Bereiche sichtbar mitziehen. Für die
-    Bildbearbeitung ist das unerwünscht: ein innerer Punkt soll nur die
-    unmittelbar angrenzenden vier Mesh-Zellen beeinflussen, während der Rand
-    stabil bleibt, solange keine Randgriffe bewegt werden.
-    """
     u = max(0.0, min(1.0, float(u)))
     v = max(0.0, min(1.0, float(v)))
     div = 4
@@ -115,34 +90,21 @@ def _piecewise_bilinear_surface_point_5(grid, u: float, v: float):
     p11 = _grid_point_5(grid, col + 1, row + 1)
     p01 = _grid_point_5(grid, col, row + 1)
     return _bilinear_point(p00, p10, p11, p01, local_u, local_v)
-
 def warp_map_uv(grid, u: float, v: float):
     if not grid or len(grid) not in (9, 25):
         return (0.0, 0.0)
-
     u = max(0.0, min(1.0, float(u)))
     v = max(0.0, min(1.0, float(v)))
-
-    # 9-Punkt-Gitter bleiben rückwärtskompatibel für alte Zustände.
-    # Das neue 25-Punkt-Gitter wird bewusst lokal stückweise bilinear
-    # interpoliert: ein verschobener innerer Punkt beeinflusst nur seine
-    # Nachbarzellen und zieht nicht global entfernte Bildbereiche mit.
     if len(grid) == 25:
         return _piecewise_bilinear_surface_point_5(grid, u, v)
     return _lagrange_surface_point(grid, u, v)
-
-
 def warp_map_rect_point(src_rect, grid, x: float, y: float):
     x1, y1, x2, y2 = src_rect
     u = (float(x) - float(x1)) / max(1.0, float(x2) - float(x1))
     v = (float(y) - float(y1)) / max(1.0, float(y2) - float(y1))
     return warp_map_uv(grid, u, v)
-
-
 def scale_grid(grid, sx: float, sy: float):
     return [(float(x) * float(sx), float(y) * float(sy)) for x, y in (grid or [])]
-
-
 def _perspective_coefficients(dst_points, src_points):
     matrix = []
     vector = []
@@ -156,16 +118,12 @@ def _perspective_coefficients(dst_points, src_points):
         return tuple(float(v) for v in coeffs)
     except Exception:
         return None
-
-
 def _cell_src_quad(w: int, h: int, col: int, row: int, div: int):
     x0 = float(col) * float(w) / float(div)
     x1 = float(col + 1) * float(w) / float(div)
     y0 = float(row) * float(h) / float(div)
     y1 = float(row + 1) * float(h) / float(div)
     return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-
-
 def _grid_is_identity(src_rect, grid, eps: float = 1e-6) -> bool:
     if not grid or len(grid) not in (9, 25):
         return False
@@ -186,19 +144,13 @@ def _grid_is_identity(src_rect, grid, eps: float = 1e-6) -> bool:
         return True
     except Exception:
         return False
-
-
 def _warp_render_division(w: int, h: int) -> int:
-    # 20 bleibt der Qualitätswert für Photoshop-ähnliche Glätte. Sehr kleine
-    # Ausschnitte brauchen aber nicht unnötig viele Teiltransformationen.
     longest = max(int(w), int(h))
     if longest < 220:
         return 12
     if longest < 520:
         return 16
     return 20
-
-
 def _quad_bbox_rel(points, min_x: int, min_y: int, out_w: int, out_h: int):
     xs = [float(x) - float(min_x) for x, _ in points]
     ys = [float(y) - float(min_y) for _, y in points]
@@ -209,8 +161,6 @@ def _quad_bbox_rel(points, min_x: int, min_y: int, out_w: int, out_h: int):
     if bx1 - bx0 < 1 or by1 - by0 < 1:
         return None
     return bx0, by0, bx1, by1
-
-
 def _warp_cell_to_local_bbox(crop: Image.Image, out_size, dst_abs, src_quad, min_x: int, min_y: int, perspective_mode=None):
     bbox = _quad_bbox_rel(dst_abs, min_x, min_y, out_size[0], out_size[1])
     if bbox is None:
@@ -241,8 +191,6 @@ def _warp_cell_to_local_bbox(crop: Image.Image, out_size, dst_abs, src_quad, min
     )
     cell.putalpha(Image.fromarray(alpha, "L"))
     return cell, bx0, by0
-
-
 def warp_rgba_by_grid(crop_rgba: Image.Image, src_rect, grid, bounds=None):
     crop = crop_rgba.convert("RGBA")
     w, h = crop.size
@@ -252,7 +200,6 @@ def warp_rgba_by_grid(crop_rgba: Image.Image, src_rect, grid, bounds=None):
         grid = default_warp_grid(*src_rect)
     if _grid_is_identity(src_rect, grid):
         return crop, int(src_rect[0]), int(src_rect[1])
-
     xs = [float(x) for x, _ in grid]
     ys = [float(y) for _, y in grid]
     min_x = int(math.floor(min(xs)))
@@ -266,17 +213,11 @@ def warp_rgba_by_grid(crop_rgba: Image.Image, src_rect, grid, bounds=None):
         max_y = min(int(bounds[1]), max_y)
     if max_x - min_x < 2 or max_y - min_y < 2:
         return crop, int(src_rect[0]), int(src_rect[1])
-
     out_size = (max_x - min_x, max_y - min_y)
     result = Image.new("RGBA", out_size, (255, 255, 255, 0))
     div = 20
     div = max(18, min(24, _warp_render_division(w, h) if max(int(w), int(h)) >= 220 else div))
     perspective_mode = Image.PERSPECTIVE
-
-    # Wichtig für große Auswahlen:
-    # Jede Mesh-Zelle wird nur noch in ihrer eigenen kleinen Ziel-Bounding-Box
-    # transformiert. Die alte Variante transformierte pro Zelle die komplette
-    # Ausgabegröße und war deshalb bei großen Auswahlbereichen extrem langsam.
     for row in range(div):
         for col in range(div):
             u0, u1 = col / div, (col + 1) / div
@@ -301,8 +242,6 @@ def warp_rgba_by_grid(crop_rgba: Image.Image, src_rect, grid, bounds=None):
             cell, bx0, by0 = warped
             result.alpha_composite(cell, (bx0, by0))
     return result, min_x, min_y
-
-
 def legacy_sine_warp_rgba(crop: Image.Image, warp_x: float = 0.0, warp_y: float = 0.0) -> Image.Image:
     original_mode = getattr(crop, "mode", "RGB")
     try:

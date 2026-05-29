@@ -1,7 +1,0 @@
-from .reading_direction_and_retranslate import MainWindowReadingDirectionAndRetranslateMixin
-from .hardware_summary import MainWindowHardwareSummaryMixin
-
-class MainWindowThemeLanguageAndReadingDirectionMixin(MainWindowReadingDirectionAndRetranslateMixin, MainWindowHardwareSummaryMixin):
-    pass
-
-__all__ = ['MainWindowThemeLanguageAndReadingDirectionMixin', 'MainWindowReadingDirectionAndRetranslateMixin', 'MainWindowHardwareSummaryMixin']

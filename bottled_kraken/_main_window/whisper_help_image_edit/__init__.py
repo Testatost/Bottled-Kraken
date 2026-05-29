@@ -1,9 +1,7 @@
-from .whisper_downloads import MainWindowWhisperDownloadsMixin
-from .uninstall_delete_help import MainWindowUninstallDeleteHelpMixin
-from .lm_help_dialogs import MainWindowLmHelpDialogsMixin
-from .image_edit_queue import MainWindowImageEditQueueMixin
-
+from bottled_kraken._main_window.whisper_help_image_edit.whisper_downloads import MainWindowWhisperDownloadsMixin
+from bottled_kraken._main_window.whisper_help_image_edit.uninstall_delete_help import MainWindowUninstallDeleteHelpMixin
+from bottled_kraken._main_window.whisper_help_image_edit.lm_help_dialogs import MainWindowLmHelpDialogsMixin
+from bottled_kraken._main_window.whisper_help_image_edit.image_edit_queue import MainWindowImageEditQueueMixin
 class MainWindowWhisperDownloadHelpAndImageEditQueueMixin(MainWindowWhisperDownloadsMixin, MainWindowUninstallDeleteHelpMixin, MainWindowLmHelpDialogsMixin, MainWindowImageEditQueueMixin):
     pass
-
 __all__ = ['MainWindowWhisperDownloadHelpAndImageEditQueueMixin', 'MainWindowWhisperDownloadsMixin', 'MainWindowUninstallDeleteHelpMixin', 'MainWindowLmHelpDialogsMixin', 'MainWindowImageEditQueueMixin']

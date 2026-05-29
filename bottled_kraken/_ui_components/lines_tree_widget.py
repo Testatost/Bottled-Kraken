@@ -1,10 +1,23 @@
-"""Zeilenliste für erkannte OCR-Zeilen."""
-from ..shared import *
+from bottled_kraken.common import (
+    List,
+    Optional,
+    QAbstractItemView,
+    QApplication,
+    QBrush,
+    QHeaderView,
+    QItemSelectionModel,
+    QKeySequence,
+    QPoint,
+    QSize,
+    QTreeWidget,
+    QTreeWidgetItem,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QCursor
-
 class LinesTreeWidget(QTreeWidget):
     delete_pressed = Signal()
-    reorder_committed = Signal(list, int)  # new_order (old indices), current_row after drop
+    reorder_committed = Signal(list, int)
     _DRAG_MIME = "application/x-bottled-kraken-lines-reorder"
     _PLACEHOLDER_ROLE = Qt.UserRole + 100
     def __init__(self, tr_func=None, *args, **kwargs):
@@ -300,8 +313,6 @@ class LinesTreeWidget(QTreeWidget):
                 if self._begin_manual_drag(pos):
                     event.accept()
                     return
-            # Während LMB-Drag keine native Bereichsauswahl laufen lassen,
-            # sonst markiert Qt zwischen Anker und Mausposition zusätzliche Zeilen.
             event.accept()
             return
         super().mouseMoveEvent(event)

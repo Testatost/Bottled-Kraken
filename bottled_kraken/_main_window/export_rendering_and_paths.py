@@ -1,3 +1,2 @@
-from .exporting import MainWindowExportRenderingAndPathsMixin
-
+from bottled_kraken._main_window.exporting import MainWindowExportRenderingAndPathsMixin
 __all__ = ['MainWindowExportRenderingAndPathsMixin']

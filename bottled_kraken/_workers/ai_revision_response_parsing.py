@@ -1,6 +1,14 @@
-"""Antwortverarbeitung für den AI-Revision-Worker."""
-from ..shared import *
-
+from bottled_kraken.common import (
+    _extract_json_payload,
+    _force_text,
+)
+from bottled_kraken.common import (
+    List,
+    RecordView,
+    Tuple,
+    json,
+    re,
+)
 class AIRevisionResponseParsingMixin:
     def _extract_message_content(self, data: dict) -> str:
         choices = data.get("choices")
@@ -46,7 +54,6 @@ class AIRevisionResponseParsingMixin:
                     elif isinstance(v, str) and v.strip():
                         return v.strip()
             return _force_text(val).strip()
-        # 1) ZUERST nur echte Ausgabe lesen
         candidates = []
         if isinstance(message, dict):
             candidates.append(message.get("content"))
@@ -58,11 +65,9 @@ class AIRevisionResponseParsingMixin:
         for cand in candidates:
             txt = flatten(cand)
             if txt:
-                # <think> entfernen, falls ein Modell sowas trotzdem in content schreibt
                 txt = re.sub(r"<think>.*?</think>", "", txt, flags=re.DOTALL).strip()
                 if txt:
                     return txt
-        # 2) reasoning_content NICHT als normale Antwort verwenden
         reasoning = ""
         if isinstance(message, dict):
             rc = message.get("reasoning_content")
@@ -73,7 +78,6 @@ class AIRevisionResponseParsingMixin:
             finish_reason = str(choice0.get("finish_reason", "")).strip()
         if reasoning:
             cleaned = re.sub(r"<think>.*?</think>", "", reasoning, flags=re.DOTALL).strip()
-            # Falls reasoning_content selbst schon JSON enthält, nutzen wir es als Notfall-Fallback
             if cleaned:
                 if cleaned.startswith("{") or '"lines"' in cleaned or '"text"' in cleaned:
                     return cleaned
@@ -85,7 +89,6 @@ class AIRevisionResponseParsingMixin:
                 self._tr("ai_err_reasoning_only")
             )
         raise RuntimeError(self._tr("ai_err_no_content"))
-
     def _request_block_reread(
             self,
             block_data_url: str,
@@ -154,7 +157,6 @@ class AIRevisionResponseParsingMixin:
             else:
                 fixed.append(fallback)
         return fixed
-
     def _chunk_records(self, recs: List[RecordView], block_size: int = 3) -> List[Tuple[int, int]]:
         chunks: List[Tuple[int, int]] = []
         i = 0

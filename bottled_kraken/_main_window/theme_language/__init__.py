@@ -1,7 +1,5 @@
-from .reading_direction_and_retranslate import MainWindowReadingDirectionAndRetranslateMixin
-from .hardware_summary import MainWindowHardwareSummaryMixin
-
+from bottled_kraken._main_window.theme_language.reading_direction_and_retranslate import MainWindowReadingDirectionAndRetranslateMixin
+from bottled_kraken._main_window.theme_language.hardware_summary import MainWindowHardwareSummaryMixin
 class MainWindowThemeLanguageAndReadingDirectionMixin(MainWindowReadingDirectionAndRetranslateMixin, MainWindowHardwareSummaryMixin):
     pass
-
 __all__ = ['MainWindowThemeLanguageAndReadingDirectionMixin', 'MainWindowReadingDirectionAndRetranslateMixin', 'MainWindowHardwareSummaryMixin']

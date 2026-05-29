@@ -1,22 +1,12 @@
-"""Registry and discovery helpers for UI languages.
-
-PyInstaller-safe: the language packages can live inside the bundled PYZ archive,
-so discovery must not require a physical ``translations/`` directory.
-"""
-
 from __future__ import annotations
-
 import pkgutil
 from importlib import import_module
 from typing import Dict, List
-
 DEFAULT_LANGUAGE = "de"
 FALLBACK_LANGUAGES = (DEFAULT_LANGUAGE, "en")
 KNOWN_LANGUAGE_CODES = ("de", "en", "fr")
-_RESERVED_PACKAGES = {"_translation_sections", "patches", "__pycache__"}
-
+_RESERVED_PACKAGES = {"patches", "__pycache__"}
 def available_language_codes() -> List[str]:
-    """Return installed translation package codes without relying on filesystem paths."""
     codes: list[str] = []
     package_name = __package__ or "bottled_kraken.translations"
     try:
@@ -29,8 +19,6 @@ def available_language_codes() -> List[str]:
                     codes.append(name)
     except Exception:
         codes = []
-
-    # Frozen builds sometimes cannot enumerate package resources; direct imports still work.
     if not codes:
         for code in KNOWN_LANGUAGE_CODES:
             try:
@@ -38,15 +26,12 @@ def available_language_codes() -> List[str]:
             except Exception:
                 continue
             codes.append(code)
-
     codes = sorted(dict.fromkeys(codes))
     if DEFAULT_LANGUAGE in codes:
         codes.remove(DEFAULT_LANGUAGE)
         codes.insert(0, DEFAULT_LANGUAGE)
     return codes
-
 def normalize_language_code(code: object, default: str = DEFAULT_LANGUAGE) -> str:
-    """Map stored or system locale values to an installed translation code."""
     available = available_language_codes()
     if not available:
         return default
@@ -60,9 +45,7 @@ def normalize_language_code(code: object, default: str = DEFAULT_LANGUAGE) -> st
         if raw.startswith(candidate.lower() + "_"):
             return candidate
     return default if default in available else available[0]
-
 def language_info(code: str) -> Dict[str, str]:
-    """Return optional metadata from ``translations/<code>/language_info.py``."""
     code = normalize_language_code(code, default=str(code or DEFAULT_LANGUAGE))
     info = {"code": code, "native_name": code, "english_name": code}
     try:
@@ -76,7 +59,6 @@ def language_info(code: str) -> Dict[str, str]:
     if english_name:
         info["english_name"] = str(english_name)
     return info
-
 __all__ = [
     "DEFAULT_LANGUAGE",
     "FALLBACK_LANGUAGES",

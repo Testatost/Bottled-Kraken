@@ -1,28 +1,33 @@
-"""Worker-Klassen für Bottled Kraken."""
-from ...shared import *
-
+from bottled_kraken.common import (
+    _clean_ocr_text_for_kraken_display,
+    _is_effectively_empty_ocr_text,
+    _is_noise_line,
+    _is_symbol_only_line,
+)
+from bottled_kraken.common import (
+    Image,
+    List,
+    RecordView,
+    expand_segmentation_bbox,
+    os,
+    recognize_with_kraken,
+    record_bbox,
+    segment_with_kraken,
+    sort_records_handwriting_simple,
+    sort_records_reading_order,
+    torch,
+)
 MAX_KRAKEN_OCR_LINES = 500
-
 class OCRWorkerTiledLinesMixin:
         def _ocr_one_tiled_lines(self, img_path: str, im_orig, file_idx: int, total_files: int):
-            """Fallback für sehr zeilenreiche Seiten.
-
-            Einige Kraken/BLLA-Kombinationen liefern bei einer kompletten Seite
-            praktisch nur ca. 200 Linien. Wenn das passiert, wird die Seite in
-            überlappende Teilbereiche zerlegt und pro Teilbereich erneut segmentiert.
-            Dadurch können bis zu 500 Linien in die GUI übernommen werden.
-            """
             try:
                 orig_w, orig_h = im_orig.size
                 if orig_w < 200 or orig_h < 200:
                     return None
-
                 overlap_x = max(16, int(orig_w * 0.025))
                 overlap_y = max(16, int(orig_h * 0.025))
                 tiles = []
-
                 if orig_w >= orig_h * 1.15:
-                    # breite Doppelseite: links/rechts und zusätzlich oben/unten
                     mid_x = orig_w // 2
                     mid_y = orig_h // 2
                     x_parts = [
@@ -37,16 +42,13 @@ class OCRWorkerTiledLinesMixin:
                         for y0, y1, cy0, cy1 in y_parts:
                             tiles.append((x0, y0, x1, y1, cx0, cy0, cx1, cy1))
                 else:
-                    # normale Seite: oben/unten
                     mid_y = orig_h // 2
                     tiles = [
                         (0, 0, orig_w, min(orig_h, mid_y + overlap_y), 0, 0, orig_w, mid_y),
                         (0, max(0, mid_y - overlap_y), orig_w, orig_h, 0, mid_y, orig_w, orig_h),
                     ]
-
                 rec_model_name = os.path.basename(self.job.recognition_model_path).lower()
                 all_views: List[RecordView] = []
-
                 def _rescale_bbox(bb, factor):
                     if not bb or factor == 1.0:
                         return bb
@@ -57,7 +59,6 @@ class OCRWorkerTiledLinesMixin:
                         int(round(x1 / factor)),
                         int(round(y1 / factor)),
                     )
-
                 for tile_idx, (x0, y0, x1, y1, cx0, cy0, cx1, cy1) in enumerate(tiles):
                     if self.isInterruptionRequested():
                         break
@@ -69,12 +70,10 @@ class OCRWorkerTiledLinesMixin:
                         if min_dim < 1200:
                             scale_factor = 2 if min_dim >= 700 else 3
                             crop = crop.resize((crop.size[0] * scale_factor, crop.size[1] * scale_factor), Image.BICUBIC)
-
                         with torch.no_grad():
                             seg = segment_with_kraken(crop, model=self._seg_model, device=self._device)
                         seg = self._filter_short_baselines_in_seg(seg)
                         expected = self._seg_expected_lines(seg)
-
                         tile_records = []
                         done = 0
                         with torch.no_grad():
@@ -87,12 +86,10 @@ class OCRWorkerTiledLinesMixin:
                                     self._emit_overall_progress(file_idx, total_files, frac_all)
                                 if self.isInterruptionRequested():
                                     break
-
                         if "handwriting" in rec_model_name:
                             tile_sorted = sort_records_handwriting_simple(tile_records, self.job.reading_direction)
                         else:
                             tile_sorted = sort_records_reading_order(tile_records, crop.size[0], crop.size[1], self.job.reading_direction)
-
                         for rec in tile_sorted:
                             pred = getattr(rec, "prediction", None)
                             if pred is None:
@@ -124,11 +121,8 @@ class OCRWorkerTiledLinesMixin:
                             crop_orig.close()
                         except Exception:
                             pass
-
                 if not all_views:
                     return None
-
-                # Reihenfolge: Tile-Reihenfolge bewahren, nur Indexe normalisieren.
                 filtered: List[RecordView] = []
                 seen = set()
                 for rv in all_views:
@@ -140,7 +134,6 @@ class OCRWorkerTiledLinesMixin:
                     filtered.append(rv)
                     if len(filtered) >= MAX_KRAKEN_OCR_LINES:
                         break
-
                 lines = [rv.text for rv in filtered]
                 return "\n".join(lines).strip(), filtered
             except Exception:

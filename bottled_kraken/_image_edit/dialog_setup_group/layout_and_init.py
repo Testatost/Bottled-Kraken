@@ -1,10 +1,25 @@
-"""Mixin-Methoden für den Bildbearbeitungsdialog."""
-from ...shared import *
-from ...dialogs import *
-from ..common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
-from ..canvas import ImageEditCanvas
+from bottled_kraken.common import _image_edit_dialog_qss
+from bottled_kraken.common import (
+    Image,
+    List,
+    QCheckBox,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QKeySequence,
+    QLabel,
+    QPushButton,
+    QShortcut,
+    QSlider,
+    QTimer,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+    Tuple,
+    translation,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
+from bottled_kraken._image_edit.canvas import ImageEditCanvas
 from PySide6.QtGui import QPainterPath
-
 class ImageEditDialogLayoutAndInitMixin:
         def __init__(
                 self,
@@ -16,8 +31,16 @@ class ImageEditDialogLayoutAndInitMixin:
                 on_apply_current=None,
                 on_apply_selected=None,
                 on_apply_all=None,
+                headless: bool = False,
         ):
             super().__init__(parent)
+            self._headless_batch_processing = bool(headless)
+            if self._headless_batch_processing:
+                try:
+                    self.setAttribute(Qt.WA_DontShowOnScreen, True)
+                    self.setWindowFlag(Qt.Tool, True)
+                except Exception:
+                    pass
             self.on_prev = on_prev
             self.on_next = on_next
             self.on_apply_current = on_apply_current
@@ -27,8 +50,11 @@ class ImageEditDialogLayoutAndInitMixin:
             tr = getattr(parent, "_tr", None)
             self._tr = tr if callable(tr) else translation.make_tr(translation.DEFAULT_LANGUAGE)
             self.setWindowTitle(self._tr("image_edit_title", title))
-            self.resize(1500, 960)
-            self.setWindowState(self.windowState() | Qt.WindowMaximized)
+            if self._headless_batch_processing:
+                self.resize(320, 240)
+            else:
+                self.resize(1500, 960)
+                self.setWindowState(self.windowState() | Qt.WindowMaximized)
             theme = getattr(parent, "current_theme", "bright")
             self._preview_tool_theme = theme
             self.setStyleSheet(_image_edit_dialog_qss(theme))
@@ -44,7 +70,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.canvas.setFocusPolicy(Qt.StrongFocus)
             self.canvas.changed.connect(self._sync_from_canvas)
             self.canvas.rotation_committed.connect(self._on_canvas_rotation_committed)
-
             self.shortcut_prev_left = QShortcut(QKeySequence(Qt.Key_Left), self)
             self.shortcut_prev_left.setContext(Qt.WidgetWithChildrenShortcut)
             self.shortcut_prev_left.activated.connect(self._go_prev)
@@ -96,13 +121,11 @@ class ImageEditDialogLayoutAndInitMixin:
             self.shortcut_redo = QShortcut(QKeySequence("Ctrl+Y"), self)
             self.shortcut_redo.setContext(Qt.ApplicationShortcut)
             self.shortcut_redo.activated.connect(self._redo_action)
-
             self.btn_preview_select = self._make_preview_tool_button("select", "image_edit_preview_tool_select_tip")
             self.btn_preview_pan = self._make_preview_tool_button("pan", "image_edit_preview_tool_pan_tip")
             self.btn_preview_select.clicked.connect(lambda: self._set_preview_tool_mode("select"))
             self.btn_preview_pan.clicked.connect(lambda: self._set_preview_tool_mode("pan"))
             self._set_preview_tool_mode("select")
-
             self.btn_rotate_mode = QPushButton(self._tr("image_edit_rotate_off"))
             self.btn_rotate_mode.setCheckable(True)
             self.btn_rotate_mode.toggled.connect(self._toggle_rotation_mode)
@@ -123,7 +146,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.lbl_grid_size.setMinimumWidth(120)
             self.lbl_grid_size.setEnabled(False)
             self.lbl_grid_size.setVisible(False)
-
             self.chk_crop = QPushButton(self._tr("image_edit_crop"))
             self.chk_crop.setCheckable(True)
             self.chk_crop.toggled.connect(self._toggle_crop)
@@ -139,7 +161,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.chk_contrast = QPushButton(self._tr("image_edit_contrast"))
             self.chk_contrast.setCheckable(True)
             self.chk_contrast.clicked.connect(self._on_contrast_button_clicked)
-
             self.contrast_controls_widget = QWidget()
             contrast_controls_layout = QHBoxLayout(self.contrast_controls_widget)
             contrast_controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -165,7 +186,6 @@ class ImageEditDialogLayoutAndInitMixin:
             contrast_controls_layout.addWidget(self.contrast_slider, 0)
             contrast_controls_layout.addStretch(1)
             self.contrast_controls_widget.setVisible(False)
-
             self.btn_erase_rect = QPushButton(self._tr("image_edit_erase_rect"))
             self.btn_erase_rect.setCheckable(True)
             self.btn_erase_rect.toggled.connect(lambda checked: self._toggle_erase_mode("rect", checked))
@@ -174,7 +194,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.btn_erase_ellipse.toggled.connect(lambda checked: self._toggle_erase_mode("ellipse", checked))
             self.btn_erase_clear = QPushButton(self._tr("image_edit_erase_clear"))
             self.btn_erase_clear.clicked.connect(self._commit_erase_selection)
-
             btn_rot_left = QPushButton("↺ 90°")
             btn_rot_left.clicked.connect(lambda: self._rotate_by(-90))
             btn_rot_right = QPushButton("↻ 90°")
@@ -185,11 +204,9 @@ class ImageEditDialogLayoutAndInitMixin:
             btn_flip_v.clicked.connect(self._flip_vertical)
             btn_rot_reset = QPushButton(self._tr("image_edit_rotation_reset"))
             btn_rot_reset.clicked.connect(self._reset_rotation)
-
             self.chk_smart_split = QCheckBox(self._tr("image_edit_smart_split"))
             self.chk_smart_split.toggled.connect(self._toggle_smart_split)
             self.chk_smart_split.setEnabled(False)
-
             self.btn_prev = QPushButton(self._tr("image_edit_prev"))
             self.btn_prev.clicked.connect(self._go_prev)
             self.btn_next = QPushButton(self._tr("image_edit_next"))
@@ -213,7 +230,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.btn_apply_selected.clicked.connect(self._apply_selected)
             self.btn_apply_all = QPushButton(self._tr("image_edit_apply_all"))
             self.btn_apply_all.clicked.connect(self._apply_all)
-
             self.btn_crop_tool = self._make_sidebar_button("crop", self._tr("image_edit_crop"))
             self.btn_crop_tool.clicked.connect(lambda: self.chk_crop.setChecked(not self.chk_crop.isChecked()))
             self.btn_transform = QPushButton(self._tr("image_edit_menu_free_transform"))
@@ -227,7 +243,6 @@ class ImageEditDialogLayoutAndInitMixin:
             self.btn_hand_tool.clicked.connect(lambda: self._set_preview_tool_mode("pan"))
             self.btn_select_tool = self._make_sidebar_button("select", self._tr("image_edit_preview_tool_select_tip"))
             self.btn_select_tool.clicked.connect(lambda: self._set_preview_tool_mode("select"))
-
             self.btn_tf_scale = QPushButton(self._tr("image_edit_transform_mode_scale"))
             self.btn_tf_scale.setCheckable(True)
             self.btn_tf_scale.clicked.connect(lambda: self._set_transform_mode("scale"))
@@ -248,11 +263,9 @@ class ImageEditDialogLayoutAndInitMixin:
             self.btn_transform_cancel = QPushButton(self._tr("image_edit_menu_transform_cancel"))
             self.btn_transform_cancel.clicked.connect(self._cancel_transform)
             self.lbl_transform_mode = QLabel(self._tr("image_edit_transform_inactive"))
-
             root = QVBoxLayout(self)
             root.setContentsMargins(8, 8, 8, 8)
             root.setSpacing(6)
-
             options_row = QHBoxLayout()
             for widget in (self.btn_preview_select, self.btn_preview_pan, self.btn_grid, self.btn_rotate_mode, btn_rot_left, btn_rot_right, btn_rot_reset, btn_flip_h, btn_flip_v):
                 options_row.addWidget(widget)
@@ -262,7 +275,6 @@ class ImageEditDialogLayoutAndInitMixin:
             options_row.addStretch(1)
             options_row.addWidget(self.btn_border, 0, Qt.AlignRight)
             root.addLayout(options_row)
-
             transform_row = QHBoxLayout()
             transform_row.addWidget(self.btn_transform)
             for widget in (self.btn_tf_scale, self.btn_tf_rotate, self.btn_tf_skew, self.btn_tf_persp, self.btn_tf_warp):
@@ -276,12 +288,8 @@ class ImageEditDialogLayoutAndInitMixin:
             transform_row.addWidget(self.btn_freehand_selection, 0, Qt.AlignRight)
             transform_row.addWidget(self.btn_polygon_selection, 0, Qt.AlignRight)
             root.addLayout(transform_row)
-
             body = QHBoxLayout()
             body.setSpacing(8)
-            # Keine linke Photoshop-Symbolleiste mehr: die Werkzeuge liegen oben in
-            # der Options-/Transformationsleiste. Die folgenden Buttons bleiben als
-            # Attribute erhalten, werden aber nicht ins Layout eingefügt.
             for _btn in (
                 self.btn_select_tool,
                 self.btn_hand_tool,
@@ -290,14 +298,12 @@ class ImageEditDialogLayoutAndInitMixin:
                 self.btn_erase_tool,
             ):
                 _btn.hide()
-
             center = QVBoxLayout()
             center.addWidget(self.canvas, 1)
             for _erase_btn in (self.btn_erase_rect, self.btn_erase_ellipse, self.btn_erase_clear):
                 _erase_btn.hide()
             body.addLayout(center, 1)
             root.addLayout(body, 1)
-
             bottom = QHBoxLayout()
             bottom.addWidget(self.btn_prev)
             bottom.addWidget(self.btn_next)
@@ -314,7 +320,6 @@ class ImageEditDialogLayoutAndInitMixin:
             bb.rejected.connect(self.reject)
             root.addLayout(bottom)
             root.addWidget(bb)
-
             self.gray_level = 0.0
             self.gray_enabled = False
             self._history_undo = []

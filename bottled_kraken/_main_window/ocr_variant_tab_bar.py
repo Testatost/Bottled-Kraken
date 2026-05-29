@@ -1,8 +1,7 @@
-"""QTabBar for OCR variants with pinned overflow controls."""
 try:
     from PySide6.QtCore import QSize, QTimer, Qt
     from PySide6.QtWidgets import QMenu, QTabBar, QToolButton
-except Exception:  # pragma: no cover
+except Exception:
     QSize = None
     QTimer = None
     Qt = None
@@ -10,17 +9,13 @@ except Exception:  # pragma: no cover
     QToolButton = None
     QTabBar = object
 try:
-    from .ocr_tab_name_utils import plain_ocr_tab_text
-except Exception:  # pragma: no cover
+    from bottled_kraken._main_window.ocr_tab_name_utils import plain_ocr_tab_text
+except Exception:
     def plain_ocr_tab_text(text: str) -> str:
         value = str(text or "").strip()
         return value[:-1].rstrip() if value.endswith("×") else value
-
 class OCRVariantTabBar(QTabBar):
-    """QTabBar with add, close, rename, and KDE-safe overflow buttons."""
-
     _CTRL_W = 108
-
     def __init__(self, owner=None, parent=None):
         super().__init__(parent)
         self._ocr_variant_owner = owner
@@ -41,17 +36,14 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             pass
         self._ensure_manual_scroll_buttons()
-
     def _actions(self):
-        from . import ocr_variant_tabs
+        from bottled_kraken._main_window import ocr_variant_tabs
         return ocr_variant_tabs
-
     def _is_plus_index(self, index: int) -> bool:
         try:
             return index >= 0 and (index == self.count() - 1 or plain_ocr_tab_text(self.tabText(index)) == "+")
         except Exception:
             return False
-
     def _ensure_manual_scroll_buttons(self):
         if self._manual_scroll_buttons_ready or QToolButton is None:
             return
@@ -82,7 +74,6 @@ class OCRVariantTabBar(QTabBar):
             self._manual_scroll_buttons_ready = True
         except Exception:
             self._manual_scroll_buttons_ready = False
-
     def _add_tab_from_button(self):
         owner = self._ocr_variant_owner
         if owner is None:
@@ -91,7 +82,6 @@ class OCRVariantTabBar(QTabBar):
             self._actions().add_ocr_variant_tab(owner)
         except Exception:
             pass
-
     def _base_tab_size_hint(self, index: int):
         try:
             return super().tabSizeHint(index)
@@ -99,7 +89,6 @@ class OCRVariantTabBar(QTabBar):
             if QSize is not None:
                 return QSize(1, 22)
             raise
-
     def tabSizeHint(self, index):
         try:
             if int(index) in self._overflow_hidden_indices and QSize is not None:
@@ -109,7 +98,6 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             pass
         return self._base_tab_size_hint(index)
-
     def minimumTabSizeHint(self, index):
         try:
             if int(index) in self._overflow_hidden_indices and QSize is not None:
@@ -122,7 +110,6 @@ class OCRVariantTabBar(QTabBar):
             return super().minimumTabSizeHint(index)
         except Exception:
             return self._base_tab_size_hint(index)
-
     def _natural_tab_width(self, index: int) -> int:
         width = 1
         try:
@@ -134,7 +121,6 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             pass
         return max(1, width)
-
     def _set_tab_visible_safe(self, index: int, visible: bool) -> None:
         try:
             index = int(index)
@@ -156,7 +142,6 @@ class OCRVariantTabBar(QTabBar):
                     pass
         except Exception:
             pass
-
     def _force_overflow_layout_refresh(self) -> None:
         if not getattr(self, "_overflow_layout_dirty", False):
             try:
@@ -200,20 +185,17 @@ class OCRVariantTabBar(QTabBar):
                 QTimer.singleShot(0, self.update)
             except Exception:
                 pass
-
     def _tabs_overflow(self) -> bool:
         try:
             total = sum(self._natural_tab_width(i) for i in range(self.count()))
             return total > max(1, self.width() - 2)
         except Exception:
             return False
-
     def _available_tab_width(self) -> int:
         try:
             return max(1, int(self.width()) - self._CTRL_W - 2)
         except Exception:
             return 1
-
     def _fit_end(self, start: int, real_count: int, available: int) -> int:
         if real_count <= 0:
             return -1
@@ -229,7 +211,6 @@ class OCRVariantTabBar(QTabBar):
             if used >= available:
                 break
         return max(start, min(end, real_count - 1))
-
     def _best_start_for_end(self, end: int, real_count: int, available: int) -> int:
         if real_count <= 0:
             return 0
@@ -245,12 +226,10 @@ class OCRVariantTabBar(QTabBar):
             if used >= available:
                 break
         return max(0, min(start, end))
-
     def _max_scroll_start(self, real_count: int, available: int) -> int:
         if real_count <= 0:
             return 0
         return self._best_start_for_end(real_count - 1, real_count, available)
-
     def _clamped_overflow_start(self, start: int, real_count: int, available: int) -> int:
         max_start = self._max_scroll_start(real_count, available)
         try:
@@ -258,7 +237,6 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             start = 0
         return max(0, min(start, max_start))
-
     def _sync_visible_overflow_tabs(self, overflow: bool, ensure_current: bool = True) -> None:
         if self._overflow_syncing:
             return
@@ -295,7 +273,6 @@ class OCRVariantTabBar(QTabBar):
             self._force_overflow_layout_refresh()
         finally:
             self._overflow_syncing = False
-
     def _hide_native_scroll_buttons(self):
         manual = {getattr(self, name, None) for name in ("_manual_plus_btn", "_overflow_more_btn", "_scroll_left_btn", "_scroll_right_btn")}
         try:
@@ -309,7 +286,6 @@ class OCRVariantTabBar(QTabBar):
                 button.resize(0, 0)
             except Exception:
                 pass
-
     def _show_manual_scroll_buttons(self, show: bool) -> None:
         if not self._manual_scroll_buttons_ready:
             return
@@ -327,7 +303,6 @@ class OCRVariantTabBar(QTabBar):
                 x += width
         except Exception:
             pass
-
     def _update_scroll_arrow_buttons(self, ensure_current: bool = True) -> None:
         self._ensure_manual_scroll_buttons()
         self._hide_native_scroll_buttons()
@@ -341,7 +316,6 @@ class OCRVariantTabBar(QTabBar):
             self._force_overflow_layout_refresh()
         except Exception:
             pass
-
     def _show_overflow_tab_menu(self):
         if self._ocr_variant_owner is None or QMenu is None:
             return
@@ -362,7 +336,6 @@ class OCRVariantTabBar(QTabBar):
         elif index > end: start = self._best_start_for_end(index, real_count, available)
         self._overflow_first_visible = self._clamped_overflow_start(start, real_count, available)
         self.setCurrentIndex(index); self._update_scroll_arrow_buttons(ensure_current=True)
-
     def _scroll_visible_window(self, step: int) -> None:
         try:
             real_count = max(0, self.count() - 1)
@@ -374,7 +347,6 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             pass
         self._update_scroll_arrow_buttons(ensure_current=False)
-
     def _show_context_menu(self, pos):
         owner = self._ocr_variant_owner
         if owner is None or QMenu is None:
@@ -399,7 +371,6 @@ class OCRVariantTabBar(QTabBar):
             self._actions().rename_ocr_variant_tab(owner, index)
         elif chosen == delete_action:
             self._actions().delete_ocr_variant_tab(owner, index)
-
     def _handle_plus_at_pos(self, pos) -> bool:
         try:
             index = self.tabAt(pos)
@@ -409,13 +380,11 @@ class OCRVariantTabBar(QTabBar):
             self._actions().add_ocr_variant_tab(self._ocr_variant_owner)
             return True
         return False
-
     def _is_right_button(self, event) -> bool:
         try:
             return Qt is not None and event.button() == Qt.RightButton
         except Exception:
             return False
-
     def mousePressEvent(self, event):
         if self._is_right_button(event):
             try:
@@ -425,7 +394,6 @@ class OCRVariantTabBar(QTabBar):
                 pass
             return
         super().mousePressEvent(event)
-
     def mouseReleaseEvent(self, event):
         if self._is_right_button(event):
             try:
@@ -441,7 +409,6 @@ class OCRVariantTabBar(QTabBar):
             return
         super().mouseReleaseEvent(event)
         self._update_scroll_arrow_buttons(ensure_current=True)
-
     def mouseDoubleClickEvent(self, event):
         try:
             index = self.tabAt(event.pos())
@@ -455,7 +422,6 @@ class OCRVariantTabBar(QTabBar):
                 pass
             return
         super().mouseDoubleClickEvent(event)
-
     def keyPressEvent(self, event):
         try:
             if Qt is not None and event.key() == Qt.Key_F2 and self._ocr_variant_owner is not None:
@@ -467,7 +433,6 @@ class OCRVariantTabBar(QTabBar):
         except Exception:
             pass
         super().keyPressEvent(event)
-
     def tabInserted(self, index):
         try:
             super().tabInserted(index)
@@ -477,7 +442,6 @@ class OCRVariantTabBar(QTabBar):
         owner = self._ocr_variant_owner
         if owner is not None:
             QTimer.singleShot(0, lambda: self._actions().configure_ocr_variant_tab_buttons(owner)) if QTimer is not None else self._actions().configure_ocr_variant_tab_buttons(owner)
-
     def tabRemoved(self, index):
         try:
             super().tabRemoved(index)
@@ -487,11 +451,9 @@ class OCRVariantTabBar(QTabBar):
         owner = self._ocr_variant_owner
         if owner is not None:
             QTimer.singleShot(0, lambda: self._actions().configure_ocr_variant_tab_buttons(owner)) if QTimer is not None else self._actions().configure_ocr_variant_tab_buttons(owner)
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_scroll_arrow_buttons()
-
     def showEvent(self, event):
         super().showEvent(event)
         self._update_scroll_arrow_buttons()

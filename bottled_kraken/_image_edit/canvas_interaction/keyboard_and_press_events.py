@@ -1,7 +1,11 @@
-"""Mixin-Methoden für die Bildbearbeitungs-Canvas."""
-from ...shared import *
-from ..common import ImageEditSeparator
-
+from bottled_kraken.common import (
+    QMessageBox,
+    QPointF,
+    QRectF,
+    Qt,
+    math,
+)
+from bottled_kraken._image_edit.common import ImageEditSeparator
 class ImageEditCanvasKeyboardAndPressMixin:
         def keyPressEvent(self, event):
             parent = self.parent()
@@ -30,7 +34,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                     event.accept()
                     return
             super().keyPressEvent(event)
-
         def mousePressEvent(self, event):
             if self.view_image is None:
                 return
@@ -72,8 +75,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                         return
                     if hit_type == "inside":
                         if mode == "warp" and not (event.modifiers() & Qt.ShiftModifier):
-                            # Warp wird nur über die sichtbaren 3x3-Kontrollpunkte verändert.
-                            # Ein Klick in die Fläche verschiebt daher nicht versehentlich den Rand.
                             return
                         self.drag_mode = "transform_move"
                         self._transform_drag_points = [QPointF(pt) for pt in self.transform_quad]
@@ -165,7 +166,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                 self.changed.emit()
                 return
             if self.show_crop:
-                # Im Crop-Modus darf KEIN Auswahlbereich entstehen.
                 hit_idx = self._crop_hit_index(p)
                 if hit_idx is not None:
                     self.select_crop_index(hit_idx)
@@ -198,7 +198,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                     self.drag_start = p
                     self.update()
                     return
-
             if getattr(self, "show_selection", False) and getattr(self, "selection_draw_mode", "rect") == "polygon":
                 if not self.selection_polygon:
                     self.selection_polygon = []
@@ -210,7 +209,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                 self.update()
                 self.changed.emit()
                 return
-
             if getattr(self, "show_selection", False) and getattr(self, "selection_draw_mode", "rect") == "freehand":
                 self.drag_mode = "selection_freehand"
                 self.drag_start = p
@@ -219,7 +217,6 @@ class ImageEditCanvasKeyboardAndPressMixin:
                 self.selection_rect = None
                 self.update()
                 return
-
             if getattr(self, "show_selection", False):
                 edge = self._selection_edge_at(p)
                 if self.selection_rect is not None and edge:
