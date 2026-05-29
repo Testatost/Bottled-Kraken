@@ -73,6 +73,17 @@ def _bk_lm_behavior_normalized(data=None) -> dict:
             out[key] = max(0, int(out.get(key, 0) or 0))
         except Exception:
             out[key] = 0
+    # Windows-Fix: In älteren/defekten Profilen konnten Handschrift oder
+    # gemischte Schrift gespeichert sein, während die Kontextwerte weiterhin
+    # 0/0/0 blieben. Dann fehlten im Dialog die erwarteten Vorgabewerte.
+    # Für Druckschrift bleibt 0/0/0 korrekt. Für Handschrift/Gemischt wird
+    # nur dann repariert, wenn wirklich alle drei Kontextwerte leer sind.
+    if out["script_mode"] in (AI_SCRIPT_HANDWRITING, AI_SCRIPT_MIXED):
+        if int(out.get("pad_x", 0) or 0) == 0 and int(out.get("pad_y", 0) or 0) == 0 and int(out.get("extra_context_y", 0) or 0) == 0:
+            px, py, ey = _BK_LM_BEHAVIOR_PRESETS.get(out["script_mode"], _BK_LM_BEHAVIOR_PRESETS[AI_SCRIPT_PRINT])
+            out["pad_x"] = int(px)
+            out["pad_y"] = int(py)
+            out["extra_context_y"] = int(ey)
     out["filters"] = str(out.get("filters", "") or "")
     return out
 def _bk_lm_load_behavior_settings(self):
@@ -181,6 +192,10 @@ def _bk_lm_show_behavior_dialog(self):
         extra_y = QSpinBox(); extra_y.setRange(0, 500); extra_y.setValue(int(data["extra_context_y"]))
         preset_btn = QPushButton(_bk_lm_opt_text(self, "lm_behavior_apply_preset"))
         preset_btn.clicked.connect(lambda _=False, c=mode_combo, x=pad_x, y=pad_y, e=extra_y: _bk_lm_behavior_apply_preset(c, x, y, e))
+        # Beim Wechsel der Schrift-/Kontext-Vorgabe sollen die Werte direkt
+        # sichtbar umspringen. Der Button bleibt zusätzlich als manuelle
+        # Wiederherstellung des Vorschlags erhalten.
+        mode_combo.currentIndexChanged.connect(lambda _idx, c=mode_combo, x=pad_x, y=pad_y, e=extra_y: _bk_lm_behavior_apply_preset(c, x, y, e))
         weight = QComboBox()
         weight.addItem(_bk_lm_opt_text(self, "lm_behavior_weight_revision"), "kraken_lm_revision")
         weight.addItem(_bk_lm_opt_text(self, "lm_behavior_weight_kraken"), "kraken_first")
