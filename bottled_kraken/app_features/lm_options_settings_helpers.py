@@ -11,6 +11,7 @@ _BK_LM_TOKEN_DEFAULTS = {
     "sqlite_json": 9000,
     "gedcom": 6000,
     "canonical": 9000,
+    "export_zones_ai": 300,
 }
 _BK_LM_TOKEN_KEYS = (
     ("current_line", "lm_token_current_line"),
@@ -23,6 +24,7 @@ _BK_LM_TOKEN_KEYS = (
     ("sqlite_json", "lm_token_sqlite_json"),
     ("gedcom", "lm_token_gedcom"),
     ("canonical", "lm_token_canonical"),
+    ("export_zones_ai", "lm_token_export_zones_ai"),
 )
 _BK_LM_PROMPT_KEYS = (
     ("ai_prompt_single_system", "lm_prompt_single_system"),
@@ -47,6 +49,8 @@ _BK_LM_PROMPT_KEYS = (
     ("ai_prompt_neo4j_user", "lm_prompt_neo4j_user"),
     ("ai_prompt_sqlite_system", "lm_prompt_sqlite_system"),
     ("ai_prompt_sqlite_user", "lm_prompt_sqlite_user"),
+    ("ai_prompt_export_zones_system", "lm_prompt_export_zones_system"),
+    ("ai_prompt_export_zones_user", "lm_prompt_export_zones_user"),
 )
 from bottled_kraken.translations.translation_loader import load_named_language_mapping as _load_translation_mapping
 _BK_LM_OPTIONS_TEXTS = _load_translation_mapping("lm_options_texts", "BK_LM_OPTIONS_TRANSLATIONS")
@@ -120,6 +124,7 @@ def _bk_lm_load_token_settings(self):
     defaults["sqlite_json"] = 9000
     defaults["gedcom"] = 6000
     defaults["canonical"] = 9000
+    defaults["export_zones_ai"] = 300
     self.lm_token_limits = {}
     settings = getattr(self, "settings", None)
     for kind, default in defaults.items():
@@ -129,6 +134,15 @@ def _bk_lm_load_token_settings(self):
                 value = int(settings.value(_bk_lm_token_settings_key(kind), default, int))
             except Exception:
                 value = default
+        try:
+            value = int(value)
+        except Exception:
+            value = int(default)
+        if kind == "export_zones_ai":
+            # Dieser Task arbeitet in kleinen Zeilen-Chunks. Mehrere tausend
+            # Antworttokens sind hier nicht sinnvoll und provozieren bei
+            # Reasoning-Modellen unnötig lange Denktexte.
+            value = max(64, min(300, value))
         self.lm_token_limits[kind] = max(1, int(value))
 def _lm_token_limit(self, kind: str) -> int:
     if not hasattr(self, "lm_token_limits"):

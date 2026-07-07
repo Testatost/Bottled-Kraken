@@ -34,6 +34,461 @@ DOTS_ONLY_RE = re.compile(r'^(?:\.\s*){3,}$')
 def emit(event: str, **payload):
     payload["event"] = event
     print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+def _bk_autocorrect_parse_weight(value, default: float = 1.0) -> float:
+    try:
+        if isinstance(value, (int, float)):
+            val = float(value)
+        else:
+            txt = str(value or "").strip().replace("\u00a0", "").replace(" ", "")
+            txt = txt.replace(".", "") if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", txt) else txt
+            txt = txt.replace(",", ".")
+            if not re.fullmatch(r"\d+(?:\.\d+)?", txt):
+                return float(default)
+            val = float(txt)
+        if val <= 0:
+            return float(default)
+        return min(val, 1000000.0)
+    except Exception:
+        return float(default)
+
+
+def _bk_autocorrect_payload_entry(item):
+    if isinstance(item, dict):
+        term = item.get("term") or item.get("text") or item.get("name") or item.get("value") or item.get("word")
+        weight = item.get("weight", item.get("count", item.get("frequency", item.get("anzahl", 1))))
+        return str(term or "").strip(), _bk_autocorrect_parse_weight(weight, 1.0)
+    if isinstance(item, (list, tuple)) and item:
+        term = str(item[0] or "").strip()
+        weight = item[1] if len(item) > 1 else 1
+        return term, _bk_autocorrect_parse_weight(weight, 1.0)
+    return str(item or "").strip(), 1.0
+
+
+def _bk_autocorrect_terms_from_replacements(value: Any):
+    raw_terms = []
+    if value is None:
+        return raw_terms
+    for raw in str(value).splitlines():
+        line = raw.strip()
+        if line.startswith("#BK_AUTOCORRECT_TERMS_JSON="):
+            try:
+                data = json.loads(line.split("=", 1)[1])
+                if isinstance(data, list):
+                    raw_terms.extend(data)
+            except Exception:
+                pass
+    by_norm = {}
+    for item in raw_terms:
+        term, weight = _bk_autocorrect_payload_entry(item)
+        if not term:
+            continue
+        norm = _bk_autocorrect_norm(term)
+        if len(norm) < 2:
+            continue
+        entry = by_norm.get(norm)
+        if entry is None:
+            by_norm[norm] = {"term": term, "weight": weight, "best_weight": weight}
+        else:
+            entry["weight"] = float(entry.get("weight", 1.0)) + weight
+            if weight > float(entry.get("best_weight", 0.0)):
+                entry["term"] = term
+                entry["best_weight"] = weight
+    return [{"term": entry["term"], "weight": float(entry.get("weight", 1.0))} for entry in by_norm.values()]
+
+
+def _bk_autocorrect_norm(value: Any) -> str:
+    txt = str(value or "").casefold()
+    txt = txt.replace("0", "o").replace("1", "l")
+    txt = txt.replace("ſ", "s")
+    txt = re.sub(r"[^a-zäöüßà-ÿ]", "", txt)
+    return txt
+
+
+def _bk_autocorrect_distance(a: str, b: str, limit: int = 2) -> int:
+    if a == b:
+        return 0
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        row_min = i
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            val = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            cur.append(val)
+            if val < row_min:
+                row_min = val
+        if row_min > limit:
+            return limit + 1
+        prev = cur
+    return prev[-1]
+
+_BK_AUTOCORRECT_WORD_CHARS = r"A-Za-zÄÖÜäöüßÀ-ÿ"
+_BK_AUTOCORRECT_TOKEN_RE = re.compile(rf"(?<![{_BK_AUTOCORRECT_WORD_CHARS}0-9])[{_BK_AUTOCORRECT_WORD_CHARS}0-9][{_BK_AUTOCORRECT_WORD_CHARS}0-9'’\-]{{2,}}(?![{_BK_AUTOCORRECT_WORD_CHARS}0-9])")
+_BK_AUTOCORRECT_WORD_RE = re.compile(rf"(?<![{_BK_AUTOCORRECT_WORD_CHARS}])[{_BK_AUTOCORRECT_WORD_CHARS}][{_BK_AUTOCORRECT_WORD_CHARS}'’\-]{{2,}}(?![{_BK_AUTOCORRECT_WORD_CHARS}])")
+_BK_AUTOCORRECT_MONTH_NORMS = {
+    "januar", "jan", "februar", "feb", "märz", "maerz", "mär", "mar",
+    "april", "apr", "mai", "juni", "jun", "juli", "jul", "august", "aug",
+    "september", "sept", "sep", "oktober", "okt", "november", "nov", "dezember", "dez",
+}
+
+
+def _bk_autocorrect_restore_case(original: str, replacement: str) -> str:
+    repl = str(replacement or "")
+    if not repl:
+        return repl
+    letters = "".join(ch for ch in str(original or "") if ch.isalpha())
+    if letters and letters.isupper():
+        return repl.upper()
+    return repl
+
+
+def _bk_autocorrect_norm_token(token: str) -> str:
+    variants = _bk_autocorrect_norm_variants(token)
+    return variants[0] if variants else ""
+
+
+def _bk_autocorrect_add_variant(out: list, seen: set, value: str):
+    norm = _bk_autocorrect_norm(value)
+    if norm and norm not in seen:
+        seen.add(norm)
+        out.append(norm)
+
+
+def _bk_autocorrect_norm_variants(token: str) -> list:
+    token = str(token or "")
+    out = []
+    seen = set()
+    if any(ch.isdigit() for ch in token) and any(ch.isalpha() for ch in token):
+        stripped_any = re.sub(r"^\d+(?=[A-Za-zÄÖÜäöüßÀ-ÿ])|(?<=[A-Za-zÄÖÜäöüßÀ-ÿ])\d+$", "", token)
+        strip_first = bool(
+            re.match(r"^\d{2,}(?=[A-Za-zÄÖÜäöüßÀ-ÿ])", token)
+            or re.search(r"(?<=[A-Za-zÄÖÜäöüßÀ-ÿ])\d{2,}$", token)
+            or re.match(r"^\d(?=[A-ZÄÖÜÀ-Ý])", token)
+        )
+        if strip_first and stripped_any and stripped_any != token:
+            _bk_autocorrect_add_variant(out, seen, stripped_any)
+        _bk_autocorrect_add_variant(out, seen, token)
+        if (not strip_first) and stripped_any and stripped_any != token:
+            _bk_autocorrect_add_variant(out, seen, stripped_any)
+        stripped = re.sub(r"^[\d\s\.,:;]+|[\d\s\.,:;]+$", "", token)
+        if stripped and stripped != token:
+            _bk_autocorrect_add_variant(out, seen, stripped)
+    else:
+        _bk_autocorrect_add_variant(out, seen, token)
+    return out
+
+def _bk_autocorrect_common_prefix(a: str, b: str) -> int:
+    count = 0
+    for ca, cb in zip(a, b):
+        if ca != cb:
+            break
+        count += 1
+    return count
+
+
+def _bk_autocorrect_common_suffix(a: str, b: str) -> int:
+    count = 0
+    for ca, cb in zip(reversed(a), reversed(b)):
+        if ca != cb:
+            break
+        count += 1
+    return count
+
+
+def _bk_autocorrect_ngrams(value: str, size: int) -> set:
+    value = str(value or "")
+    if len(value) < size:
+        return set()
+    return {value[i:i + size] for i in range(0, len(value) - size + 1)}
+
+
+def _bk_autocorrect_similarity_rank(norm: str, cand_norm: str) -> int:
+    norm = str(norm or "")
+    cand_norm = str(cand_norm or "")
+    return (
+        4 * _bk_autocorrect_common_suffix(norm, cand_norm)
+        + 3 * _bk_autocorrect_common_prefix(norm, cand_norm)
+        + 3 * len(_bk_autocorrect_ngrams(norm, 2).intersection(_bk_autocorrect_ngrams(cand_norm, 2)))
+        + len(_bk_autocorrect_ngrams(norm, 3).intersection(_bk_autocorrect_ngrams(cand_norm, 3)))
+    )
+
+
+def _bk_autocorrect_max_distance(norm: str) -> int:
+    length = len(str(norm or ""))
+    if length < 3:
+        return 0
+    if length == 3:
+        return 1
+    if length <= 8:
+        return 2
+    return 2
+
+
+def _bk_autocorrect_weight_bonus(weight: float) -> int:
+    try:
+        w = float(weight)
+    except Exception:
+        w = 1.0
+    if w >= 100:
+        return 24
+    if w >= 50:
+        return 22
+    if w >= 25:
+        return 20
+    if w >= 10:
+        return 16
+    if w >= 5:
+        return 10
+    if w >= 2:
+        return 5
+    return 0
+
+
+def _bk_autocorrect_best_term(norm: str, buckets: dict, exact: dict, weights: dict = None, skip_norm: str = None):
+    norm = str(norm or "")
+    if not norm:
+        return None, 99, None
+    max_dist = _bk_autocorrect_max_distance(norm)
+    if max_dist <= 0:
+        return None, 99, None
+    weights = weights or {}
+    best_term = None
+    best_norm = None
+    best_dist = 99
+    best_score = -1
+    best_rank = -1
+    best_weight = -1.0
+    best_len_delta = 999
+    for ln in range(max(1, len(norm) - max_dist), len(norm) + max_dist + 1):
+        for cand_norm, cand_term in buckets.get(ln, []):
+            if skip_norm is not None and cand_norm == skip_norm:
+                continue
+            dist = _bk_autocorrect_distance(norm, cand_norm, max_dist)
+            if dist > max_dist:
+                continue
+            rank = _bk_autocorrect_similarity_rank(norm, cand_norm)
+            weight = float(weights.get(cand_norm, 1.0))
+            if dist >= 2 and len(norm) <= 5 and rank < 8:
+                continue
+            if dist == 1 and len(norm) == 3 and rank < 7 and weight < 8:
+                continue
+            len_delta = abs(len(norm) - len(cand_norm))
+            score = rank + _bk_autocorrect_weight_bonus(weight)
+            key = (dist, -score, len_delta, -rank, -weight)
+            best_key = (best_dist, -best_score, best_len_delta, -best_rank, -best_weight)
+            if key < best_key:
+                best_dist = dist
+                best_score = score
+                best_rank = rank
+                best_weight = weight
+                best_len_delta = len_delta
+                best_term = cand_term
+                best_norm = cand_norm
+    if best_term is None or best_dist > max_dist:
+        return None, 99, None
+    return best_term, best_dist, best_norm
+
+
+def _bk_autocorrect_best_override_term(norm: str, buckets: dict, exact: dict, weights: dict = None):
+    norm = str(norm or "")
+    weights = weights or {}
+    max_dist = _bk_autocorrect_max_distance(norm)
+    if not norm or max_dist <= 0:
+        return None, 99, None
+    best_term = None
+    best_norm = None
+    best_dist = 99
+    best_score = -1
+    best_rank = -1
+    best_weight = -1.0
+    best_len_delta = 999
+    for ln in range(max(1, len(norm) - max_dist), len(norm) + max_dist + 1):
+        for cand_norm, cand_term in buckets.get(ln, []):
+            if cand_norm == norm:
+                continue
+            dist = _bk_autocorrect_distance(norm, cand_norm, max_dist)
+            if dist > max_dist:
+                continue
+            rank = _bk_autocorrect_similarity_rank(norm, cand_norm)
+            weight = float(weights.get(cand_norm, 1.0))
+            if dist >= 2 and len(norm) <= 5 and rank < 8:
+                continue
+            if dist == 1 and len(norm) == 3 and rank < 7 and weight < 8:
+                continue
+            score = rank + _bk_autocorrect_weight_bonus(weight)
+            len_delta = abs(len(norm) - len(cand_norm))
+            key = (-score, dist, len_delta, -rank, -weight)
+            best_key = (-best_score, best_dist, best_len_delta, -best_rank, -best_weight)
+            if key < best_key:
+                best_term = cand_term
+                best_norm = cand_norm
+                best_dist = dist
+                best_score = score
+                best_rank = rank
+                best_weight = weight
+                best_len_delta = len_delta
+    if best_term is None:
+        return None, 99, None
+    return best_term, best_dist, best_norm
+
+def _bk_autocorrect_should_override_exact(norm: str, cand_norm: str, dist: int, weights: dict) -> bool:
+    if not cand_norm or dist <= 0:
+        return False
+    exact_weight = float((weights or {}).get(norm, 1.0))
+    cand_weight = float((weights or {}).get(cand_norm, 1.0))
+    rank = _bk_autocorrect_similarity_rank(norm, cand_norm)
+    if len(norm) <= 3:
+        return dist == 1 and rank >= 8 and cand_weight >= max(5.0, exact_weight * 4.0)
+    if len(norm) <= 5:
+        return dist <= 2 and rank >= 8 and cand_weight >= max(8.0, exact_weight * 5.0)
+    return dist <= 2 and rank >= 10 and cand_weight >= max(10.0, exact_weight * 6.0)
+
+
+def _bk_autocorrect_correct_reference_token(token: str, buckets: dict, exact: dict, weights: dict = None) -> str:
+    token = str(token or "")
+    weights = weights or {}
+    best_term = None
+    best_dist = 99
+    best_rank = -1
+    best_weight = -1.0
+    best_variant_index = 999
+    for variant_index, norm in enumerate(_bk_autocorrect_norm_variants(token)):
+        if len(norm) < 3:
+            continue
+        if norm in exact:
+            term = exact[norm]
+            dist = 0
+            cand_norm = norm
+            alt_term, alt_dist, alt_norm = _bk_autocorrect_best_override_term(norm, buckets, exact, weights)
+            if alt_term is not None and _bk_autocorrect_should_override_exact(norm, alt_norm, alt_dist, weights):
+                term, dist, cand_norm = alt_term, alt_dist, alt_norm
+        else:
+            term, dist, cand_norm = _bk_autocorrect_best_term(norm, buckets, exact, weights)
+            if term is None:
+                continue
+        rank = _bk_autocorrect_similarity_rank(norm, _bk_autocorrect_norm(term))
+        weight = float(weights.get(cand_norm or _bk_autocorrect_norm(term), 1.0))
+        key = (dist, variant_index, -rank, -weight)
+        best_key = (best_dist, 999, -best_rank, -best_weight) if best_term is None else (best_dist, best_variant_index, -best_rank, -best_weight)
+        if key < best_key:
+            best_term = term
+            best_dist = dist
+            best_rank = rank
+            best_weight = weight
+            best_variant_index = variant_index
+    if best_term is None:
+        return token
+    return _bk_autocorrect_restore_case(token, best_term)
+
+
+def _bk_autocorrect_correct_embedded_numeric_tokens(text: str, buckets: dict, exact: dict, weights: dict) -> str:
+    def repl(match):
+        token = match.group(0)
+        if not any(ch.isdigit() for ch in token) or not any(ch.isalpha() for ch in token):
+            return token
+        return _bk_autocorrect_correct_reference_token(token, buckets, exact, weights)
+    return _BK_AUTOCORRECT_TOKEN_RE.sub(repl, str(text or ""))
+
+
+def _bk_autocorrect_correct_word_tokens(text: str, buckets: dict, exact: dict, weights: dict) -> str:
+    def repl(match):
+        return _bk_autocorrect_correct_reference_token(match.group(0), buckets, exact, weights)
+    return _BK_AUTOCORRECT_WORD_RE.sub(repl, str(text or ""))
+
+
+def _bk_autocorrect_reference_phrase(phrase: str, buckets: dict, exact: dict, weights: dict):
+    phrase = str(phrase or "").strip()
+    if not phrase:
+        return None
+    words = list(_BK_AUTOCORRECT_WORD_RE.finditer(phrase))
+    if not words:
+        return None
+    gap_text = _BK_AUTOCORRECT_WORD_RE.sub("", phrase)
+    if re.search(r"[^\s,;:'’\-\.]+", gap_text):
+        return None
+    norms = [_bk_autocorrect_norm(match.group(0)) for match in words]
+    if any(norm in _BK_AUTOCORRECT_MONTH_NORMS for norm in norms):
+        return None
+    resolved = []
+    for match, norm in zip(words, norms):
+        if norm in exact:
+            term = exact[norm]
+            alt_term, alt_dist, alt_norm = _bk_autocorrect_best_override_term(norm, buckets, exact, weights)
+            if alt_term is not None and _bk_autocorrect_should_override_exact(norm, alt_norm, alt_dist, weights):
+                term = alt_term
+            resolved.append(_bk_autocorrect_restore_case(match.group(0), term))
+            continue
+        corrected = _bk_autocorrect_correct_reference_token(match.group(0), buckets, exact, weights)
+        if corrected == match.group(0):
+            return None
+        resolved.append(_bk_autocorrect_restore_case(match.group(0), corrected))
+    idx = 0
+    def repl(_match):
+        nonlocal idx
+        item = resolved[idx]
+        idx += 1
+        return item
+    return _BK_AUTOCORRECT_WORD_RE.sub(repl, phrase).strip(" ,;:-.\t")
+
+def _bk_autocorrect_cleanup_numeric_reference_lines(text: str, buckets: dict, exact: dict, weights: dict) -> str:
+    out = []
+    for raw_line in str(text or "").splitlines(True):
+        newline = ""
+        line = raw_line
+        if line.endswith("\r\n"):
+            line, newline = line[:-2], "\r\n"
+        elif line.endswith("\n") or line.endswith("\r"):
+            line, newline = line[:-1], line[-1]
+        leading = re.match(r"^\s*", line).group(0)
+        trailing = re.search(r"\s*$", line).group(0)
+        core = line.strip()
+        replacement = None
+        match = re.match(r"^\d{1,4}[\s\.,:;]+(.+?)$", core)
+        if match:
+            replacement = _bk_autocorrect_reference_phrase(match.group(1), buckets, exact, weights)
+        if replacement is None:
+            match = re.match(r"^(.+?)[\s\.,:;]+\d{1,4}$", core)
+            if match:
+                replacement = _bk_autocorrect_reference_phrase(match.group(1), buckets, exact, weights)
+        if replacement:
+            out.append(leading + replacement + trailing + newline)
+        else:
+            out.append(line + newline)
+    return "".join(out)
+
+
+def _bk_autocorrect_apply_reference_terms(text: str, replacements=None) -> str:
+    terms = _bk_autocorrect_terms_from_replacements(replacements)
+    if not terms:
+        return text
+    buckets = {}
+    exact = {}
+    weights = {}
+    display_weights = {}
+    for entry in terms:
+        term, weight = _bk_autocorrect_payload_entry(entry)
+        norm = _bk_autocorrect_norm(term)
+        if not norm:
+            continue
+        old_weight = float(weights.get(norm, 0.0))
+        weights[norm] = old_weight + float(weight)
+        if norm not in exact or float(weight) > float(display_weights.get(norm, 0.0)):
+            exact[norm] = term
+            display_weights[norm] = float(weight)
+    for norm, term in exact.items():
+        buckets.setdefault(len(norm), []).append((norm, term))
+    txt = str(text or "")
+    # Erste Stufe: OCR-Zahlenmüll direkt an Referenzwörtern entfernen, z. B. "23Emilia" -> "Emilia".
+    txt = _bk_autocorrect_correct_embedded_numeric_tokens(txt, buckets, exact, weights)
+    # Zweite Stufe: Wortfehler gegen die Referenzliste abgleichen. Gewichtete CSV-Referenzen dürfen seltene Exakt-Treffer korrigieren, z. B. "Nia" -> "Mia", wenn "Mia" deutlich wahrscheinlicher ist.
+    txt = _bk_autocorrect_correct_word_tokens(txt, buckets, exact, weights)
+    # Dritte Stufe: eine alleinstehende OCR-Zahl vor/nach einem reinen Referenzbegriff entfernen, z. B. "19 Mohammad" -> "Mohammad".
+    txt = _bk_autocorrect_cleanup_numeric_reference_lines(txt, buckets, exact, weights)
+    return txt
+
 def parse_auto_revision_replacements(value):
     default = [("ſ", "s"), ("⸗", "-"), ("±", "+/-")]
     if value is None: return default
@@ -48,7 +503,9 @@ def parse_auto_revision_replacements(value):
     return out or default
 def apply_auto_revision_replacements(text, replacements=None):
     txt = clean_text(text)
-    for src, dst in parse_auto_revision_replacements(replacements): txt = txt.replace(src, dst)
+    for src, dst in parse_auto_revision_replacements(replacements):
+        txt = txt.replace(src, dst)
+    txt = _bk_autocorrect_apply_reference_terms(txt, replacements)
     return re.sub(r"[ \t\r\f\v]+", " ", txt).strip()
 def clean_text(text: Any) -> str:
     if text is None:

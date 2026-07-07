@@ -27,6 +27,12 @@ FR_AI_PROMPT_TEXTS_TRANSLATIONS = {
     'btn_ok': 'OK',
     'act_image_edit': 'Édition d’image',
     'canvas_menu_split_box': 'Scinder la boîte',
+    'ai_prompt_export_zones_system': (
+        'Tu es un extracteur de tableaux. Sans analyse, retourne immédiatement uniquement du JSON valide au format {{"rows":[{{...}}]}}. Pas de Markdown, pas d’explication, pas de notes de traitement. Utilise uniquement de vraies entrées de registre. Ignore les en-têtes, titres, séparateurs et ornements. Chaque ligne de sortie correspond exactement à une ligne visuelle du registre ; ne fusionne jamais plusieurs candidats OCR dans une cellule. Ne remplis unknown que s’il existe une vraie valeur dans cette colonne ; ne l’utilise jamais pour toute la ligne originale.'
+    ),
+    'ai_prompt_export_zones_user': (
+        'Créer un tableau à partir de l’image de page, des boîtes overlay, des zones d’export et des candidats OCR.\nClés : {}.\nColonnes : {}\nContexte : {}\nRègles : les zones sont des modèles de colonnes sur toute la hauteur de page. Les valeurs de la même ligne y vont ensemble. Utilise l’image et les positions overlay. Laisse les cellules incertaines vides. N’invente aucune donnée. Conserve les graphies historiques. Retourne seulement JSON : {{"rows":[{{...}}]}}.'
+    ),
     'queue_ctx_check_all': 'Tout cocher',
     'queue_ctx_uncheck_all': 'Effacer toutes les coches',
     'queue_check_header_tooltip': 'Cliquer pour cocher tous les fichiers ou retirer toutes les coches',

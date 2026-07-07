@@ -4,9 +4,11 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from bottled_kraken.user_storage import bottled_kraken_runtime_path
 from bottled_kraken.common import QThread, Signal, OCRJob, RecordView, BBox
 from bottled_kraken.translation import translation
 BACKEND_APP_DIR_NAME = "BottledKraken"
@@ -42,17 +44,7 @@ def _default_backend_root() -> Path:
     custom = os.environ.get("BOTTLED_KRAKEN_BACKENDS_DIR", "").strip()
     if custom:
         return Path(custom).expanduser()
-    if sys.platform.startswith("win"):
-        local = os.environ.get("LOCALAPPDATA", "").strip()
-        if local:
-            return Path(local) / BACKEND_APP_DIR_NAME / "backends"
-        return Path.home() / "AppData" / "Local" / BACKEND_APP_DIR_NAME / "backends"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / BACKEND_APP_DIR_NAME / "backends"
-    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
-    if xdg:
-        return Path(xdg).expanduser() / BACKEND_APP_DIR_NAME / "backends"
-    return Path.home() / ".local" / "share" / BACKEND_APP_DIR_NAME / "backends"
+    return bottled_kraken_runtime_path("backends")
 def _backend_dir_for_kind(kind: str) -> Path:
     return _default_backend_root() / kind
 def _safe_read_backend_info(kind: str) -> Optional[Dict[str, Any]]:
@@ -244,7 +236,6 @@ class ExternalBackendOCRWorker(QThread):
             except Exception:
                 pass
     def _write_job_file(self) -> Path:
-        import tempfile
         payload = {
             "input_paths": list(self.job.input_paths or []),
             "recognition_model_path": self.job.recognition_model_path,
@@ -255,9 +246,9 @@ class ExternalBackendOCRWorker(QThread):
             "auto_revision_enabled": bool(getattr(self.job, "auto_revision_enabled", False)),
             "auto_revision_replacements": str(getattr(self.job, "auto_revision_replacements", "") or ""),
         }
-        fd, path = tempfile.mkstemp(prefix="bk_backend_job_", suffix=".json")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
+        job_dir = bottled_kraken_runtime_path("backend_jobs")
+        path = job_dir / f"bk_backend_job_{int(time.time() * 1000)}_{uuid.uuid4().hex}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         self._job_file = Path(path)
         return self._job_file
     def _handle_event(self, data: Dict[str, Any]):

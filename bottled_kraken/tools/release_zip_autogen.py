@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 def _project_root() -> Path:
@@ -48,13 +48,7 @@ def ensure_release_zip_for_tests() -> None:
     if not _has_release_integrity_test(project_root):
         return
     output_path = project_root.parent / "bottled_kraken_autorelease_source.zip"
-    fd, tmp_name = tempfile.mkstemp(
-        prefix="bottled_kraken_autorelease_",
-        suffix=".zip",
-        dir=str(project_root.parent),
-    )
-    os.close(fd)
-    tmp_path = Path(tmp_name)
+    tmp_path = project_root.parent / f"bottled_kraken_autorelease_{uuid.uuid4().hex}.zip"
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(project_root.rglob("*")):

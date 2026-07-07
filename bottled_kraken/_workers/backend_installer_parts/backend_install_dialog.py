@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -15,6 +16,10 @@ from bottled_kraken._workers.backend_installer_parts.backend_installer_helpers i
 )
 from bottled_kraken._workers.backend_installer_parts.backend_installer_helpers import _call_tr
 from bottled_kraken._workers.backend_installer_parts.backend_installer_worker import BackendInstallerWorker
+try:
+    from bottled_kraken.dialogs import BusySpinnerWidget
+except Exception:
+    BusySpinnerWidget = None
 class BackendInstallDialog(QDialog):
     install_finished = Signal(bool, str)
     def __init__(self, kind: str, tr_func: Optional[Callable[..., str]] = None, parent=None):
@@ -36,6 +41,18 @@ class BackendInstallDialog(QDialog):
         self.force_checkbox = QCheckBox(self._tr("backend_install_force"))
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
+        self.activity_row = QHBoxLayout()
+        self.activity_row.setSpacing(10)
+        if BusySpinnerWidget is not None:
+            self.activity_spinner = BusySpinnerWidget(self, diameter=30)
+        else:
+            self.activity_spinner = QLabel("⟳", self)
+        self.activity_spinner.hide()
+        self.activity_label = QLabel(self._tr("backend_install_active"), self)
+        self.activity_label.setWordWrap(True)
+        self.activity_label.hide()
+        self.activity_row.addWidget(self.activity_spinner, 0, Qt.AlignVCenter)
+        self.activity_row.addWidget(self.activity_label, 1)
         self.buttons = QDialogButtonBox()
         self.start_button = QPushButton(self._tr("backend_install_start"))
         self.close_button = QPushButton(self._tr("backend_install_close"))
@@ -49,6 +66,7 @@ class BackendInstallDialog(QDialog):
         layout.addWidget(self.target_label)
         layout.addWidget(self.warning_label)
         layout.addWidget(self.force_checkbox)
+        layout.addLayout(self.activity_row)
         layout.addWidget(QLabel(self._tr("backend_install_log")))
         layout.addWidget(self.log_edit, 1)
         layout.addWidget(self.buttons)
@@ -62,6 +80,15 @@ class BackendInstallDialog(QDialog):
         if self.kind == "amd-rocm":
             return self._tr("backend_install_intro_rocm")
         return self._tr("backend_install_intro_nvidia")
+    def _set_activity(self, active: bool):
+        active = bool(active)
+        try:
+            self.activity_spinner.setVisible(active)
+            self.activity_label.setVisible(active)
+            if active:
+                self.activity_label.setText(self._tr("backend_install_active"))
+        except Exception:
+            pass
     def _append(self, text: str):
         self.log_edit.appendPlainText(str(text).rstrip())
     def start_install(self):
@@ -70,6 +97,7 @@ class BackendInstallDialog(QDialog):
             return
         self.start_button.setEnabled(False)
         self.force_checkbox.setEnabled(False)
+        self._set_activity(True)
         self.worker = BackendInstallerWorker(self.kind, force=self.force_checkbox.isChecked(), parent=self)
         self.worker.line.connect(self._append)
         self.worker.finished_ok.connect(self._finished)
@@ -77,6 +105,7 @@ class BackendInstallDialog(QDialog):
     def _finished(self, ok: bool, message: str):
         self.start_button.setEnabled(True)
         self.force_checkbox.setEnabled(True)
+        self._set_activity(False)
         self.install_finished.emit(bool(ok), self.kind)
         if ok:
             self._append(self._tr("backend_install_success"))
@@ -94,4 +123,5 @@ class BackendInstallDialog(QDialog):
             if reply != QMessageBox.Yes:
                 return
             self.worker.cancel()
+            self._set_activity(False)
         super().reject()

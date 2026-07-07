@@ -8,7 +8,7 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             return icon
         if hasattr(self, "btn_import_lines"):
             self.btn_import_lines.setIcon(
-                self.style().standardIcon(QStyle.SP_DialogOpenButton)
+                self._tinted_theme_or_standard_icon("document-import", QStyle.SP_DialogOpenButton)
             )
         if hasattr(self, "btn_voice_fill"):
             self.btn_voice_fill.setIcon(
@@ -16,7 +16,11 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             )
         if hasattr(self, "btn_ai_revise_bottom"):
             self.btn_ai_revise_bottom.setIcon(
-                plain_theme_or_standard("preferences-system", QStyle.SP_ComputerIcon)
+                self._tinted_theme_or_standard_icon("preferences-system", QStyle.SP_ComputerIcon)
+            )
+        if hasattr(self, "btn_autocorrect_settings"):
+            self.btn_autocorrect_settings.setIcon(
+                self._tinted_theme_or_standard_icon("tools-check-spelling", QStyle.SP_DialogApplyButton)
             )
         if hasattr(self, "btn_line_search"):
             self.btn_line_search.setIcon(
@@ -32,7 +36,7 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
             )
         if hasattr(self, "btn_toggle_log"):
             self.btn_toggle_log.setIcon(
-                self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
+                self._tinted_theme_or_standard_icon("text-x-log", QStyle.SP_FileDialogDetailedView)
             )
     def _scan_kraken_models(self):
         self.kraken_rec_models = []

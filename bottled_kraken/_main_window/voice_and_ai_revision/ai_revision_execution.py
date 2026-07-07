@@ -101,7 +101,7 @@ class MainWindowAiRevisionExecutionMixin:
                 return
             live_recs = self._current_recs_for_ai(task)
             single_rec = RecordView(
-                idx=0,
+                idx=row,
                 text=live_recs[row].text,
                 bbox=live_recs[row].bbox
             )

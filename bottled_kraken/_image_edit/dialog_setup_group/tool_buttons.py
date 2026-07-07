@@ -9,6 +9,7 @@ from bottled_kraken.common import (
     QSize,
     QToolButton,
     Qt,
+    THEMES,
 )
 from bottled_kraken._image_edit.common import ImageEditSeparator, ImageEditSettings, WhiteBorderDialog
 from bottled_kraken._image_edit.canvas import ImageEditCanvas
@@ -33,7 +34,13 @@ class ImageEditDialogToolButtonsMixin:
             if hasattr(self, "btn_hand_tool"):
                 self.btn_hand_tool.setChecked(mode == "pan")
         def _preview_tool_icon_color(self) -> QColor:
-            return QColor("#f8fafc" if getattr(self, "_preview_tool_theme", "bright") == "dark" else "#111827")
+            theme = getattr(self, "_preview_tool_theme", "bright")
+            try:
+                conf = THEMES.get(theme, THEMES.get("bright", {}))
+                is_dark = bool(conf.get("dark", QColor(str(conf.get("bg", "#ffffff"))).lightness() < 128))
+            except Exception:
+                is_dark = theme == "dark"
+            return QColor("#f8fafc" if is_dark else "#111827")
         def _build_preview_tool_icon(self, tool: str) -> QIcon:
             ink = self._preview_tool_icon_color()
             pix = QPixmap(24, 24)

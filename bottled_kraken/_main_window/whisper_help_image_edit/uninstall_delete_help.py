@@ -1,3 +1,4 @@
+from bottled_kraken.user_storage import bottled_kraken_user_root
 from bottled_kraken.common import _help_html
 from bottled_kraken.common import (
     List,
@@ -111,6 +112,7 @@ class MainWindowUninstallDeleteHelpMixin:
                     return
                 if norm and norm not in paths:
                     paths.append(norm)
+            add(str(bottled_kraken_user_root()))
             add(os.path.join(home, ".bottled_kraken"))
             add(os.path.join(home, ".bottled_kraken.env"))
             add(os.path.join(home, ".kraken_ocr_tool_settings"))

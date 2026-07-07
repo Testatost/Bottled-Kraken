@@ -8,12 +8,21 @@ from bottled_kraken.common import (
     QDialog,
     QDialogButtonBox,
     QKeySequence,
+    QFileDialog,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
     QLabel,
     QPlainTextEdit,
     QVBoxLayout,
     READING_MODES,
 )
 import math
+import csv
+import json
+import os
+import re
+import zipfile
 from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
 class MainWindowMenuConstructionMixin:
         def set_kraken_auto_revision_enabled(self, checked: bool):
@@ -27,6 +36,279 @@ class MainWindowMenuConstructionMixin:
                 return _serialize_ocr_auto_revision_replacements()
             except Exception:
                 return "ſ=s\n⸗=-\n±=+/-"
+        def _kraken_autocorrect_flatten_json_terms(self, value) -> list:
+            terms = []
+            def collect(obj):
+                if obj is None:
+                    return
+                if isinstance(obj, str):
+                    txt = obj.strip()
+                    if txt:
+                        terms.append(txt)
+                    return
+                if isinstance(obj, (list, tuple, set)):
+                    for item in obj:
+                        collect(item)
+                    return
+                if isinstance(obj, dict):
+                    for key, item in obj.items():
+                        collect(item)
+                        if item is True:
+                            collect(key)
+            collect(value)
+            return terms
+
+        def _kraken_autocorrect_extract_text_file(self, path: str) -> str:
+            """Liest Referenzwörter aus txt/csv/json/docx/xlsx/odt/ods ohne schwere Zusatzabhängigkeiten."""
+            ext = os.path.splitext(str(path or ""))[1].lower()
+            try:
+                if ext in {".txt", ".csv"}:
+                    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                        try:
+                            with open(path, "r", encoding=enc, errors="replace") as handle:
+                                return handle.read()
+                        except UnicodeError:
+                            continue
+                    return ""
+                if ext == ".json":
+                    raw = ""
+                    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                        try:
+                            with open(path, "r", encoding=enc, errors="replace") as handle:
+                                raw = handle.read()
+                            break
+                        except UnicodeError:
+                            continue
+                    if not raw:
+                        return ""
+                    try:
+                        data = json.loads(raw)
+                        return "\n".join(self._kraken_autocorrect_flatten_json_terms(data))
+                    except Exception:
+                        return raw
+                if ext == ".docx":
+                    with zipfile.ZipFile(path) as archive:
+                        data = archive.read("word/document.xml").decode("utf-8", errors="replace")
+                    data = re.sub(r"<w:tab[^>]*/>", " ", data)
+                    data = re.sub(r"</w:p>", "\n", data)
+                    return re.sub(r"<[^>]+>", " ", data)
+                if ext in {".odt", ".ods"}:
+                    with zipfile.ZipFile(path) as archive:
+                        data = archive.read("content.xml").decode("utf-8", errors="replace")
+                    data = re.sub(r"</text:p>|</table:table-row>", "\n", data)
+                    return re.sub(r"<[^>]+>", " ", data)
+                if ext == ".xlsx":
+                    parts = []
+                    with zipfile.ZipFile(path) as archive:
+                        names = set(archive.namelist())
+                        if "xl/sharedStrings.xml" in names:
+                            data = archive.read("xl/sharedStrings.xml").decode("utf-8", errors="replace")
+                            parts.append(re.sub(r"<[^>]+>", " ", data))
+                        for name in sorted(n for n in names if n.startswith("xl/worksheets/") and n.endswith(".xml"))[:20]:
+                            data = archive.read(name).decode("utf-8", errors="replace")
+                            # inlineStr und Rohwerte als zusätzliche Referenz; Shared-Strings liefern meist die Namen.
+                            parts.append(re.sub(r"<[^>]+>", " ", data))
+                    return "\n".join(parts)
+            except Exception:
+                return ""
+            return ""
+
+        def _kraken_autocorrect_reference_paths(self) -> list:
+            exts = {".txt", ".csv", ".json", ".docx", ".xlsx", ".odt", ".ods"}
+            single_file = str(getattr(self, "kraken_autocorrect_reference_file", "") or "").strip()
+            # Datei und Ordner sind absichtlich Alternativen. Dadurch bleibt kein alter,
+            # versteckter Referenzordner aktiv, der eine saubere Einzeldatei mit
+            # fehlerhaften OCR-Exporten aus Downloads vermischen könnte.
+            if single_file and os.path.isfile(single_file) and os.path.splitext(single_file)[1].lower() in exts:
+                return [single_file]
+            paths = []
+            seen_paths = set()
+            directory = str(getattr(self, "kraken_autocorrect_reference_dir", "") or "").strip()
+            if directory and os.path.isdir(directory):
+                for root, _dirs, files in os.walk(directory):
+                    for filename in sorted(files):
+                        if os.path.splitext(filename)[1].lower() not in exts:
+                            continue
+                        path = os.path.join(root, filename)
+                        real = os.path.abspath(path)
+                        if real in seen_paths:
+                            continue
+                        seen_paths.add(real)
+                        paths.append(path)
+            return paths
+
+        def _kraken_autocorrect_reference_norm(self, value) -> str:
+            txt = str(value or "").casefold()
+            txt = txt.replace("0", "o").replace("1", "l").replace("ſ", "s")
+            return re.sub(r"[^a-zäöüßà-ÿ]", "", txt)
+
+        def _kraken_autocorrect_reference_weight(self, value, default: float = 1.0) -> float:
+            try:
+                if isinstance(value, (int, float)):
+                    val = float(value)
+                else:
+                    txt = str(value or "").strip().replace("\u00a0", "").replace(" ", "")
+                    txt = txt.replace(".", "") if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", txt) else txt
+                    txt = txt.replace(",", ".")
+                    if not re.fullmatch(r"\d+(?:\.\d+)?", txt):
+                        return float(default)
+                    val = float(txt)
+                if val <= 0:
+                    return float(default)
+                return min(val, 1000000.0)
+            except Exception:
+                return float(default)
+
+        def _kraken_autocorrect_reference_split_cell(self, value) -> list:
+            text = str(value or "")
+            text = re.sub(r"(?<=[a-zäöüßà-ÿ])(?=[A-ZÄÖÜÀ-Ý])", " ", text)
+            parts = re.split(r"[\s,;_]+", text)
+            out = []
+            for part in parts:
+                term = str(part or "").strip(" \t\r\n\"'’`´.,;:()[]{}<>")
+                if not term:
+                    continue
+                # Bindestriche bleiben erhalten, weil sie bei Doppel-Namen relevant sind.
+                if not re.search(r"[A-Za-zÄÖÜäöüßÀ-ÿ]", term):
+                    continue
+                if re.fullmatch(r"[mMwWdD]", term):
+                    continue
+                norm = self._kraken_autocorrect_reference_norm(term)
+                if len(norm) < 2:
+                    continue
+                out.append(term)
+            return out
+
+        def _kraken_autocorrect_add_reference_entry(self, by_norm: dict, term, weight: float = 1.0):
+            for part in self._kraken_autocorrect_reference_split_cell(term):
+                norm = self._kraken_autocorrect_reference_norm(part)
+                if not norm or len(norm) < 2:
+                    continue
+                if norm in {
+                    "anzahl", "zahl", "count", "frequency", "frequenz", "haeufigkeit", "häufigkeit",
+                    "vorname", "vornamen", "name", "namen", "nachname", "familienname", "familiennamen",
+                    "geschlecht", "gender", "position", "rang", "rank", "ort", "orte", "stadt",
+                    "strasse", "straße", "sonderzeichen", "begriff", "begriffe", "term", "terms", "wert",
+                }:
+                    continue
+                entry = by_norm.get(norm)
+                w = self._kraken_autocorrect_reference_weight(weight, 1.0)
+                if entry is None:
+                    by_norm[norm] = {"term": part, "weight": w, "best_weight": w}
+                else:
+                    entry["weight"] = float(entry.get("weight", 1.0)) + w
+                    if w > float(entry.get("best_weight", 0.0)):
+                        entry["term"] = part
+                        entry["best_weight"] = w
+
+        def _kraken_autocorrect_parse_delimited_reference_text(self, text: str, by_norm: dict) -> bool:
+            lines = [line for line in str(text or "").splitlines() if line.strip()]
+            if not lines:
+                return False
+            delimiters = [";", "\t", ",", "|"]
+            delimiter_scores = {d: sum(line.count(d) for line in lines[:25]) for d in delimiters}
+            delimiter = max(delimiter_scores, key=delimiter_scores.get)
+            if delimiter_scores.get(delimiter, 0) <= 0:
+                return False
+            try:
+                rows = list(csv.reader(lines, delimiter=delimiter))
+            except Exception:
+                return False
+            rows = [[str(cell or "").strip() for cell in row] for row in rows if any(str(cell or "").strip() for cell in row)]
+            if not rows:
+                return False
+            header_norms = [self._kraken_autocorrect_reference_norm(cell) for cell in rows[0]]
+            term_header_norms = {
+                "vorname", "vornamen", "name", "namen", "nachname", "familienname", "familiennamen",
+                "ort", "orte", "stadt", "gemeinde", "strasse", "straße", "sonderzeichen",
+                "begriff", "begriffe", "term", "terms", "wert", "text",
+            }
+            ignored_header_norms = {
+                "anzahl", "zahl", "count", "frequency", "frequenz", "haeufigkeit", "häufigkeit",
+                "gewicht", "weight", "geschlecht", "gender", "position", "rang", "rank", "id", "nr", "nummer",
+            }
+            weight_header_norms = {
+                "anzahl", "zahl", "count", "frequency", "frequenz", "haeufigkeit", "häufigkeit", "gewicht", "weight",
+            }
+            has_header = bool(set(header_norms).intersection(term_header_norms | ignored_header_norms))
+            term_cols = [idx for idx, norm in enumerate(header_norms) if norm in term_header_norms] if has_header else []
+            weight_cols = [idx for idx, norm in enumerate(header_norms) if norm in weight_header_norms] if has_header else []
+            data_rows = rows[1:] if has_header else rows
+            parsed_any = False
+            for row in data_rows:
+                if not row:
+                    continue
+                row_weight = 1.0
+                for idx in weight_cols:
+                    if idx < len(row):
+                        row_weight = max(row_weight, self._kraken_autocorrect_reference_weight(row[idx], 1.0))
+                if not weight_cols:
+                    for cell in row:
+                        row_weight = max(row_weight, self._kraken_autocorrect_reference_weight(cell, 1.0))
+                active_cols = term_cols
+                if not active_cols:
+                    active_cols = []
+                    for idx, cell in enumerate(row):
+                        norm = self._kraken_autocorrect_reference_norm(cell)
+                        if not norm or norm in ignored_header_norms or re.fullmatch(r"[mMwWdD]", str(cell or "").strip()):
+                            continue
+                        if self._kraken_autocorrect_reference_weight(cell, 0.0) > 0:
+                            continue
+                        active_cols.append(idx)
+                for idx in active_cols:
+                    if idx >= len(row):
+                        continue
+                    before = len(by_norm)
+                    self._kraken_autocorrect_add_reference_entry(by_norm, row[idx], row_weight)
+                    if len(by_norm) != before:
+                        parsed_any = True
+            return parsed_any
+
+        def _kraken_autocorrect_parse_plain_reference_text(self, text: str, by_norm: dict):
+            cleaned = str(text or "")
+            cleaned = re.sub(r"(?<=[a-zäöüßà-ÿ])(?=[A-ZÄÖÜÀ-Ý])", " ", cleaned)
+            cleaned = cleaned.replace("_", " ")
+            # Komma, Semikolon und Leerzeichen trennen Einträge; Bindestriche bleiben Teil des Begriffs.
+            for match in re.finditer(r"[A-Za-zÄÖÜäöüßÀ-ÿ][A-Za-zÄÖÜäöüßÀ-ÿ'’\-]{1,}", cleaned):
+                self._kraken_autocorrect_add_reference_entry(by_norm, match.group(0), 1.0)
+
+        def _kraken_autocorrect_reference_terms(self) -> list:
+            if not bool(getattr(self, "kraken_autocorrect_enabled", False)):
+                return []
+            by_norm = {}
+            for path in self._kraken_autocorrect_reference_paths():
+                text = self._kraken_autocorrect_extract_text_file(path)
+                if not text:
+                    continue
+                ext = os.path.splitext(str(path or ""))[1].lower()
+                parsed_structured = False
+                if ext in {".csv", ".txt"}:
+                    parsed_structured = self._kraken_autocorrect_parse_delimited_reference_text(text, by_norm)
+                if not parsed_structured:
+                    self._kraken_autocorrect_parse_plain_reference_text(text, by_norm)
+                if len(by_norm) >= 20000:
+                    break
+            terms = []
+            for norm, entry in by_norm.items():
+                term = str(entry.get("term", "")).strip()
+                if not term:
+                    continue
+                terms.append({"term": term, "weight": float(entry.get("weight", 1.0))})
+                if len(terms) >= 20000:
+                    break
+            return terms
+
+        def _kraken_auto_revision_runtime_replacements(self) -> str:
+            """Erzeugt die Laufzeit-Konfiguration für OCR-Worker inkl. Referenz-Autokorrektur."""
+            text = str(getattr(self, "kraken_auto_revision_replacements", "") or self._kraken_auto_revision_default_text())
+            terms = self._kraken_autocorrect_reference_terms()
+            if terms:
+                try:
+                    text += "\n#BK_AUTOCORRECT_TERMS_JSON=" + json.dumps(terms, ensure_ascii=False)
+                except Exception:
+                    pass
+            return text
+
         def _open_kraken_auto_revision_settings(self):
             dialog = QDialog(self)
             dialog.setWindowTitle(self._tr("kraken_revision_settings_title"))
@@ -50,6 +332,73 @@ class MainWindowMenuConstructionMixin:
             check = QCheckBox(self._tr("kraken_revision_enable_checkbox"), dialog)
             check.setChecked(bool(getattr(self, "kraken_auto_revision_enabled", False)))
             layout.addWidget(check)
+
+            autocorrect_check = QCheckBox(self._tr("kraken_autocorrect_enable_checkbox"), dialog)
+            autocorrect_check.setChecked(bool(getattr(self, "kraken_autocorrect_enabled", False)))
+            layout.addWidget(autocorrect_check)
+
+            ref_state = {
+                "dir": str(getattr(self, "kraken_autocorrect_reference_dir", "") or ""),
+                "file": str(getattr(self, "kraken_autocorrect_reference_file", "") or ""),
+            }
+            ref_row = QHBoxLayout()
+            ref_label = QLabel(self._tr("kraken_autocorrect_reference_label"), dialog)
+            ref_file_btn = QPushButton(self._tr("kraken_autocorrect_reference_file_choose"), dialog)
+            ref_btn = QPushButton(self._tr("kraken_autocorrect_reference_dir_choose"), dialog)
+            ref_status = QLabel("", dialog)
+            ref_status.setWordWrap(True)
+            def update_reference_status():
+                has_file = bool(ref_state.get("file") and os.path.isfile(ref_state.get("file")))
+                has_dir = bool(ref_state.get("dir") and os.path.isdir(ref_state.get("dir")))
+                if has_file:
+                    text = self._tr("kraken_autocorrect_reference_selected_file")
+                elif has_dir:
+                    text = self._tr("kraken_autocorrect_reference_selected_dir")
+                else:
+                    text = self._tr("kraken_autocorrect_reference_selected_none")
+                ref_status.setText(text)
+            def choose_reference_file():
+                start_dir = os.path.expanduser("~")
+                current_file = str(ref_state.get("file") or "").strip()
+                current_dir = str(ref_state.get("dir") or "").strip()
+                if current_file and os.path.isfile(current_file):
+                    start_dir = os.path.dirname(current_file)
+                elif current_dir and os.path.isdir(current_dir):
+                    start_dir = current_dir
+                chosen, _selected_filter = QFileDialog.getOpenFileName(
+                    dialog,
+                    self._tr("kraken_autocorrect_reference_file_title"),
+                    start_dir,
+                    self._tr("kraken_autocorrect_reference_file_filter"),
+                )
+                if chosen:
+                    ref_state["file"] = chosen
+                    ref_state["dir"] = ""
+                    update_reference_status()
+            def choose_reference_dir():
+                start_dir = str(ref_state.get("dir") or "").strip()
+                if not start_dir or not os.path.isdir(start_dir):
+                    current_file = str(ref_state.get("file") or "").strip()
+                    start_dir = os.path.dirname(current_file) if current_file and os.path.isfile(current_file) else os.path.expanduser("~")
+                chosen = QFileDialog.getExistingDirectory(dialog, self._tr("kraken_autocorrect_reference_dir_title"), start_dir)
+                if chosen:
+                    ref_state["dir"] = chosen
+                    ref_state["file"] = ""
+                    update_reference_status()
+            ref_file_btn.clicked.connect(choose_reference_file)
+            ref_btn.clicked.connect(choose_reference_dir)
+            ref_row.addWidget(ref_label)
+            ref_row.addWidget(ref_file_btn)
+            ref_row.addWidget(ref_btn)
+            ref_row.addStretch(1)
+            layout.addLayout(ref_row)
+            update_reference_status()
+            layout.addWidget(ref_status)
+
+            ref_hint = QLabel(self._tr("kraken_autocorrect_reference_dir_hint"), dialog)
+            ref_hint.setWordWrap(True)
+            layout.addWidget(ref_hint)
+
             buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog)
             if buttons.button(QDialogButtonBox.Save):
                 buttons.button(QDialogButtonBox.Save).setText(self._tr("btn_save"))
@@ -64,26 +413,41 @@ class MainWindowMenuConstructionMixin:
                 text = editor.toPlainText().strip() or self._kraken_auto_revision_default_text()
                 self.kraken_auto_revision_replacements = text
                 self.kraken_auto_revision_enabled = bool(check.isChecked())
+                self.kraken_autocorrect_enabled = bool(autocorrect_check.isChecked())
+                selected_file = str(ref_state.get("file") or "").strip()
+                selected_dir = str(ref_state.get("dir") or "").strip()
+                if selected_file and os.path.isfile(selected_file):
+                    selected_dir = ""
+                self.kraken_autocorrect_reference_dir = selected_dir
+                self.kraken_autocorrect_reference_file = selected_file
                 try:
                     self.settings.setValue("ocr/auto_revision_replacements", text)
                     self.settings.setValue("ocr/auto_revision_enabled", "true" if self.kraken_auto_revision_enabled else "false")
+                    self.settings.setValue("ocr/autocorrect_enabled", "true" if self.kraken_autocorrect_enabled else "false")
+                    self.settings.setValue("ocr/autocorrect_reference_dir", self.kraken_autocorrect_reference_dir)
+                    self.settings.setValue("ocr/autocorrect_reference_file", self.kraken_autocorrect_reference_file)
                 except Exception:
                     pass
         def _place_kraken_auto_revision_action_at_bottom(self):
-            if not hasattr(self, "models_menu"):
+            target_menu = getattr(self, "options_menu", None)
+            if target_menu is None:
                 return
             if not hasattr(self, "act_kraken_auto_revision_settings"):
                 self.act_kraken_auto_revision_settings = QAction(self._tr("act_kraken_auto_revision_settings"), self)
                 self.act_kraken_auto_revision_settings.triggered.connect(self._open_kraken_auto_revision_settings)
             sep = getattr(self, "_kraken_auto_revision_separator", None)
-            for action in (sep, self.act_kraken_auto_revision_settings):
-                if action is not None:
-                    try:
-                        self.models_menu.removeAction(action)
-                    except Exception:
-                        pass
-            self._kraken_auto_revision_separator = self.models_menu.addSeparator()
-            self.models_menu.addAction(self.act_kraken_auto_revision_settings)
+            for menu_name in ("models_menu", "options_menu"):
+                menu_obj = getattr(self, menu_name, None)
+                if menu_obj is None:
+                    continue
+                for action in (sep, self.act_kraken_auto_revision_settings):
+                    if action is not None:
+                        try:
+                            menu_obj.removeAction(action)
+                        except Exception:
+                            pass
+            self._kraken_auto_revision_separator = target_menu.addSeparator()
+            target_menu.addAction(self.act_kraken_auto_revision_settings)
         def _shortcut_ctrl_label(self, suffix: str) -> str:
             lang = str(getattr(self, "current_lang", "") or "").lower()
             prefix = "Strg" if lang.startswith("de") else "Ctrl"
@@ -222,6 +586,9 @@ class MainWindowMenuConstructionMixin:
             self.act_lm_base_url.setEnabled(False)
             self.revision_models_menu.addAction(self.act_lm_base_url)
             self._build_toolbar_language_theme_menus()
+            self.act_appearance = QAction(self._tr("menu_appearance"), self)
+            self.act_appearance.triggered.connect(self.open_appearance_dialog)
+            self.options_menu.addAction(self.act_appearance)
             self.options_menu.addSeparator()
             self.hw_menu = BKStayOpenMenu(self._tr("menu_hw"), self.options_menu); self.options_menu.addMenu(self.hw_menu)
             hw_group = QActionGroup(self)

@@ -106,11 +106,20 @@ def _variant_multi_done(self, path, merged_text, last_sorted, im, last_views, va
 def _variant_task_to_dict(self, task):
     payload = _VARIANT_PREV_TASK_TO_DICT(self, task) if callable(_VARIANT_PREV_TASK_TO_DICT) else {}
     try:
-        _ptr_store_task_in_variant(self, task=task, path=getattr(task, "path", ""))
-        entries = _ptr_ensure_entries(self, getattr(task, "path", ""), create=False)
+        path = str(getattr(task, "path", "") or "")
+        visible_path = str(getattr(self, "_loaded_preview_path", "") or getattr(self, "_ocr_active_path", "") or "")
+        # Only the currently visible/loaded task may read from the live list widget.
+        # Otherwise saving a project while a non-first tab is active can accidentally
+        # copy the visible tab contents into other tasks or reset their active tab.
+        if path and path == visible_path:
+            _ptr_store_task_in_variant(self, task=task, path=path)
+        entries = _ptr_ensure_entries(self, path, create=False)
         if entries:
             payload["ocr_variants"] = [_ptr_entry_to_project_dict(entry) for entry in entries]
-            payload["active_ocr_variant_index"] = int(self._ocr_active_variant_by_path.get(getattr(task, "path", ""), 0) or 0)
+            active = int(getattr(task, "ocr_tab_active_index", self._ocr_active_variant_by_path.get(path, 0)) or 0)
+            active = int(self._ocr_active_variant_by_path.get(path, active) or active)
+            active = max(0, min(active, len(entries) - 1))
+            payload["active_ocr_variant_index"] = active
     except Exception:
         pass
     return payload
@@ -126,6 +135,11 @@ def _variant_task_from_dict(self, data):
                 self._ocr_variants_by_path[path] = entries
                 active = max(0, min(int(data.get("active_ocr_variant_index", 0) or 0), len(entries) - 1))
                 self._ocr_active_variant_by_path[path] = active
+                try:
+                    task.ocr_tab_variants = entries
+                    task.ocr_tab_active_index = active
+                except Exception:
+                    pass
                 task.results = _ptr_entry_to_results(entries[active])
     except Exception:
         pass

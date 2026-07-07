@@ -1,5 +1,8 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.user_storage import bottled_kraken_runtime_path, safe_storage_name
+import hashlib
+
 from bottled_kraken.common import (
     fitz,
     gc,
@@ -54,7 +57,9 @@ def _bk_pdf_render_worker_run_cancellable(self):
         pdf_path = self.pdf_path
         dpi = int(getattr(self, "dpi", 300) or 300)
         base = os.path.splitext(os.path.basename(pdf_path))[0]
-        tmp_dir = os.path.join(os.path.dirname(pdf_path), f".kraken_tmp_{base}")
+        base_safe = safe_storage_name(base or "pdf", "pdf")
+        path_hash = hex(abs(hash(os.path.abspath(pdf_path))) & 0xFFFFFFFF)[2:]
+        tmp_dir = str(bottled_kraken_runtime_path("pdf_render", f"{base_safe}_{path_hash}"))
         os.makedirs(tmp_dir, exist_ok=True)
         doc = fitz.open(pdf_path)
         total = int(doc.page_count)

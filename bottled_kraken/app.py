@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QImage
 from PySide6.QtCore import QCoreApplication, Qt, QTimer, QEventLoop, QRect
 from bottled_kraken.translation import translation
+from bottled_kraken.user_storage import bottled_kraken_user_path
 try:
     import pyi_splash as _pyi_splash
 except Exception:
@@ -13,7 +14,7 @@ _CRASH_LOG_FILE = None
 def _app_log_dir() -> str:
     base = os.environ.get("BOTTLED_KRAKEN_LOG_DIR")
     if not base:
-        base = os.path.join(os.path.expanduser("~"), ".bottled_kraken")
+        base = str(bottled_kraken_user_path("logs"))
     try:
         os.makedirs(base, exist_ok=True)
     except Exception:

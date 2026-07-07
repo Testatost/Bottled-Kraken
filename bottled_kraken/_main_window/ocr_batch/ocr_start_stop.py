@@ -175,8 +175,8 @@ class MainWindowOcrStartStopMixin:
                 export_format="pdf",
                 export_dir=self.current_export_dir,
                 preset_bboxes_by_path={},
-                auto_revision_enabled=bool(getattr(self, "kraken_auto_revision_enabled", False)),
-                auto_revision_replacements=str(getattr(self, "kraken_auto_revision_replacements", "") or ""),
+                auto_revision_enabled=bool(getattr(self, "kraken_auto_revision_enabled", False)) or bool(getattr(self, "kraken_autocorrect_enabled", False)),
+                auto_revision_replacements=(self._kraken_auto_revision_runtime_replacements() if hasattr(self, "_kraken_auto_revision_runtime_replacements") else str(getattr(self, "kraken_auto_revision_replacements", "") or "")),
             )
             external_backend = None
             if self.device_str == "cuda":

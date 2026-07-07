@@ -380,6 +380,8 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
                 "device": self.device_str,
                 "show_overlay": self.show_overlay,
                 "theme": self.current_theme,
+                "custom_theme_colors": self._load_custom_theme_colors() if hasattr(self, "_load_custom_theme_colors") else {},
+                "appearance_user_themes": self._appearance_user_themes() if hasattr(self, "_appearance_user_themes") else [],
                 "model_path": self.model_path,
                 "seg_model_path": self.seg_model_path,
                 "current_export_dir": self.current_export_dir,

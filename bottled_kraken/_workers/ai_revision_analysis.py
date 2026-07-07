@@ -126,6 +126,48 @@ class AIRevisionAnalysisMixin:
         if "\n" in txt:
             return True
         return False
+
+    def _looks_like_manual_placeholder(self, text: str) -> bool:
+        txt = _clean_ocr_text(text or "")
+        if not txt:
+            return False
+        low = txt.lower().strip()
+        if low in {"test", "dummy", "placeholder", "platzhalter", "random", "asdf", "qwer", "lorem", "ipsum"}:
+            return True
+        # Typical manually typed key-smash/random strings: one long token, repeated
+        # short fragments, very long consonant runs, or almost no readable word shape.
+        if len(txt.split()) > 1:
+            return False
+        compact = re.sub(r"[^a-z0-9äöüß]", "", low)
+        if len(compact) < 8:
+            return False
+        if re.fullmatch(r"(?:asdf|qwer|test|dummy|abc|xyz|123)+", compact):
+            return True
+        for size in (2, 3, 4):
+            chunks = [compact[i:i + size] for i in range(0, max(0, len(compact) - size + 1))]
+            if any(chunks.count(chunk) >= 3 for chunk in set(chunks)):
+                return True
+        if re.search(r"[bcdfghjklmnpqrstvwxz]{5,}", compact):
+            return True
+        letters = re.sub(r"[^a-zäöüß]", "", compact)
+        if len(letters) >= 12:
+            vowels = sum(1 for ch in letters if ch in "aeiouäöü")
+            if vowels / max(1, len(letters)) < 0.20:
+                return True
+        return False
+
+    def _is_usable_image_line_result(self, text: str) -> bool:
+        txt = _clean_ocr_text(text or "")
+        if not txt:
+            return False
+        if self._looks_like_long_block(txt):
+            return False
+        if self._is_suspicious_box_result(txt):
+            return False
+        if self._looks_like_manual_placeholder(txt):
+            return False
+        return True
+
     def _is_suspicious_box_result(self, text: str) -> bool:
         txt = _clean_ocr_text(text or "")
         if not txt:
@@ -133,7 +175,10 @@ class AIRevisionAnalysisMixin:
         if "\n" in txt:
             return True
         if len(txt) <= 2:
-            return True
+            # Short standalone OCR results such as "2", "3.", "U" or roman numerals
+            # are valid in registers and page-number columns. Treat only pure
+            # punctuation/control fragments as suspicious.
+            return not bool(re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß0-9IVXLCDMivxlcdm][.)]?", txt))
         if txt.isupper() and len(txt) >= 5 and " " not in txt:
             return True
         return False

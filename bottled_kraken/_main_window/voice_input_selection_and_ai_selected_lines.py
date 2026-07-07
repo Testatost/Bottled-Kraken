@@ -172,7 +172,7 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
         live_recs = self._current_recs_for_ai(task)
         selected_recs = [
             RecordView(
-                idx=i,
+                idx=row,
                 text=live_recs[row].text,
                 bbox=live_recs[row].bbox
             )

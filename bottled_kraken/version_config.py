@@ -5,11 +5,13 @@ APP_DIR_NAME = "BottledKraken"
 KRAKEN_VERSION = "7.0.2"
 KRAKEN_REQUIREMENT = f"kraken=={KRAKEN_VERSION}"
 PYTHON_BIDI_REQUIREMENT = "python-bidi>=0.6.7,<0.7"
-DEFAULT_NVIDIA_CUDA_INDEX = "cu128"
+DEFAULT_NVIDIA_CUDA_INDEX = "cu130"
 DEFAULT_AMD_ROCM_INDEX = "rocm6.4"
-SUPPORTED_CUDA_INDEXES = ("cu121", "cu124", "cu126", "cu128", "cu130")
-NVIDIA_TORCH_VERSION = "2.10.0"
-NVIDIA_TORCHVISION_VERSION = "0.25.0"
+# Static values are only fallbacks. The integrated installer resolves the newest
+# available PyTorch CUDA/ROCm wheel index online at install time.
+SUPPORTED_CUDA_INDEXES = ()
+NVIDIA_TORCH_VERSION = ""
+NVIDIA_TORCHVISION_VERSION = ""
 BACKEND_DEFS = {
     "nvidia-cuda": {
         "name": "Bottled Kraken NVIDIA CUDA Backend",

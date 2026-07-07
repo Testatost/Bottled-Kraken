@@ -208,7 +208,9 @@ def _ocr_tab_current_results(self, task):
         return task.results
     recs = _ocr_tab_clone_recs(recs or [])
     visible = _ocr_tab_visible_texts(self)
-    if visible:
+    task_path = str(getattr(task, "path", "") or "")
+    visible_path = str(getattr(self, "_loaded_preview_path", "") or getattr(self, "_ocr_tab_active_path", "") or _ocr_tab_current_path(self) or "")
+    if visible and task_path and task_path == visible_path:
         rebuilt = []
         for i, value in enumerate(visible):
             bbox = recs[i].bbox if i < len(recs) else None

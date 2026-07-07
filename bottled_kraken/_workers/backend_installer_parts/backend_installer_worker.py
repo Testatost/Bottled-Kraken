@@ -1,8 +1,10 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -22,7 +24,6 @@ from bottled_kraken._workers.backend_installer_parts.backend_installer_helpers i
 from bottled_kraken.version_config import (
     NVIDIA_TORCH_VERSION,
     NVIDIA_TORCHVISION_VERSION,
-    SUPPORTED_CUDA_INDEXES,
 )
 from bottled_kraken.translation import translation
 class BackendInstallerWorker(QThread):
@@ -78,6 +79,69 @@ class BackendInstallerWorker(QThread):
             worker_path.chmod(0o755)
         except Exception:
             pass
+
+    def _pytorch_index_sort_key(self, token: str):
+        token = str(token or "").strip().lower()
+        if token.startswith("cu"):
+            return (1, int(re.sub(r"\D", "", token) or "0"))
+        if token.startswith("rocm"):
+            nums = [int(x) for x in re.findall(r"\d+", token)]
+            return (2, nums)
+        return (0, token)
+
+    def _fetch_available_pytorch_indexes(self, prefix: str) -> List[str]:
+        url = "https://download.pytorch.org/whl/"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": f"BottledKraken/{APP_VERSION} backend-installer"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as response:
+            html = response.read().decode("utf-8", "replace")
+        prefix = str(prefix or "").lower()
+        if prefix == "cu":
+            pattern = r"(?<![a-z0-9])cu\d{3,4}(?![a-z0-9])"
+        elif prefix == "rocm":
+            pattern = r"(?<![a-z0-9])rocm\d+(?:\.\d+)+(?![a-z0-9])"
+        else:
+            return []
+        return sorted(set(m.group(0).lower() for m in re.finditer(pattern, html, re.I)), key=self._pytorch_index_sort_key)
+
+    def _resolve_torch_index(self, default_index: str) -> str:
+        if self.kind == "nvidia-cuda":
+            env_name = "BK_CUDA_INDEX"
+            prefix = "cu"
+            label = "CUDA"
+            env_value = os.environ.get(env_name, "").strip().lower()
+            if env_value:
+                if not re.fullmatch(r"cu\d{3,4}", env_value):
+                    raise RuntimeError(translation.translate(translation.DEFAULT_LANGUAGE, "backend_install_unsupported_cuda_index", env_value))
+                self._emit(f"Using {label} wheel index from {env_name}: {env_value}")
+                return env_value
+        elif self.kind == "amd-rocm":
+            env_name = "BK_ROCM_INDEX"
+            prefix = "rocm"
+            label = "ROCm"
+            env_value = os.environ.get(env_name, "").strip().lower()
+            if env_value:
+                if not re.fullmatch(r"rocm\d+(?:\.\d+)+", env_value):
+                    raise RuntimeError(translation.translate(translation.DEFAULT_LANGUAGE, "backend_install_unsupported_rocm_index", env_value))
+                self._emit(f"Using {label} wheel index from {env_name}: {env_value}")
+                return env_value
+        else:
+            return str(default_index or "").strip()
+        fallback = str(default_index or "").strip().lower()
+        self._emit(f"Resolving newest PyTorch {label} wheel index online...")
+        try:
+            indexes = self._fetch_available_pytorch_indexes(prefix)
+            if indexes:
+                chosen = indexes[-1]
+                self._emit(f"Newest PyTorch {label} wheel index found: {chosen}")
+                return chosen
+            self._emit(f"[!] No PyTorch {label} wheel index found online; using fallback {fallback}.")
+        except Exception as exc:
+            self._emit(f"[!] Could not resolve newest PyTorch {label} wheel index online: {exc}")
+            self._emit(f"[!] Using fallback PyTorch {label} wheel index: {fallback}")
+        return fallback
     def _write_backend_info(self, target_dir: Path, py: Path, worker: Path, torch_index: str):
         meta = BACKEND_DEFS[self.kind]
         info = {
@@ -99,14 +163,18 @@ class BackendInstallerWorker(QThread):
         )
     def _torch_packages(self, torch_index: str):
         meta = BACKEND_DEFS[self.kind]
-        if self.kind == "nvidia-cuda":
-            torch_ver = meta.get("torch") or NVIDIA_TORCH_VERSION
-            torchvision_ver = meta.get("torchvision") or NVIDIA_TORCHVISION_VERSION
-            suffix = f"+{torch_index}" if torch_index.startswith("cu") else ""
+        torch_ver = os.environ.get("BK_TORCH_VERSION", "").strip() or meta.get("torch") or NVIDIA_TORCH_VERSION
+        torchvision_ver = os.environ.get("BK_TORCHVISION_VERSION", "").strip() or meta.get("torchvision") or NVIDIA_TORCHVISION_VERSION
+        if torch_ver and torchvision_ver:
+            suffix = f"+{torch_index}" if self.kind == "nvidia-cuda" and torch_index.startswith("cu") else ""
             return f"torch=={torch_ver}{suffix}", f"torchvision=={torchvision_ver}{suffix}"
-        torch_pkg = f"torch=={meta['torch']}" if meta.get("torch") else "torch"
-        torchvision_pkg = f"torchvision=={meta['torchvision']}" if meta.get("torchvision") else "torchvision"
-        return torch_pkg, torchvision_pkg
+        if torch_ver:
+            suffix = f"+{torch_index}" if self.kind == "nvidia-cuda" and torch_index.startswith("cu") else ""
+            return f"torch=={torch_ver}{suffix}", "torchvision"
+        if torchvision_ver:
+            suffix = f"+{torch_index}" if self.kind == "nvidia-cuda" and torch_index.startswith("cu") else ""
+            return "torch", f"torchvision=={torchvision_ver}{suffix}"
+        return "torch", "torchvision"
     def _install_pytorch_backend_wheels(self, pip_cmd: List[str], torch_index: str, *, repair: bool = False):
         torch_pkg, torchvision_pkg = self._torch_packages(torch_index)
         if repair:
@@ -118,6 +186,7 @@ class BackendInstallerWorker(QThread):
             pip_cmd + [
                 "install",
                 "--no-cache-dir",
+                "--upgrade",
                 "--force-reinstall",
                 torch_pkg,
                 torchvision_pkg,
@@ -208,15 +277,7 @@ class BackendInstallerWorker(QThread):
                     "because that would require Rust/MSVC build tools on Windows.\n\n"
                     f"Original error: {exc}"
                 ) from exc
-            torch_index = meta["torch_index"]
-            if self.kind == "nvidia-cuda":
-                torch_index = os.environ.get("BK_CUDA_INDEX", torch_index).strip() or torch_index
-                if torch_index not in SUPPORTED_CUDA_INDEXES:
-                    raise RuntimeError(translation.translate(translation.DEFAULT_LANGUAGE, "backend_install_unsupported_cuda_index", torch_index))
-            elif self.kind == "amd-rocm":
-                torch_index = os.environ.get("BK_ROCM_INDEX", torch_index).strip() or torch_index
-                if not torch_index.startswith("rocm"):
-                    raise RuntimeError(translation.translate(translation.DEFAULT_LANGUAGE, "backend_install_unsupported_rocm_index", torch_index))
+            torch_index = self._resolve_torch_index(meta["torch_index"])
             self._install_pytorch_backend_wheels(pip_cmd, torch_index)
             self._emit("Installing Kraken runtime dependencies...")
             deps = [KRAKEN_REQUIREMENT, PYTHON_BIDI_REQUIREMENT, "pyarrow", "Pillow", "numpy"]

@@ -1,4 +1,5 @@
 from bottled_kraken.common import (
+    _apply_ocr_auto_revision_replacements,
     List,
     Optional,
     QBrush,
@@ -30,6 +31,13 @@ class MainWindowOcrResultsMixin:
         def on_file_done(self, path, text, kr_records, im, recs):
             item = next((i for i in self.queue_items if i.path == path), None)
             if item:
+                try:
+                    if bool(getattr(self, "kraken_auto_revision_enabled", False)) or bool(getattr(self, "kraken_autocorrect_enabled", False)):
+                        replacements = (self._kraken_auto_revision_runtime_replacements() if hasattr(self, "_kraken_auto_revision_runtime_replacements") else str(getattr(self, "kraken_auto_revision_replacements", "") or ""))
+                        for rv in recs or []:
+                            rv.text = _apply_ocr_auto_revision_replacements(getattr(rv, "text", ""), replacements)
+                except Exception:
+                    pass
                 text = "\n".join(rv.text for rv in recs).strip()
                 item.status = STATUS_DONE
                 try:

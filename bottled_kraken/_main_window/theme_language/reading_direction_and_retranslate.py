@@ -59,6 +59,8 @@ class MainWindowReadingDirectionAndRetranslateMixin:
             self.edit_menu.setTitle(self._tr("menu_edit"))
             self.models_menu.setTitle(self._tr("menu_models"))
             self.options_menu.setTitle(self._tr("menu_options"))
+            if hasattr(self, "act_appearance"):
+                self.act_appearance.setText(self._tr("menu_appearance"))
             self.hw_menu.setTitle(self._tr("menu_hw"))
             if hasattr(self, "_menu_text_with_shortcut"):
                 self.export_menu.setTitle(self._menu_text_with_shortcut(self._tr("menu_export"), "E"))
@@ -117,6 +119,9 @@ class MainWindowReadingDirectionAndRetranslateMixin:
             if hasattr(self, "btn_ai_revise_bottom"):
                 self.btn_ai_revise_bottom.setText(self._tr("act_ai_revise"))
                 self.btn_ai_revise_bottom.setToolTip(self._tr("act_ai_revise_tip"))
+            if hasattr(self, "btn_autocorrect_settings"):
+                self.btn_autocorrect_settings.setText(self._tr("btn_autocorrect_settings"))
+                self.btn_autocorrect_settings.setToolTip(self._tr("btn_autocorrect_settings_tooltip"))
             if hasattr(self, "btn_line_search"):
                 self.btn_line_search.setText(self._tr("btn_line_search"))
                 self.btn_line_search.setToolTip(self._tr("btn_line_search_tooltip"))
@@ -216,6 +221,9 @@ class MainWindowReadingDirectionAndRetranslateMixin:
                 self.act_seg.setText(self._tr("act_load_seg_model"))
             if hasattr(self, "act_kraken_auto_revision_settings"):
                 self.act_kraken_auto_revision_settings.setText(self._tr("act_kraken_auto_revision_settings"))
+            if hasattr(self, "btn_autocorrect_settings"):
+                self.btn_autocorrect_settings.setText(self._tr("btn_autocorrect_settings"))
+                self.btn_autocorrect_settings.setToolTip(self._tr("btn_autocorrect_settings_tooltip"))
             if hasattr(self, "act_whisper_set_path"):
                 self.act_whisper_set_path.setText(self._tr("act_whisper_set_path"))
             if hasattr(self, "act_whisper_set_mic"):

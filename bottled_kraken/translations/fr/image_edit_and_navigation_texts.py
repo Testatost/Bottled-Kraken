@@ -32,6 +32,8 @@ FR_IMAGE_EDIT_AND_NAVIGATION_TEXTS_TRANSLATIONS = {
     'overlay_resize_side_right': 'Côté droit',
     'overlay_resize_side_top': 'Côté supérieur',
     'overlay_resize_side_bottom': 'Côté inférieur',
+    'overlay_resize_fit_horizontal': 'Horizontalement jusqu’au bord',
+    'overlay_resize_fit_vertical': 'Verticalement jusqu’au bord',
     'image_edit_title': 'Édition d’image',
     'image_edit_prev': 'Image précédente',
     'image_edit_next': 'Image suivante',

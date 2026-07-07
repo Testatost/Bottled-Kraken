@@ -1,3 +1,5 @@
+from bottled_kraken.user_storage import bottled_kraken_user_path
+
 from bottled_kraken.common import (
     List,
     Tuple,
@@ -11,13 +13,7 @@ class MainWindowWhisperPathHelpersMixin:
                 return os.path.dirname(sys.executable)
             return os.path.dirname(os.path.abspath(sys.argv[0]))
         def _default_whisper_base_dir(self) -> str:
-            home = os.path.expanduser("~")
-            if sys.platform.startswith("win"):
-                base = os.path.join(home, "BottledKraken", "whisper")
-            elif sys.platform == "darwin":
-                base = os.path.join(home, "Library", "Application Support", "BottledKraken", "whisper")
-            else:
-                base = os.path.join(home, ".local", "share", "BottledKraken", "whisper")
+            base = str(bottled_kraken_user_path("whisper"))
             os.makedirs(base, exist_ok=True)
             return base
         def _default_whisper_model_dir(self) -> str:

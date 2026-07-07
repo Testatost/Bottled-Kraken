@@ -44,13 +44,13 @@ class AIRevisionRuntimeMixin:
                     box_text = self._request_single_line_reread(
                         line_data_url=line_data_url,
                         idx=rv.idx,
-                        current_text=""
+                        current_text=str(rv.text or "")
                     )
                 except Exception as e:
                     print(f"BOX OCR ERROR idx={rv.idx}: {e}")
-                    box_text = rv.text
+                    box_text = "" if self._looks_like_manual_placeholder(str(rv.text or "")) else rv.text
                 if not str(box_text).strip():
-                    box_text = rv.text
+                    box_text = "" if self._looks_like_manual_placeholder(str(rv.text or "")) else rv.text
                 box_lines.append(str(box_text).strip())
                 self.progress_changed.emit(int(((i + 1) / total) * 55))
             if self._cancelled or self.isInterruptionRequested():
@@ -106,12 +106,22 @@ class AIRevisionRuntimeMixin:
                 box_text = str(box_lines[i] if i < len(box_lines) else "").strip()
                 page_text = str(page_lines[i] if i < len(page_lines) else "").strip()
                 prev_final = final_lines[i - 1] if i > 0 else ""
-                best_text = self._request_line_decision(
-                    idx=i,
-                    kraken_text=kraken_text,
-                    page_text=page_text,
-                    box_text=box_text,
-                ).strip()
+                if self._looks_like_manual_placeholder(kraken_text):
+                    if self._is_usable_image_line_result(box_text):
+                        best_text = box_text
+                    elif self._is_usable_image_line_result(page_text):
+                        best_text = page_text
+                    else:
+                        best_text = ""
+                else:
+                    best_text = self._request_line_decision(
+                        idx=i,
+                        kraken_text=kraken_text,
+                        page_text=page_text,
+                        box_text=box_text,
+                    ).strip()
+                    if self._looks_like_manual_placeholder(best_text) and self._is_usable_image_line_result(box_text):
+                        best_text = box_text
                 if not best_text:
                     best_text = self._choose_final_line_text(
                         kraken_text=kraken_text,

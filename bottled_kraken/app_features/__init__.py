@@ -173,5 +173,15 @@ from bottled_kraken.app_features import final_export_runtime as _final_export_ru
 __all__.extend(_absorb(_final_export_runtime))
 from bottled_kraken.app_features import spreadsheet_export_runtime as _spreadsheet_export_runtime
 __all__.extend(_absorb(_spreadsheet_export_runtime))
+from bottled_kraken.app_features import tabular_export_runtime as _tabular_export_runtime
+__all__.extend(_absorb(_tabular_export_runtime))
+from bottled_kraken.app_features import lm_manual_overlay_placeholder_fix as _lm_manual_overlay_placeholder_fix
+__all__.extend(_absorb(_lm_manual_overlay_placeholder_fix))
+from bottled_kraken.app_features import lm_manual_overlay_single_line_final_fix as _lm_manual_overlay_single_line_final_fix
+__all__.extend(_absorb(_lm_manual_overlay_single_line_final_fix))
+from bottled_kraken.app_features import lm_manual_overlay_apply_fix as _lm_manual_overlay_apply_fix
+__all__.extend(_absorb(_lm_manual_overlay_apply_fix))
+from bottled_kraken.app_features import autocorrect_offline_dictionary as _autocorrect_offline_dictionary
+__all__.extend(_absorb(_autocorrect_offline_dictionary))
 __all__ = sorted(set(__all__))
 synchronize("bk")

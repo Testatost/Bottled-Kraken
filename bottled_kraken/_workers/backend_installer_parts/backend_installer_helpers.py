@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+from bottled_kraken.user_storage import bottled_kraken_runtime_path
 from bottled_kraken.version_config import (
     APP_DIR_NAME,
     APP_VERSION,
@@ -31,6 +32,7 @@ def _fallback_tr(key: str, *args) -> str:
         "backend_install_close": "Close",
         "backend_install_log": "Installation log:",
         "backend_install_running": "Installation is already running.",
+        "backend_install_active": "Download/installation is running...",
         "backend_install_success": "Backend installation completed successfully.",
         "backend_install_failed": "Backend installation failed.",
         "backend_install_finished": "Installation finished.",
@@ -56,17 +58,7 @@ def backend_root() -> Path:
     custom = os.environ.get("BOTTLED_KRAKEN_BACKENDS_DIR", "").strip()
     if custom:
         return Path(custom).expanduser()
-    if sys.platform.startswith("win"):
-        base = os.environ.get("LOCALAPPDATA", "").strip()
-        if base:
-            return Path(base) / APP_DIR_NAME / "backends"
-        return Path.home() / "AppData" / "Local" / APP_DIR_NAME / "backends"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_DIR_NAME / "backends"
-    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
-    if xdg:
-        return Path(xdg).expanduser() / APP_DIR_NAME / "backends"
-    return Path.home() / ".local" / "share" / APP_DIR_NAME / "backends"
+    return bottled_kraken_runtime_path("backends")
 def backend_dir(kind: str) -> Path:
     meta = BACKEND_DEFS.get(kind, BACKEND_DEFS["nvidia-cuda"])
     return backend_root() / meta["dir"]

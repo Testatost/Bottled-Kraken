@@ -111,4 +111,8 @@ BK_LM_OPTIONS_TRANSLATIONS_DE = {
     'lm_token_postgresql_json': 'PostgreSQL-json',
     'lm_token_neo4j_json': 'Neo4j-json',
     'lm_token_sqlite_json': 'SQLite-json',
+    'lm_token_export_zones_ai': 'KI-Unterstützung für Exportbereiche',
+    'lm_prompt_export_zones_system': 'Exportbereiche – KI-Unterstützung – System-Prompt',
+    'lm_prompt_export_zones_user': 'Exportbereiche – KI-Unterstützung – Benutzer-Prompt',
 }
+

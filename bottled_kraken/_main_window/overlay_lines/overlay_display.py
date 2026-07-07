@@ -13,7 +13,7 @@ from bottled_kraken.common import (
     Qt,
     RecordView,
 )
-from PySide6.QtWidgets import QButtonGroup, QGridLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QGridLayout, QWidget, QCheckBox
 class MainWindowOverlayDisplayMixin:
         def _overlay_visible_rows_for_mode(self, recs: List[RecordView]) -> List[int]:
             if not getattr(self, "show_overlay", True):
@@ -149,6 +149,43 @@ class MainWindowOverlayDisplayMixin:
             nx1 = max(nx0 + 2, min(nx1, img_w))
             ny1 = max(ny0 + 2, min(ny1, img_h))
             return nx0, ny0, nx1, ny1
+        def _fit_overlay_bbox_to_edges(
+                self,
+                bbox: BBox,
+                img_w: int,
+                img_h: int,
+                side: str = "center",
+                fit_horizontal: bool = False,
+                fit_vertical: bool = False,
+        ) -> BBox:
+            x0, y0, x1, y1 = [int(v) for v in bbox]
+            side = str(side or "center").lower()
+            nx0, ny0, nx1, ny1 = x0, y0, x1, y1
+            if fit_horizontal:
+                if side == "left":
+                    nx0 = 0
+                    nx1 = max(nx0 + 2, min(x1, img_w))
+                elif side == "right":
+                    nx0 = max(0, min(x0, img_w - 2))
+                    nx1 = img_w
+                else:
+                    nx0 = 0
+                    nx1 = img_w
+            if fit_vertical:
+                if side == "top":
+                    ny0 = 0
+                    ny1 = max(ny0 + 2, min(y1, img_h))
+                elif side == "bottom":
+                    ny0 = max(0, min(y0, img_h - 2))
+                    ny1 = img_h
+                else:
+                    ny0 = 0
+                    ny1 = img_h
+            nx0 = max(0, min(int(nx0), max(0, img_w - 2)))
+            ny0 = max(0, min(int(ny0), max(0, img_h - 2)))
+            nx1 = max(nx0 + 2, min(int(nx1), img_w))
+            ny1 = max(ny0 + 2, min(int(ny1), img_h))
+            return nx0, ny0, nx1, ny1
         def resize_overlay_boxes_dialog(self):
             task = self._ensure_overlay_possible()
             if not task or not task.results:
@@ -203,6 +240,15 @@ class MainWindowOverlayDisplayMixin:
                 side_grid.addWidget(rb, idx // 2, idx % 2)
             side_buttons["center"].setChecked(True)
             layout.addWidget(side_box)
+            edge_box = QWidget(dlg)
+            edge_grid = QGridLayout(edge_box)
+            edge_grid.setContentsMargins(0, 0, 0, 0)
+            edge_grid.setSpacing(4)
+            cb_fit_horizontal = QCheckBox(self._tr("overlay_resize_fit_horizontal"), edge_box)
+            cb_fit_vertical = QCheckBox(self._tr("overlay_resize_fit_vertical"), edge_box)
+            edge_grid.addWidget(cb_fit_horizontal, 0, 0)
+            edge_grid.addWidget(cb_fit_vertical, 0, 1)
+            layout.addWidget(edge_box)
             def make_slider(label_key: str):
                 row = QHBoxLayout()
                 lbl = QLabel(self._tr(label_key, 0), dlg)
@@ -267,16 +313,21 @@ class MainWindowOverlayDisplayMixin:
                     sx = 1.0 + (int(sl_w.value()) / 100.0)
                     sy = 1.0 + (int(sl_h.value()) / 100.0)
                     side = selected_side()
-                    if rows and (abs(sx - 1.0) >= 1e-6 or abs(sy - 1.0) >= 1e-6):
+                    fit_h = bool(cb_fit_horizontal.isChecked())
+                    fit_v = bool(cb_fit_vertical.isChecked())
+                    if rows and (abs(sx - 1.0) >= 1e-6 or abs(sy - 1.0) >= 1e-6 or fit_h or fit_v):
                         for row in rows:
                             bb = original_bboxes.get(row)
                             if bb:
-                                recs[row].bbox = self._scale_overlay_bbox(bb, sx, sy, img_w, img_h, side)
+                                scaled = self._scale_overlay_bbox(bb, sx, sy, img_w, img_h, side)
+                                recs[row].bbox = self._fit_overlay_bbox_to_edges(scaled, img_w, img_h, side, fit_h, fit_v)
                     refresh_overlay_only()
                 finally:
                     preview_guard["active"] = False
             sl_w.valueChanged.connect(lambda _v: apply_preview())
             sl_h.valueChanged.connect(lambda _v: apply_preview())
+            cb_fit_horizontal.toggled.connect(lambda _checked: apply_preview())
+            cb_fit_vertical.toggled.connect(lambda _checked: apply_preview())
             for rb in (rb_current, rb_selected, rb_all):
                 rb.toggled.connect(lambda _checked: apply_preview())
             for rb in side_buttons.values():
@@ -294,6 +345,8 @@ class MainWindowOverlayDisplayMixin:
             sx = 1.0 + (int(sl_w.value()) / 100.0)
             sy = 1.0 + (int(sl_h.value()) / 100.0)
             side = selected_side()
+            fit_h = bool(cb_fit_horizontal.isChecked())
+            fit_v = bool(cb_fit_vertical.isChecked())
             restore_original_bboxes()
             refresh_overlay_only()
             if not accepted:
@@ -301,13 +354,14 @@ class MainWindowOverlayDisplayMixin:
             if not rows:
                 QMessageBox.information(self, self._tr("info_title"), self._tr("overlay_resize_no_boxes"))
                 return
-            if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+            if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6 and not fit_h and not fit_v:
                 return
             self._push_undo(task)
             for row in rows:
                 bb = original_bboxes.get(row)
                 if bb:
-                    recs[row].bbox = self._scale_overlay_bbox(bb, sx, sy, img_w, img_h, side)
+                    scaled = self._scale_overlay_bbox(bb, sx, sy, img_w, img_h, side)
+                    recs[row].bbox = self._fit_overlay_bbox_to_edges(scaled, img_w, img_h, side, fit_h, fit_v)
             task.edited = True
             task.results = ("\n".join(r.text for r in recs).strip(), kr_records, None, recs)
             self._update_task_preset_bboxes(task)

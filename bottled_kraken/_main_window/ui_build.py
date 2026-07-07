@@ -1,4 +1,4 @@
-from bottled_kraken.common import QAction, QBrush, QColor, QEvent, QHBoxLayout, QHeaderView, QIcon, QLineEdit, QPainter, QPen, QPixmap, QPointF, QPushButton, QSize, QSizePolicy, QSplitter, QStyle, QTimer, QToolBar, QToolButton, QUEUE_COL_CHECK, QUEUE_COL_FILE, QUEUE_COL_NUM, QUEUE_COL_STATUS, QVBoxLayout, QWidget, Qt
+from bottled_kraken.common import QAction, QBrush, QColor, QEvent, QHBoxLayout, QHeaderView, QIcon, QLineEdit, QPainter, QPen, QPixmap, QPointF, QPushButton, QSize, QSizePolicy, QSplitter, QStyle, QTimer, QToolBar, QToolButton, QUEUE_COL_CHECK, QUEUE_COL_FILE, QUEUE_COL_NUM, QUEUE_COL_STATUS, QVBoxLayout, QWidget, Qt, THEMES
 from PySide6.QtWidgets import QSplitterHandle, QTabBar
 from PySide6.QtGui import QPainterPath
 from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
@@ -11,6 +11,19 @@ class BKPreviewSplitterHandle(QSplitterHandle):
             return getattr(owner, "current_theme", "bright")
         except Exception:
             return "bright"
+    def _owner_theme_conf(self) -> dict:
+        try:
+            return THEMES.get(self._owner_theme(), THEMES.get("bright", {}))
+        except Exception:
+            return {}
+    def _owner_theme_dark(self) -> bool:
+        try:
+            conf = self._owner_theme_conf()
+            if "dark" in conf:
+                return bool(conf.get("dark"))
+            return QColor(str(conf.get("bg", "#ffffff"))).lightness() < 128
+        except Exception:
+            return self._owner_theme() == "dark"
     def event(self, event):
         try:
             if event.type() in (QEvent.PaletteChange, QEvent.StyleChange, QEvent.ApplicationPaletteChange):
@@ -19,15 +32,11 @@ class BKPreviewSplitterHandle(QSplitterHandle):
             pass
         return super().event(event)
     def paintEvent(self, event):
-        theme = self._owner_theme()
-        if theme == "dark":
-            bg = QColor("#2b2b2b")
-            line = QColor("#4b5563")
-            dot = QColor("#ffffff")
-        else:
-            bg = QColor("#f0f0f0")
-            line = QColor("#c8c8c8")
-            dot = QColor("#000000")
+        conf = self._owner_theme_conf()
+        is_dark = self._owner_theme_dark()
+        bg = QColor(str(conf.get("bg", "#2b2b2b" if is_dark else "#f0f0f0")))
+        line = QColor(str(conf.get("border", "#4b5563" if is_dark else "#c8c8c8")))
+        dot = QColor(str(conf.get("fg", "#ffffff" if is_dark else "#000000")))
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), bg)
@@ -55,6 +64,17 @@ class BKPreviewSplitter(QSplitter):
     def createHandle(self):
         return BKPreviewSplitterHandle(self.orientation(), self)
 class MainWindowUiBuildMixin:
+    def _is_current_theme_dark_for_ui(self) -> bool:
+        value = getattr(self, "_current_theme_is_dark", None)
+        if value is not None:
+            return bool(value)
+        try:
+            conf = THEMES.get(getattr(self, "current_theme", "bright"), THEMES.get("bright", {}))
+            if "dark" in conf:
+                return bool(conf.get("dark"))
+            return QColor(str(conf.get("bg", "#ffffff"))).lightness() < 128
+        except Exception:
+            return getattr(self, "current_theme", "bright") == "dark"
     def set_preview_tool_mode(self, mode: str):
         mode = "pan" if str(mode or "").lower() == "pan" else "select"
         if hasattr(self, "canvas"):
@@ -64,7 +84,7 @@ class MainWindowUiBuildMixin:
         if hasattr(self, "btn_preview_pan"):
             self.btn_preview_pan.setChecked(mode == "pan")
     def _preview_tool_icon_color(self) -> QColor:
-        return QColor("#f8fafc" if getattr(self, "current_theme", "bright") == "dark" else "#111827")
+        return QColor("#f8fafc" if self._is_current_theme_dark_for_ui() else "#111827")
     def _build_preview_tool_icon(self, tool: str) -> QIcon:
         ink = self._preview_tool_icon_color()
         pix = QPixmap(24, 24)
@@ -244,6 +264,11 @@ class MainWindowUiBuildMixin:
         self.btn_ai_revise_bottom.setToolTip(self._tr("act_ai_revise_tip"))
         self.btn_ai_revise_bottom.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.btn_ai_revise_bottom.clicked.connect(self.run_ai_revision)
+        self.btn_autocorrect_settings = QToolButton()
+        self.btn_autocorrect_settings.setText(self._tr("btn_autocorrect_settings"))
+        self.btn_autocorrect_settings.setToolTip(self._tr("btn_autocorrect_settings_tooltip"))
+        self.btn_autocorrect_settings.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_autocorrect_settings.clicked.connect(self._open_kraken_auto_revision_settings)
         self.btn_line_search = QToolButton()
         self.btn_line_search.setText(self._tr("btn_line_search"))
         self.btn_line_search.setToolTip(self._tr("btn_line_search_tooltip"))
@@ -262,9 +287,10 @@ class MainWindowUiBuildMixin:
         self.btn_import_lines.setMenu(import_menu)
         self.line_search_button_panel = QWidget()
         self.line_search_button_panel.setObjectName("line_search_button_panel")
-        search_panel_layout = QVBoxLayout(self.line_search_button_panel)
+        search_panel_layout = QHBoxLayout(self.line_search_button_panel)
         search_panel_layout.setContentsMargins(0, 0, 0, 0)
-        search_panel_layout.setSpacing(0)
+        search_panel_layout.setSpacing(6)
+        search_panel_layout.addWidget(self.btn_autocorrect_settings, 0, Qt.AlignLeft)
         search_panel_layout.addWidget(self.btn_line_search, 0, Qt.AlignLeft)
         self.line_search_inline_panel = QWidget()
         self.line_search_inline_panel.setObjectName("line_search_inline_panel")

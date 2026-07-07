@@ -1,3 +1,4 @@
+from bottled_kraken.user_storage import bottled_kraken_user_path
 from bottled_kraken.common import _serialize_ocr_auto_revision_replacements
 from bottled_kraken.common import (
     Dict,
@@ -88,7 +89,8 @@ class MainWindow(
         super().__init__()
         self.resize(1600, 900)
         self.setAcceptDrops(True)
-        self.settings = QSettings("BottledKraken", "BottledKrakenApp")
+        settings_file = str(bottled_kraken_user_path("settings") / "settings.ini")
+        self.settings = QSettings(settings_file, QSettings.IniFormat)
         self.last_rec_model_dir = self.settings.value(
             "paths/last_rec_model_dir",
             KRAKEN_MODELS_DIR,
@@ -152,6 +154,9 @@ class MainWindow(
         except Exception:
             default_repls = "ſ=s\n⸗=-\n±=+/-"
         self.kraken_auto_revision_replacements = str(self.settings.value("ocr/auto_revision_replacements", default_repls, str))
+        self.kraken_autocorrect_enabled = str(self.settings.value("ocr/autocorrect_enabled", "false", str)).strip().lower() in {"1", "true", "yes", "on"}
+        self.kraken_autocorrect_reference_dir = str(self.settings.value("ocr/autocorrect_reference_dir", "", str) or "")
+        self.kraken_autocorrect_reference_file = str(self.settings.value("ocr/autocorrect_reference_file", "", str) or "")
         self.model_path = ""
         self.seg_model_path = ""
         self.kraken_rec_models: List[str] = []

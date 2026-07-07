@@ -38,9 +38,63 @@ def _bk_fix46_parse_single_text(content: str) -> str:
     if lines:
         return lines[0]
     return _clean_ocr_text(raw)
+
+def _bk_fix49_is_manual_placeholder_text(text: str) -> bool:
+    """Return True for deliberately typed filler/random text in manual overlay boxes.
+
+    Such text must not protect the old line against a shorter visual LM result.
+    Real OCR can legitimately be very short ("2", "3.", "U"), so this only
+    flags longer, low-information artificial strings.
+    """
+    t = _clean_ocr_text(text or '')
+    if not t:
+        return False
+    low = t.casefold()
+    compact = re.sub(r"\s+", "", low)
+    if re.search(r"\b(?:random|platzhalter|placeholder|testtext|dummy|lorem|asdf|qwerty)\b", low):
+        return True
+    if len(compact) >= 8 and re.fullmatch(r"[a-zäöüß]+", compact):
+        # Typical manual gibberish has only a few different characters or repeated chunks.
+        unique_ratio = len(set(compact)) / max(1, len(compact))
+        vowels = sum(1 for ch in compact if ch in "aeiouäöüy")
+        vowel_ratio = vowels / max(1, len(compact))
+        repeated_chunks = bool(re.search(r"([a-zäöüß]{2,5})\1", compact))
+        no_titlecase = not re.search(r"[A-ZÄÖÜ]", t)
+        if no_titlecase and (unique_ratio <= 0.42 or repeated_chunks or vowel_ratio < 0.18):
+            return True
+    if len(compact) >= 10 and re.fullmatch(r"[a-z0-9._\-]+", compact) and not re.search(r"\s", t):
+        # Long uninterrupted keyboard-like tokens are more likely placeholders than OCR lines.
+        alpha = sum(1 for ch in compact if ch.isalpha())
+        digit = sum(1 for ch in compact if ch.isdigit())
+        if alpha >= 7 and digit <= 2 and len(set(compact)) <= max(5, int(len(compact) * 0.45)):
+            return True
+    return False
+
+
+def _bk_fix49_is_usable_visual_text(text: str) -> bool:
+    t = _clean_ocr_text(text or '')
+    if not t:
+        return False
+    if t.startswith('{') or t.startswith('[') or 'bbox_norm' in t:
+        return False
+    if '\n' in t:
+        return False
+    # Valid OCR snippets can be extremely short: page numbers, column numbers,
+    # roman numerals, separators, or one-letter headings.
+    if re.fullmatch(r"[0-9IVXLCDMivxlcdmA-Za-zÄÖÜäöüß]{1,4}[.)]?", t):
+        return True
+    if len(t) <= 8 and re.search(r"[A-Za-zÀ-ÿÄÖÜäöüß0-9]", t):
+        return True
+    try:
+        return not _bk_fix45_is_bad_candidate(None, t)
+    except Exception:
+        return True
+
 def _bk_fix46_is_truncated_against(ref: str, cand: str) -> bool:
     ref = _clean_ocr_text(ref or '')
     cand = _clean_ocr_text(cand or '')
+    if _bk_fix49_is_manual_placeholder_text(ref):
+        return False
     if not ref:
         return False
     if not cand:
@@ -88,6 +142,8 @@ def _bk_fix46_request_overlay_box_revision(self, rv, page_context_lines: List[st
         pass
     text = _bk_fix46_parse_single_text(content)
     text = _clean_ocr_text(text)
+    if text and _bk_fix49_is_manual_placeholder_text(kraken_text):
+        return text
     if _bk_fix46_is_truncated_against(kraken_text, text):
         return kraken_text
     return text or kraken_text
@@ -95,6 +151,8 @@ def _bk_fix46_sanity_merge_line(self, kraken_text: str, lm_box_text: str, page_c
     kt = _clean_ocr_text(kraken_text or '')
     lt = _clean_ocr_text(lm_box_text or '')
     pt = _clean_ocr_text(page_context_text or '')
+    if lt and _bk_fix49_is_manual_placeholder_text(kt) and _bk_fix49_is_usable_visual_text(lt):
+        return lt
     candidates = []
     for label, cand in (('lm_box', lt), ('kraken', kt)):
         if not cand or _bk_fix45_is_bad_candidate(self, cand):
@@ -203,7 +261,9 @@ def _bk_fix46_request_single_line_reread(self, line_data_url: str, idx: int, cur
         ),
     }
     data = self._post_json(payload)
-    txt = _bk_fix46_parse_single_text(self._extract_message_content(data))
+    txt = _clean_ocr_text(_bk_fix46_parse_single_text(self._extract_message_content(data)))
+    if txt and _bk_fix49_is_manual_placeholder_text(kraken_text):
+        return txt
     if kraken_text and _bk_fix46_is_truncated_against(kraken_text, txt):
         return kraken_text
     return txt or kraken_text
@@ -403,6 +463,8 @@ __all__ = [
     '_bk_fix48_request_true_full_page_ocr_context',
     '_bk_fix48_response_format_full_page_lines',
     '_bk_fix48_target_rows_for_item',
+    '_bk_fix49_is_manual_placeholder_text',
+    '_bk_fix49_is_usable_visual_text',
     '_bk_fix48_task_recs_from_parent',
 ]
 register_globals('bk', globals(), __all__)

@@ -1,3 +1,5 @@
+from bottled_kraken.user_storage import bottled_kraken_runtime_path
+
 from bottled_kraken.common import (
     Optional,
     QThread,
@@ -127,10 +129,8 @@ class VoiceLineFillWorker(QThread):
             finally:
                 self._stream = None
     def _safe_ascii_temp_root(self) -> str:
-        if sys.platform.startswith("win"):
-            base = r"C:\bk_temp"
-        else:
-            base = "/tmp/bk_temp"
+        # Keep generated WAV files under the user's BottledKraken folder, not in OS temp.
+        base = str(bottled_kraken_runtime_path("voice"))
         os.makedirs(base, exist_ok=True)
         return base
     def _write_temp_wav(self) -> str:
@@ -141,7 +141,7 @@ class VoiceLineFillWorker(QThread):
         if len(audio) < min_samples:
             raise RuntimeError(self._tr("voice_error_recording_too_short"))
         audio = np.clip(audio, -1.0, 1.0)
-        tmp_dir = os.path.join(self._safe_ascii_temp_root(), "voice")
+        tmp_dir = self._safe_ascii_temp_root()
         os.makedirs(tmp_dir, exist_ok=True)
         tmp_path = os.path.join(
             tmp_dir,

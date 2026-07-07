@@ -236,8 +236,8 @@ def write_positioned_docx(path, item, export_image, record_views):
             continue
         left = offset_x_pt + (float(record["x0"]) - min_x) * scale
         top = offset_y_pt + (float(record["y0"]) - min_y) * scale
-        width = max(float(record["w"]) * scale + 6.0, min(usable_width_pt, max(18.0, len(text) * font_size * 0.43)))
-        height = max(float(record["h"]) * scale * 1.25, font_size * 1.35, median_height * scale * 0.95)
+        width = max(6.0, float(record["w"]) * scale)
+        height = max(5.0, float(record["h"]) * scale * 1.08, font_size * 1.15)
         try:
             run._r.append(parse_xml(_textbox_xml(text, left, top, width, height, font_size, index)))
         except Exception:
@@ -270,8 +270,8 @@ def _odt_content_xml(records, page_width, page_height, min_x, min_y, max_x, max_
             continue
         left = margin_cm + offset_x + (float(record["x0"]) - min_x) * scale
         top = margin_cm + offset_y + (float(record["y0"]) - min_y) * scale
-        width = max(float(record.get("w", 0.0)) * scale + 0.08, min(usable_w_cm, max(0.35, len(text) * 0.055)))
-        height = max(float(record.get("h", 0.0)) * scale * 1.25, median_height * scale * 0.95, 0.18)
+        width = max(0.10, float(record.get("w", 0.0)) * scale)
+        height = max(float(record.get("h", 0.0)) * scale * 1.08, 0.14)
         frames.append(
             '<draw:frame draw:style-name="BkTextFrame" draw:name="bk_text_%04d" text:anchor-type="page" '
             'svg:x="%.4fcm" svg:y="%.4fcm" svg:width="%.4fcm" svg:height="%.4fcm" draw:z-index="%d">'

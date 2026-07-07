@@ -1,3 +1,7 @@
+from bottled_kraken.user_storage import bottled_kraken_runtime_path, safe_storage_name
+
+import hashlib
+
 from bottled_kraken.common import (
     List,
     QThread,
@@ -50,7 +54,9 @@ class PDFRenderWorker(QThread):
             pdf_path = self.pdf_path
             dpi = self.dpi
             base = os.path.splitext(os.path.basename(pdf_path))[0]
-            tmp_dir = os.path.join(os.path.dirname(pdf_path), f".kraken_tmp_{base}")
+            base_safe = safe_storage_name(base or "pdf", "pdf")
+            path_hash = hashlib.sha1(os.path.abspath(pdf_path).encode("utf-8", "ignore")).hexdigest()[:10]
+            tmp_dir = str(bottled_kraken_runtime_path("pdf_render", f"{base_safe}_{path_hash}"))
             os.makedirs(tmp_dir, exist_ok=True)
             doc = fitz.open(pdf_path)
             total = int(doc.page_count)

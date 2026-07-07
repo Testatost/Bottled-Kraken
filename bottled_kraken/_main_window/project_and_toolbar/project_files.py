@@ -79,6 +79,17 @@ class MainWindowProjectFilesMixin:
             self._process_ui()
             try:
                 self.clear_queue()
+                for _name in (
+                    "_ocr_variants_by_path",
+                    "_ocr_active_variant_by_path",
+                    "_ptr_multi_ocr_variant_meta_by_path",
+                    "_ptr_multi_ocr_variants_by_path",
+                    "_ptr_multi_ocr_active_index_by_path",
+                ):
+                    try:
+                        setattr(self, _name, {})
+                    except Exception:
+                        pass
                 progress.setLabelText(self._tr("project_restore_settings"))
                 progress.setValue(5)
                 self._process_ui()
@@ -89,6 +100,20 @@ class MainWindowProjectFilesMixin:
                 self.device_str = settings.get("device", self.device_str)
                 self.show_overlay = bool(settings.get("show_overlay", self.show_overlay))
                 self.current_theme = settings.get("theme", self.current_theme)
+                custom_theme_colors = settings.get("custom_theme_colors", None)
+                if isinstance(custom_theme_colors, dict) and hasattr(self, "_save_custom_theme_colors"):
+                    try:
+                        self._save_custom_theme_colors(custom_theme_colors)
+                        self._register_custom_theme(custom_theme_colors)
+                    except Exception:
+                        pass
+                appearance_user_themes = settings.get("appearance_user_themes", None)
+                if isinstance(appearance_user_themes, list) and hasattr(self, "_appearance_save_user_themes"):
+                    try:
+                        self._appearance_save_user_themes(appearance_user_themes)
+                        self._ensure_appearance_themes_loaded()
+                    except Exception:
+                        pass
                 self.model_path = settings.get("model_path", self.model_path)
                 self.seg_model_path = settings.get("seg_model_path", self.seg_model_path)
                 self.current_export_dir = settings.get("current_export_dir", self.current_export_dir)
@@ -164,6 +189,12 @@ class MainWindowProjectFilesMixin:
                         if os.path.exists(path):
                             if task.status == STATUS_DONE and task.results:
                                 self.load_results(path)
+                                try:
+                                    refresh_tabs = getattr(self, "_ptr_refresh_ocr_variant_tabs_now", None)
+                                    if callable(refresh_tabs):
+                                        refresh_tabs()
+                                except Exception:
+                                    pass
                             else:
                                 self.preview_image(path)
                         else:

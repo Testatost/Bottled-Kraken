@@ -152,15 +152,41 @@ class ImageCanvasSetupMixin:
         else:
             self.viewport().unsetCursor()
             self.unsetCursor()
-    def set_theme(self, theme: str):
-        if theme == "dark":
-            self._bg_color = QColor("#1e1e1e")
-            self._pen_normal.setColor(QColor("#ff3b30"))
-            self._pen_selected.setColor(QColor("#0a84ff"))
-        else:
-            self._bg_color = QColor("#f2f2f2")
-            self._pen_normal.setColor(QColor("#d00000"))
-            self._pen_selected.setColor(QColor("#0000ff"))
+    def set_theme(self, theme: str, colors: Optional[dict] = None):
+        colors = colors or {}
+        def _name(key, default):
+            value = colors.get(key, default) if isinstance(colors, dict) else default
+            try:
+                if hasattr(value, "name"):
+                    return value.name()
+                c = QColor(str(value or default))
+                return c.name() if c.isValid() else str(default)
+            except Exception:
+                return str(default)
+        bg = _name("canvas_bg", "#1e1e1e" if theme == "dark" else "#f2f2f2")
+        frame = _name("overlay_frame", "#ff3b30" if theme == "dark" else "#d00000")
+        selected = _name("overlay_selected", _name("selection", "#0a84ff" if theme == "dark" else "#0000ff"))
+        split = _name("overlay_split", "#ffd60a")
+        try:
+            fill_alpha = int(colors.get("overlay_fill_alpha", 34)) if isinstance(colors, dict) else 34
+        except Exception:
+            fill_alpha = 34
+        try:
+            selected_alpha = int(colors.get("overlay_selected_alpha", 64)) if isinstance(colors, dict) else 64
+        except Exception:
+            selected_alpha = 64
+        fill_alpha = max(0, min(255, fill_alpha))
+        selected_alpha = max(0, min(255, selected_alpha))
+        self._bg_color = QColor(bg)
+        self._pen_normal.setColor(QColor(frame))
+        self._pen_selected.setColor(QColor(selected))
+        self._brush_fill = QBrush(QColor(QColor(frame).red(), QColor(frame).green(), QColor(frame).blue(), fill_alpha))
+        self._brush_selected = QBrush(QColor(QColor(selected).red(), QColor(selected).green(), QColor(selected).blue(), selected_alpha))
+        self._pen_draw = QPen(QColor(frame), 2)
+        self._brush_draw = QBrush(QColor(QColor(frame).red(), QColor(frame).green(), QColor(frame).blue(), max(30, fill_alpha)))
+        self._pen_selection = QPen(QColor(selected), 2, Qt.DashLine)
+        self._brush_selection = QBrush(QColor(QColor(selected).red(), QColor(selected).green(), QColor(selected).blue(), max(32, selected_alpha // 2)))
+        self._split_pen = QPen(QColor(split), 2, Qt.DashLine)
         self.setBackgroundBrush(QBrush(self._bg_color))
         if self._pixmap_item and hasattr(self, "_last_recs"):
             self.refresh_overlays()

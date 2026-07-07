@@ -58,6 +58,7 @@ def _ptr_rebuild_secondary_button_rows(window):
         getattr(window, "btn_import_lines", None),
         getattr(window, "btn_voice_fill", None),
         getattr(window, "btn_ai_revise_bottom", None),
+        getattr(window, "btn_autocorrect_settings", None),
         getattr(window, "btn_line_search", None),
         getattr(window, "line_search_button_panel", None),
         getattr(window, "line_search_inline_panel", None),
@@ -86,8 +87,9 @@ def _ptr_rebuild_secondary_button_rows(window):
     row2.setSpacing(6)
     row1.addWidget(window.btn_import_lines)
     row1.addWidget(window.btn_voice_fill)
-    search_widget = getattr(window, "line_search_button_panel", window.btn_line_search)
-    row1.addWidget(search_widget, 0, Qt.AlignTop)
+    if getattr(window, "btn_autocorrect_settings", None) is not None:
+        row1.addWidget(window.btn_autocorrect_settings, 0, Qt.AlignTop)
+    row1.addWidget(window.btn_line_search, 0, Qt.AlignTop)
     row1.addStretch(1)
     row2.addWidget(window.btn_ai_revise_bottom)
     row2.addWidget(window.btn_ptr_multi_ocr_bottom)

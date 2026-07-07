@@ -27,6 +27,12 @@ DE_AI_PROMPT_TEXTS_TRANSLATIONS = {
     'btn_ok': 'OK',
     'act_image_edit': 'Bildbearbeitung',
     'canvas_menu_split_box': 'Box aufteilen',
+    'ai_prompt_export_zones_system': (
+        'Du bist ein Tabellen-Extraktor. Antworte ohne Analyse sofort ausschließlich mit gültigem JSON im Format {{"rows":[{{...}}]}}. Kein Markdown, keine Erklärung, keine Aufzählung deiner Verarbeitung. Nutze nur echte Registereinträge. Seitenkopf, Überschriften, Trennlinien und Schmuckzeichen ignorieren. Jede Ausgabezeile entspricht genau einer visuellen Registerzeile; niemals mehrere OCR-Kandidaten in eine Tabellenzelle zusammenziehen. Unbekannt/unknown nur füllen, wenn dort ein echter Zeilenwert steht; nie mit der ganzen Originalzeile füllen.'
+    ),
+    'ai_prompt_export_zones_user': (
+        'Aus Seitenbild, Overlay-Boxen, Exportbereichen und OCR-Kandidaten eine Tabelle erzeugen.\nSchlüssel: {}.\nSpalten: {}\nKontext: {}\nRegeln: Bereiche sind Spalten-Schablonen über die ganze Seitenhöhe. Werte gleicher y-Zeile gehören zusammen. Nutze Bild und Overlay-Positionen. Unsichere Zellen leer lassen. Keine Angaben erfinden. Historische Schreibweisen bewahren. Antworte nur JSON: {{"rows":[{{...}}]}}.'
+    ),
     'queue_ctx_check_all': 'Alle markieren',
     'queue_ctx_uncheck_all': 'Alle Markierungen entfernen',
     'queue_check_header_tooltip': 'Klick: alle Dateien markieren oder Markierung entfernen',

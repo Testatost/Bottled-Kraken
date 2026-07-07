@@ -12,9 +12,21 @@ from bottled_kraken.common import (
     QStyle,
     QToolButton,
     Qt,
+    THEMES,
 )
 import math
 class MainWindowToolbarIconFactoryMixin:
+        def _is_current_theme_dark(self) -> bool:
+            value = getattr(self, "_current_theme_is_dark", None)
+            if value is not None:
+                return bool(value)
+            try:
+                conf = THEMES.get(getattr(self, "current_theme", "bright"), THEMES.get("bright", {}))
+                if "dark" in conf:
+                    return bool(conf.get("dark"))
+                return QColor(str(conf.get("bg", "#ffffff"))).lightness() < 128
+            except Exception:
+                return getattr(self, "current_theme", "bright") == "dark"
         def _normalize_toolbar_button_sizes(self):
             target_height = 34
             clear_width = 28
@@ -89,34 +101,31 @@ class MainWindowToolbarIconFactoryMixin:
                 painter.setBrush(QColor("#facc15"))
                 painter.drawEllipse(QRectF(px * 0.25, py * 0.25, px * 0.50, py * 0.50))
             elif kind == "translate":
-                is_bright = self.current_theme == "bright"
-                outline = QColor("#000000") if is_bright else QColor("#f8fafc")
-                accent = QColor("#000000") if is_bright else QColor("#93c5fd")
-                front_fill = QColor("#ffffff") if is_bright else QColor("#0f172a")
-                back_fill = QColor("#f3f4f6") if is_bright else QColor("#1e293b")
+                blue = QColor("#2563eb")
+                is_dark = self._is_current_theme_dark()
+                blue_light = QColor("#1e3a8a") if is_dark else QColor("#dbeafe")
                 card_front = QRectF(px * 0.12, py * 0.20, px * 0.46, py * 0.50)
                 card_back = QRectF(px * 0.40, py * 0.30, px * 0.40, py * 0.42)
                 radius = max(2.5, px * 0.08)
-                pen = QPen(outline, max(1.1, px * 0.05))
-                painter.setPen(pen)
-                painter.setBrush(front_fill)
+                painter.setPen(QPen(blue, max(1.1, px * 0.05)))
+                painter.setBrush(QColor("#0f172a") if is_dark else QColor("#ffffff"))
                 painter.drawRoundedRect(card_front, radius, radius)
-                painter.setPen(pen)
-                painter.setBrush(back_fill)
+                painter.setBrush(blue_light)
                 painter.drawRoundedRect(card_back, radius, radius)
+                fg = QColor("#f8fafc") if is_dark else QColor("#111827")
                 font_a = QFont()
                 font_a.setBold(True)
                 font_a.setPointSizeF(max(6.5, px * 0.30))
                 painter.setFont(font_a)
-                painter.setPen(outline)
+                painter.setPen(fg)
                 painter.drawText(card_front, Qt.AlignCenter, "A")
                 font_b = QFont()
                 font_b.setBold(True)
                 font_b.setPointSizeF(max(5.5, px * 0.24))
                 painter.setFont(font_b)
-                painter.setPen(accent)
+                painter.setPen(QColor("#bfdbfe") if is_dark else blue)
                 painter.drawText(card_back, Qt.AlignCenter, "文")
-                arrow_pen = QPen(outline, max(1.2, px * 0.055), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                arrow_pen = QPen(blue, max(1.2, px * 0.055), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
                 painter.setPen(arrow_pen)
                 y = py * 0.83
                 x1 = px * 0.22
@@ -133,7 +142,7 @@ class MainWindowToolbarIconFactoryMixin:
             painter.end()
             return QIcon(pix)
         def _icon_fg_color(self) -> QColor:
-            return QColor("#ffffff") if self.current_theme == "dark" else QColor("#000000")
+            return QColor("#ffffff") if self._is_current_theme_dark() else QColor("#000000")
         def _tinted_theme_or_standard_icon(
                 self,
                 theme_name: str,
@@ -172,7 +181,7 @@ class MainWindowToolbarIconFactoryMixin:
                     return icon
             return QIcon()
         def _theme_toggle_icon(self) -> QIcon:
-            if self.current_theme == "dark":
+            if self._is_current_theme_dark():
                 return self._toolbar_custom_symbol_icon("sun")
             icon = self._first_theme_icon(
                 "weather-clear-night",
@@ -184,6 +193,14 @@ class MainWindowToolbarIconFactoryMixin:
                 return icon
             return self._toolbar_custom_symbol_icon("moon")
         def _language_menu_icon(self) -> QIcon:
+            icon = self._first_theme_icon(
+                "preferences-desktop-locale",
+                "accessories-dictionary",
+                "tools-check-spelling",
+                "preferences-desktop-text-to-speech"
+            )
+            if not icon.isNull():
+                return icon
             return self._toolbar_custom_symbol_icon("translate")
         def _set_primary_toolbar_icons(self):
             if hasattr(self, "act_add"):

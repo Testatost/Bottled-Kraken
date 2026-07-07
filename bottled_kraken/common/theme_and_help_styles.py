@@ -1,290 +1,292 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('shared', globals())
+def _theme_color(theme: str, key: str, default: str) -> str:
+    try:
+        conf = THEMES.get(theme, THEMES.get("bright", {}))
+    except Exception:
+        conf = {}
+    value = conf.get(key, default) if isinstance(conf, dict) else default
+    try:
+        if hasattr(value, "name"):
+            return value.name()
+    except Exception:
+        pass
+    return str(value or default)
+def _theme_conf(theme: str) -> Dict[str, str]:
+    try:
+        conf = THEMES.get(theme, THEMES.get("bright", {}))
+    except Exception:
+        conf = {}
+    return conf if isinstance(conf, dict) else {}
+def _theme_is_dark(theme: str) -> bool:
+    conf = _theme_conf(theme)
+    try:
+        if "dark" in conf:
+            return bool(conf.get("dark"))
+        return QColor(_theme_color(theme, "bg", "#ffffff")).lightness() < 128
+    except Exception:
+        return str(theme or "").lower() == "dark"
+def _theme_adjust(color: str, factor: int) -> str:
+    try:
+        c = QColor(str(color))
+        if not c.isValid():
+            return str(color)
+        return c.lighter(int(factor)).name() if int(factor) >= 100 else c.darker(int(200 - factor)).name()
+    except Exception:
+        return str(color)
+def _theme_contrast_text(color: str) -> str:
+    try:
+        return "#000000" if QColor(str(color)).lightness() > 165 else "#ffffff"
+    except Exception:
+        return "#ffffff"
 def _theme_app_qss(theme: str) -> str:
-    if theme == "dark":
-        base = """
-            QWidget {
-                background: #2b2b2b;
-                color: #f3f4f6;
-            }
-            QMainWindow, QDialog, QMessageBox, QInputDialog, QProgressDialog {
-                background: #1f232a;
-                color: #f3f4f6;
-            }
-            QLabel, QGroupBox {
-                color: #f3f4f6;
-            }
-            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
-            QComboBox, QListWidget, QTreeWidget, QTableWidget {
-                background: #2b3038;
-                color: #f3f4f6;
-                border: 1px solid #4b5563;
-                selection-background-color: #2563eb;
-                selection-color: white;
-            }
-            QPushButton, QToolButton {
-                color: #f3f4f6;
-                background: #2b3038;
-                border: 1px solid #4b5563;
-                border-radius: 6px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background: #343a44;
-                border-color: #60a5fa;
-            }
-            QPushButton:pressed, QToolButton:pressed {
-                background: #3f4652;
-            }
-            QPushButton:disabled, QToolButton:disabled {
-                color: #9ca3af;
-                background: #252a31;
-                border-color: #3f4652;
-            }
-            QMenuBar {
-                background: #20242b;
-                color: #f3f4f6;
-            }
-            QMenuBar::item:selected {
-                background: #2f3540;
-            }
-            QMenu {
-                background: #1f232a;
-                color: #f3f4f6;
-                border: 1px solid #4b5563;
-            }
-            QMenu::item {
-                background: transparent;
-                min-height: 22px;
-                padding: 4px 30px 4px 28px;
-            }
-            QMenu::item:selected {
-                background: #2563eb;
-                color: white;
-            }
-            QMenu::item:disabled {
-                color: #9ca3af;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #4b5563;
-                margin: 4px 6px;
-            }
-            QMenu::indicator {
-                width: 16px;
-                height: 16px;
-            }
-            QHeaderView::section {
-                background: #313844;
-                color: #f3f4f6;
-                border: 1px solid #4b5563;
-                padding: 4px;
-            }
-            QScrollBar:vertical, QScrollBar:horizontal {
-                background: #232830;
-            }
-        """
-    else:
-        base = """
-            QWidget {
-                background: #f0f0f0;
-                color: #000000;
-            }
-            QMainWindow, QDialog, QMessageBox, QInputDialog, QProgressDialog {
-                background: #efefef;
-                color: #000000;
-            }
-            QLabel, QGroupBox {
-                color: #000000;
-            }
-            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
-            QComboBox, QListWidget, QTreeWidget, QTableWidget {
-                background: #ffffff;
-                color: #000000;
-                border: 1px solid #b8b8b8;
-                selection-background-color: #3399ff;
-                selection-color: #ffffff;
-            }
-            QPushButton, QToolButton {
-                color: #000000;
-                background: #f7f7f7;
-                border: 1px solid #b8b8b8;
-                border-radius: 6px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background: #ececec;
-                border-color: #7aaef7;
-            }
-            QPushButton:pressed, QToolButton:pressed {
-                background: #dddddd;
-            }
-            QPushButton:disabled, QToolButton:disabled {
-                color: #8a8a8a;
-                background: #f0f0f0;
-                border-color: #cfcfcf;
-            }
-            QMenuBar {
-                background: #efefef;
-                color: #000000;
-            }
-            QMenuBar::item:selected {
-                background: #dcdcdc;
-            }
-            QMenu {
-                background: #ffffff;
-                color: #000000;
-                border: 1px solid #b8b8b8;
-            }
-            QMenu::item {
-                background: transparent;
-                min-height: 22px;
-                padding: 4px 30px 4px 28px;
-            }
-            QMenu::item:selected {
-                background: #3399ff;
-                color: #ffffff;
-            }
-            QMenu::item:disabled {
-                color: #7a7a7a;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #c8c8c8;
-                margin: 4px 6px;
-            }
-            QMenu::indicator {
-                width: 16px;
-                height: 16px;
-            }
-            QHeaderView::section {
-                background: #e8e8e8;
-                color: #000000;
-                border: 1px solid #c8c8c8;
-                padding: 4px;
-            }
-            QScrollBar:vertical, QScrollBar:horizontal {
-                background: #efefef;
-            }
-        """
+    dark = _theme_is_dark(theme)
+    fg = _theme_color(theme, "fg", "#f3f4f6" if dark else "#000000")
+    bg = _theme_color(theme, "bg", "#1f232a" if dark else "#f0f0f0")
+    surface = _theme_color(theme, "surface", "#2b3038" if dark else "#ffffff")
+    control_bg = _theme_color(theme, "control_bg", surface)
+    control_hover = _theme_color(theme, "control_hover", _theme_adjust(control_bg, 118 if dark else 96))
+    control_pressed = _theme_color(theme, "control_pressed", _theme_adjust(control_bg, 132 if dark else 88))
+    border = _theme_color(theme, "border", "#4b5563" if dark else "#b8b8b8")
+    selection = _theme_color(theme, "selection", "#2563eb" if dark else "#3399ff")
+    selection_text = _theme_color(theme, "selection_text", _theme_contrast_text(selection))
+    table_alt = _theme_color(theme, "table_alt", _theme_adjust(surface, 112 if dark else 97))
+    menu_bg = _theme_color(theme, "menu_bg", bg)
+    disabled_fg = _theme_adjust(fg, 70 if dark else 150)
+    disabled_bg = _theme_adjust(control_bg, 86 if dark else 96)
+    base = f"""
+        QWidget {{
+            background: {bg};
+            color: {fg};
+        }}
+        QMainWindow, QDialog, QMessageBox, QInputDialog, QProgressDialog {{
+            background: {bg};
+            color: {fg};
+        }}
+        QLabel, QGroupBox {{
+            color: {fg};
+        }}
+        QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
+        QComboBox, QListWidget, QTreeWidget, QTableWidget {{
+            background: {surface};
+            color: {fg};
+            border: 1px solid {border};
+            selection-background-color: {selection};
+            selection-color: {selection_text};
+        }}
+        QTreeWidget, QTableWidget {{
+            alternate-background-color: {table_alt};
+        }}
+        QPushButton, QToolButton {{
+            color: {fg};
+            background: {control_bg};
+            border: 1px solid {border};
+            border-radius: 6px;
+            padding: 5px 10px;
+        }}
+        QPushButton:hover, QToolButton:hover {{
+            background: {control_hover};
+            border-color: {selection};
+        }}
+        QPushButton:pressed, QToolButton:pressed {{
+            background: {control_pressed};
+        }}
+        QPushButton:disabled, QToolButton:disabled {{
+            color: {disabled_fg};
+            background: {disabled_bg};
+            border-color: {border};
+        }}
+        QMenuBar {{
+            background: {menu_bg};
+            color: {fg};
+        }}
+        QMenuBar::item:selected {{
+            background: {control_hover};
+        }}
+        QMenu {{
+            background: {menu_bg};
+            color: {fg};
+            border: 1px solid {border};
+        }}
+        QMenu::item {{
+            background: transparent;
+            min-height: 22px;
+            padding: 4px 30px 4px 28px;
+        }}
+        QMenu::item:selected {{
+            background: {selection};
+            color: {selection_text};
+        }}
+        QMenu::item:disabled {{
+            color: {disabled_fg};
+        }}
+        QMenu::separator {{
+            height: 1px;
+            background: {border};
+            margin: 4px 6px;
+        }}
+        QMenu::indicator {{
+            width: 16px;
+            height: 16px;
+        }}
+        QHeaderView::section {{
+            background: {control_bg};
+            color: {fg};
+            border: 1px solid {border};
+            padding: 4px;
+        }}
+        QScrollBar:vertical, QScrollBar:horizontal {{
+            background: {bg};
+        }}
+    """
     return base + "\n" + _theme_control_qss(theme)
 def _image_edit_dialog_qss(theme: str) -> str:
-    if theme == "dark":
-        base = """
-            QDialog {
-                background: #1f232a;
-                color: #f3f4f6;
-            }
-            QLabel, QPushButton {
-                color: #f3f4f6;
-                font-size: 13px;
-            }
-            QPushButton {
-                background: #2b3038;
-                border: 1px solid #4b5563;
-                border-radius: 6px;
-                padding: 6px 10px;
-            }
-            QPushButton:hover {
-                background: #343a44;
-                border-color: #60a5fa;
-            }
-            QPushButton:pressed {
-                background: #3f4652;
-            }
-            QPushButton:checked {
-                background: #1d4ed8;
-                border-color: #60a5fa;
-                color: white;
-            }
-        """
-    else:
-        base = """
-            QDialog {
-                background: #f6f7fb;
-                color: #1f2937;
-            }
-            QLabel, QPushButton {
-                color: #1f2937;
-                font-size: 13px;
-            }
-            QPushButton {
-                background: #ffffff;
-                border: 1px solid #cfd5df;
-                border-radius: 6px;
-                padding: 6px 10px;
-            }
-            QPushButton:hover {
-                background: #f0f4ff;
-                border-color: #7aaef7;
-            }
-            QPushButton:pressed {
-                background: #e5edff;
-            }
-            QPushButton:checked {
-                background: #3399ff;
-                border-color: #7aaef7;
-                color: white;
-            }
-        """
+    dark = _theme_is_dark(theme)
+    fg = _theme_color(theme, "fg", "#f3f4f6" if dark else "#1f2937")
+    bg = _theme_color(theme, "bg", "#1f232a" if dark else "#f6f7fb")
+    surface = _theme_color(theme, "surface", "#2b3038" if dark else "#ffffff")
+    border = _theme_color(theme, "border", "#4b5563" if dark else "#cfd5df")
+    selection = _theme_color(theme, "selection", "#1d4ed8" if dark else "#3399ff")
+    selection_text = _theme_color(theme, "selection_text", _theme_contrast_text(selection))
+    hover = _theme_color(theme, "control_hover", _theme_adjust(surface, 118 if dark else 96))
+    pressed = _theme_color(theme, "control_pressed", _theme_adjust(surface, 132 if dark else 88))
+    base = f"""
+        QDialog {{
+            background: {bg};
+            color: {fg};
+        }}
+        QLabel, QPushButton {{
+            color: {fg};
+            font-size: 13px;
+        }}
+        QPushButton {{
+            background: {surface};
+            border: 1px solid {border};
+            border-radius: 6px;
+            padding: 6px 10px;
+        }}
+        QPushButton:hover {{
+            background: {hover};
+            border-color: {selection};
+        }}
+        QPushButton:pressed {{
+            background: {pressed};
+        }}
+        QPushButton:checked {{
+            background: {selection};
+            border-color: {selection};
+            color: {selection_text};
+        }}
+    """
     return base + "\n" + _theme_control_qss(theme)
+def _theme_control_qss(theme: str) -> str:
+    dark = _theme_is_dark(theme)
+    fg = _theme_color(theme, "fg", "#f3f4f6" if dark else "#000000")
+    surface = _theme_color(theme, "surface", "#2b3038" if dark else "#ffffff")
+    border = _theme_color(theme, "border", "#94a3b8" if dark else "#7c8aa5")
+    selection = _theme_color(theme, "selection", "#2563eb" if dark else "#3399ff")
+    hover = _theme_color(theme, "control_hover", _theme_adjust(surface, 118 if dark else 96))
+    rail = _theme_adjust(surface, 125 if dark else 92)
+    handle = _theme_adjust(selection, 128 if dark else 150)
+    return f"""
+        QCheckBox, QRadioButton {{
+            spacing: 6px;
+            color: {fg};
+        }}
+        QCheckBox::indicator,
+        QRadioButton::indicator,
+        QTableWidget::indicator,
+        QTreeWidget::indicator,
+        QListWidget::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 1px solid {border};
+            border-radius: 3px;
+            background: {surface};
+        }}
+        QCheckBox::indicator:hover,
+        QRadioButton::indicator:hover,
+        QTableWidget::indicator:hover,
+        QTreeWidget::indicator:hover,
+        QListWidget::indicator:hover {{
+            border: 1px solid {selection};
+            background: {hover};
+        }}
+        QCheckBox::indicator:checked,
+        QRadioButton::indicator:checked,
+        QTableWidget::indicator:checked,
+        QTreeWidget::indicator:checked,
+        QListWidget::indicator:checked {{
+            border: 1px solid {selection};
+            background: {selection};
+        }}
+        QCheckBox::indicator:checked:hover,
+        QRadioButton::indicator:checked:hover,
+        QTableWidget::indicator:checked:hover,
+        QListWidget::indicator:checked:hover {{
+            border: 1px solid {handle};
+            background: {handle};
+        }}
+        QSlider::groove:horizontal {{
+            height: 8px;
+            background: {rail};
+            border-radius: 4px;
+        }}
+        QSlider::sub-page:horizontal {{
+            background: {selection};
+            border-radius: 4px;
+        }}
+        QSlider::add-page:horizontal {{
+            background: {rail};
+            border-radius: 4px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {handle};
+            width: 18px;
+            margin: -5px 0;
+            border-radius: 9px;
+            border: 1px solid {selection};
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {selection};
+        }}
+    """
 def _help_theme_values(theme: str) -> Dict[str, str]:
-    if theme == "dark":
-        return {
-            "html_bg": "#1f232a",
-            "html_fg": "#f3f4f6",
-            "card_bg": "#2b3038",
-            "card_border": "#4b5563",
-            "accent": "#60a5fa",
-            "muted": "#cbd5e1",
-            "badge_bg": "#1d4ed8",
-            "badge_fg": "#ffffff",
-            "warn_bg": "#3b2b00",
-            "warn_border": "#f59e0b",
-            "ok_bg": "#0f2d1f",
-            "ok_border": "#34d399",
-            "code_bg": "#20242b",
-            "nav_bg": "#2b3038",
-            "nav_border": "#4b5563",
-            "nav_hover": "#374151",
-            "nav_selected_bg": "#1d4ed8",
-            "nav_selected_border": "#60a5fa",
-            "button_bg": "#2b3038",
-            "button_hover": "#343a44",
-            "button_border": "#4b5563",
-            "dialog_bg": "#1f232a",
-            "browser_bg": "#2b3038",
-            "browser_border": "#4b5563",
-        }
+    dark = _theme_is_dark(theme)
+    fg = _theme_color(theme, "fg", "#f3f4f6" if dark else "#1f2937")
+    bg = _theme_color(theme, "bg", "#1f232a" if dark else "#f6f7fb")
+    surface = _theme_color(theme, "surface", "#2b3038" if dark else "#ffffff")
+    border = _theme_color(theme, "border", "#4b5563" if dark else "#e3e7ef")
+    accent = _theme_color(theme, "selection", "#60a5fa" if dark else "#1d4ed8")
     return {
-        "html_bg": "#f6f7fb",
-        "html_fg": "#1f2937",
-        "card_bg": "#ffffff",
-        "card_border": "#e3e7ef",
-        "accent": "#1d4ed8",
-        "muted": "#6b7280",
-        "badge_bg": "#dbeafe",
-        "badge_fg": "#1d4ed8",
-        "warn_bg": "#fff7e6",
+        "html_bg": bg,
+        "html_fg": fg,
+        "card_bg": surface,
+        "card_border": border,
+        "accent": accent,
+        "muted": _theme_adjust(fg, 76 if dark else 138),
+        "badge_bg": accent,
+        "badge_fg": _theme_contrast_text(accent),
+        "warn_bg": "#3b2b00" if dark else "#fff7e6",
         "warn_border": "#f59e0b",
-        "ok_bg": "#eefbf3",
+        "ok_bg": "#0f2d1f" if dark else "#eefbf3",
         "ok_border": "#34d399",
-        "code_bg": "#f3f6fb",
-        "nav_bg": "#ffffff",
-        "nav_border": "#d9dce3",
-        "nav_hover": "#f3f6fb",
-        "nav_selected_bg": "#dbeafe",
-        "nav_selected_border": "#93c5fd",
-        "button_bg": "#ffffff",
-        "button_hover": "#f0f4ff",
-        "button_border": "#cfd5df",
-        "dialog_bg": "#f6f7fb",
-        "browser_bg": "#ffffff",
-        "browser_border": "#d9dce3",
+        "code_bg": _theme_color(theme, "control_bg", surface),
+        "nav_bg": surface,
+        "nav_border": border,
+        "nav_hover": _theme_color(theme, "control_hover", _theme_adjust(surface, 118 if dark else 96)),
+        "nav_selected_bg": accent,
+        "nav_selected_border": _theme_adjust(accent, 126 if dark else 82),
+        "button_bg": _theme_color(theme, "control_bg", surface),
+        "button_hover": _theme_color(theme, "control_hover", _theme_adjust(surface, 118 if dark else 96)),
+        "button_border": border,
+        "dialog_bg": bg,
+        "browser_bg": surface,
+        "browser_border": border,
     }
 def _help_dialog_qss(theme: str) -> str:
     colors = _help_theme_values(theme)
-    selected_fg = "#ffffff" if theme == "dark" else "#1e3a8a"
+    selected_fg = _theme_color(theme, "selection_text", _theme_contrast_text(colors["nav_selected_bg"]))
     return f"""
         QDialog {{
             background: {colors["dialog_bg"]};
@@ -464,5 +466,7 @@ __all__ = [
     '_help_theme_values',
     '_image_edit_dialog_qss',
     '_theme_app_qss',
+    '_theme_control_qss',
+    '_theme_is_dark',
 ]
 register_globals('shared', globals(), __all__)

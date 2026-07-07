@@ -169,18 +169,49 @@ def _bk_lm_behavior_is_json_debris(text: str) -> bool:
         or '"lines"' in low
         or ('"text"' in low and ("{" in t or "}" in t))
     )
+def _bk_lm_behavior_is_short_valid_text(text: str) -> bool:
+    t = _clean_ocr_text(text or "")
+    if not t or "\n" in t or _bk_lm_behavior_is_json_debris(t):
+        return False
+    return bool(
+        re.fullmatch(r"\d{1,4}\.?", t)
+        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\s*\.?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[IVXLCDM]{1,8}\.?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß]\.?", t)
+    )
+
+
 def _bk_lm_behavior_candidate_visible_text(worker, candidate: str) -> str:
     cand = _clean_ocr_text(candidate or "")
     if not cand or "\n" in cand:
         return ""
     if _bk_lm_behavior_is_json_debris(cand):
         return ""
+    if _bk_lm_behavior_is_short_valid_text(cand):
+        return cand
     try:
         if _bk_fix45_is_bad_candidate(worker, cand):
             return ""
     except Exception:
         pass
     return cand
+
+def _bk_lm_behavior_is_placeholder_source_text(text: str) -> bool:
+    t = _clean_ocr_text(text or "")
+    if not t:
+        return True
+    low = t.casefold().strip()
+    low_flat = re.sub(r"[\s_:\-.,;]+", " ", low).strip()
+    compact = re.sub(r"[\s_:\-.,;]+", "", low)
+    if any(word in low_flat for word in ("random", "zufall", "dummy", "platzhalter", "placeholder", "lorem ipsum")):
+        return True
+    if compact in {"test", "text", "ocr", "box", "bbox", "overlay", "zeile", "line", "leer", "empty", "abc", "xyz", "xxx", "asdf", "qwertz", "qwerty"}:
+        return True
+    if re.fullmatch(r"(?:test|text|ocr|box|bbox|overlay|zeile|line|dummy|platzhalter|placeholder)\d*", compact):
+        return True
+    if len(compact) >= 3 and len(set(compact)) == 1:
+        return True
+    return False
 def _bk_lm_behavior_request_overlay_box_revision(self, rv, page_context_lines: List[str], local_pos: int, total: int) -> str:
     behavior = _bk_lm_behavior_for_worker(self)
     kraken_text = _bk_lm_behavior_filter_text(self, getattr(rv, "text", "") or "")
@@ -325,6 +356,8 @@ def _bk_lm_behavior_request_source_revision(worker, kraken_text: str, lm_text: s
     pt = _clean_ocr_text(page_text or '')
     if not kt:
         return lt or pt
+    if _bk_lm_behavior_is_placeholder_source_text(kt) and lt:
+        return lt
     if not lt:
         return kt
     system_prompt = (
@@ -372,6 +405,8 @@ def _bk_lm_behavior_sanity_merge_line(worker, kraken_text: str, lm_box_text: str
     mode = _bk_lm_behavior_revision_mode(behavior)
     lm_visible = _bk_lm_behavior_candidate_visible_text(worker, lt)
     page_visible = _bk_lm_behavior_candidate_visible_text(worker, pt)
+    if _bk_lm_behavior_is_placeholder_source_text(kt) and (lm_visible or page_visible):
+        return lm_visible or page_visible or kt
     if mode == "lm_first":
         return lm_visible or page_visible or kt
     if mode == "kraken_first":
@@ -394,6 +429,8 @@ __all__ = [
     '_bk_lm_behavior_for_worker',
     '_bk_lm_behavior_get_page_context',
     '_bk_lm_behavior_is_json_debris',
+    '_bk_lm_behavior_is_placeholder_source_text',
+    '_bk_lm_behavior_is_short_valid_text',
     '_bk_lm_behavior_parse_single_line_response',
     '_bk_lm_behavior_post_single_line',
     '_bk_lm_behavior_queue_init',

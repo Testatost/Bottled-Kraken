@@ -139,6 +139,8 @@ class AIRevisionRequestsMixin:
     ) -> str:
         system_prompt = self._tr("ai_prompt_single_system")
         user_prompt = self._tr("ai_prompt_single_user", idx)
+        if current_text and self._looks_like_manual_placeholder(current_text):
+            user_prompt += "\n\nHinweis: Der bisherige Zeilentext ist nur manuell erzeugter Platzhalter-/Random-Text. Ignoriere ihn vollständig und lies ausschließlich den Bildausschnitt."
         payload = {
             "model": self.lm_model,
             "messages": [
@@ -241,12 +243,19 @@ class AIRevisionRequestsMixin:
         if isinstance(obj, dict):
             txt = _force_text(obj.get("text", "")).strip()
             if txt:
+                if self._looks_like_manual_placeholder(_force_text(kraken_text)) and self._is_usable_image_line_result(box_text) and self._looks_like_manual_placeholder(txt):
+                    return _force_text(box_text).strip()
                 return txt
         lines = _extract_text_lines(content)
         if lines:
-            return lines[0].strip()
+            txt = lines[0].strip()
+            if self._looks_like_manual_placeholder(_force_text(kraken_text)) and self._is_usable_image_line_result(box_text) and self._looks_like_manual_placeholder(txt):
+                return _force_text(box_text).strip()
+            return txt
         if _force_text(box_text).strip():
             return _force_text(box_text).strip()
+        if self._looks_like_manual_placeholder(_force_text(kraken_text)):
+            return _force_text(page_text).strip()
         if _force_text(kraken_text).strip():
             return _force_text(kraken_text).strip()
         return _force_text(page_text).strip()

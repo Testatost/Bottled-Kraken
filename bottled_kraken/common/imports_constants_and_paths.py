@@ -163,24 +163,109 @@ QUEUE_COL_NUM = 0
 QUEUE_COL_CHECK = 1
 QUEUE_COL_FILE = 2
 QUEUE_COL_STATUS = 3
-THEMES = {
-    "bright": {
-        "bg": "#f0f0f0",
-        "fg": "#000000",
-        "canvas_bg": "#f2f2f2",
-        "table_base": QColor(240, 240, 240),
-        "toolbar_text": "#000000",
-        "toolbar_border": "#000000",
-    },
-    "dark": {
-        "bg": "#2b2b2b",
-        "fg": "#ffffff",
-        "canvas_bg": "#1e1e1e",
-        "table_base": QColor(43, 43, 43),
-        "toolbar_text": "#ffffff",
-        "toolbar_border": "#ffffff",
+def _theme_entry(
+        *,
+        name: str,
+        bg: str,
+        fg: str,
+        surface: str,
+        canvas_bg: str,
+        selection: str,
+        overlay_frame: str,
+        overlay_split: str,
+        border: str | None = None,
+        control_bg: str | None = None,
+        control_hover: str | None = None,
+        control_pressed: str | None = None,
+        table_alt: str | None = None,
+        selection_text: str | None = None,
+        dark: bool | None = None,
+):
+    base_color = QColor(surface)
+    bg_color = QColor(bg)
+    is_dark = bool(dark) if dark is not None else bg_color.lightness() < 128
+    border_color = border or (QColor(surface).lighter(150).name() if is_dark else QColor(surface).darker(130).name())
+    hover = control_hover or (QColor(control_bg or surface).lighter(118).name() if is_dark else QColor(control_bg or surface).darker(104).name())
+    pressed = control_pressed or (QColor(control_bg or surface).lighter(132).name() if is_dark else QColor(control_bg or surface).darker(112).name())
+    alt = table_alt or (base_color.lighter(112).name() if is_dark else base_color.darker(103).name())
+    sel_text = selection_text
+    if not sel_text:
+        sel_text = "#000000" if QColor(selection).lightness() > 165 else "#ffffff"
+    return {
+        "name": name,
+        "dark": is_dark,
+        "bg": bg,
+        "fg": fg,
+        "surface": surface,
+        "canvas_bg": canvas_bg,
+        "table_base": base_color,
+        "table_alt": alt,
+        "control_bg": control_bg or surface,
+        "control_hover": hover,
+        "control_pressed": pressed,
+        "border": border_color,
+        "selection": selection,
+        "selection_text": sel_text,
+        "toolbar_text": fg,
+        "toolbar_border": border_color,
+        "overlay_frame": overlay_frame,
+        "overlay_selected": selection,
+        "overlay_split": overlay_split,
+        "overlay_fill_alpha": 34,
+        "overlay_selected_alpha": 64,
     }
+THEMES = {
+    "bright": _theme_entry(
+        name="Hell",
+        bg="#f0f0f0",
+        fg="#000000",
+        surface="#ffffff",
+        canvas_bg="#f2f2f2",
+        selection="#3399ff",
+        overlay_frame="#d00000",
+        overlay_split="#ffd60a",
+        border="#b8b8b8",
+        control_bg="#f7f7f7",
+        control_hover="#ececec",
+        control_pressed="#dddddd",
+        table_alt="#f3f6fb",
+        dark=False,
+    ),
+    "dark": _theme_entry(
+        name="Dunkel",
+        bg="#2b2b2b",
+        fg="#ffffff",
+        surface="#2b3038",
+        canvas_bg="#1e1e1e",
+        selection="#2563eb",
+        overlay_frame="#ff3b30",
+        overlay_split="#ffd60a",
+        border="#4b5563",
+        control_bg="#2b3038",
+        control_hover="#343a44",
+        control_pressed="#3f4652",
+        table_alt="#27303b",
+        dark=True,
+    ),
+    "original": _theme_entry(name="Original", bg="#f0f0f0", fg="#000000", surface="#ffffff", canvas_bg="#f2f2f2", selection="#3399ff", overlay_frame="#d00000", overlay_split="#ffd60a", border="#b8b8b8", control_bg="#f7f7f7", dark=False),
+    "light": _theme_entry(name="Light", bg="#f7f4ed", fg="#1f2933", surface="#fffaf0", canvas_bg="#fbf7ee", selection="#c49a6c", overlay_frame="#7c4f2c", overlay_split="#d08b5b", border="#d9c8aa", dark=False),
+    "midnight": _theme_entry(name="Midnight", bg="#0b1020", fg="#dbeafe", surface="#111827", canvas_bg="#050816", selection="#60a5fa", overlay_frame="#ff5757", overlay_split="#f59e0b", border="#334155", dark=True),
+    "paper": _theme_entry(name="Paper", bg="#f8f3df", fg="#262626", surface="#fff8dc", canvas_bg="#f7efd4", selection="#b59b4a", overlay_frame="#7a5c16", overlay_split="#a16207", border="#d6c896", dark=False),
+    "cyberpunk": _theme_entry(name="Cyberpunk", bg="#070712", fg="#e0fbff", surface="#101022", canvas_bg="#050510", selection="#00e5ff", overlay_frame="#d946ef", overlay_split="#facc15", border="#26264a", dark=True),
+    "retrowave": _theme_entry(name="Retrowave", bg="#190b2d", fg="#fff1f8", surface="#24113f", canvas_bg="#110720", selection="#ff4d8d", overlay_frame="#ff2d55", overlay_split="#00d4ff", border="#5b2c83", dark=True),
+    "forest": _theme_entry(name="Forest", bg="#102017", fg="#e7f5e8", surface="#1d3325", canvas_bg="#0c1a12", selection="#7cc47f", overlay_frame="#9bdc9c", overlay_split="#d6a84f", border="#335c40", dark=True),
+    "ocean": _theme_entry(name="Ocean", bg="#071b2c", fg="#e0f2fe", surface="#0f2a44", canvas_bg="#061525", selection="#38bdf8", overlay_frame="#67e8f9", overlay_split="#f59e0b", border="#235277", dark=True),
+    "sakura": _theme_entry(name="Sakura", bg="#fdf2f8", fg="#3b2233", surface="#fff7fb", canvas_bg="#fff1f6", selection="#f9a8d4", overlay_frame="#e879a6", overlay_split="#a78bfa", border="#f3c6d9", selection_text="#3b2233", dark=False),
+    "copper": _theme_entry(name="Copper", bg="#211814", fg="#ffe8d6", surface="#35231c", canvas_bg="#180f0c", selection="#f4b183", overlay_frame="#e27d60", overlay_split="#f7c56f", border="#6b4636", dark=True),
+    "terminal": _theme_entry(name="Terminal", bg="#000000", fg="#1cff68", surface="#050805", canvas_bg="#000000", selection="#00ff55", overlay_frame="#00ff55", overlay_split="#eaff00", border="#0a7f32", selection_text="#001a08", dark=True),
+    "organs": _theme_entry(name="Organs", bg="#150608", fg="#ffe4e6", surface="#250b10", canvas_bg="#100305", selection="#f4f1de", overlay_frame="#be3144", overlay_split="#f59e0b", border="#5a1721", dark=True),
+    "lavender": _theme_entry(name="Lavender", bg="#f3efff", fg="#2f2358", surface="#faf8ff", canvas_bg="#f0eafd", selection="#8b5cf6", overlay_frame="#7c3aed", overlay_split="#ec4899", border="#d6c9ff", dark=False),
+    "gpt": _theme_entry(name="GPT", bg="#101513", fg="#ececec", surface="#1f2723", canvas_bg="#0b0f0e", selection="#10a37f", overlay_frame="#d1d5db", overlay_split="#fbbf24", border="#3f4f48", dark=True),
+    "claude": _theme_entry(name="Claude", bg="#f7efe7", fg="#2c221c", surface="#fffaf3", canvas_bg="#f5eadf", selection="#d97745", overlay_frame="#cc785c", overlay_split="#4b5563", border="#dcc7b5", dark=False),
+    "cute": _theme_entry(name="Cute", bg="#fff1f5", fg="#4a1d2f", surface="#fff7fb", canvas_bg="#ffeaf2", selection="#fb7185", overlay_frame="#ec4899", overlay_split="#facc15", border="#fecdd3", dark=False),
+    "custom": _theme_entry(name="Benutzerdefiniert", bg="#101010", fg="#00ff66", surface="#050805", canvas_bg="#000000", selection="#00ff66", overlay_frame="#00ff66", overlay_split="#ffff00", border="#0a7f32", selection_text="#001a08", dark=True),
 }
+
 ZENODO_URL = "https://zenodo.org/communities/ocr_models/records?q=&l=list&p=1&s=10&sort=mostdownloaded"
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 SUPPORTED_PDF_EXTS = {".pdf"}
