@@ -1,34 +1,47 @@
-# Bottled Kraken v3.3 Windows runtime dependencies
-# Recommended Python: >=3.10,<3.14
+# Bottled Kraken v3.4 Windows 10/11 runtime dependencies
+# Target Python: Python 3.13 x64; Python 3.12 x64 remains accepted by the build script.
 #
-# This requirements file installs the CPU baseline for Windows 10/11.
-# Optional NVIDIA CUDA backends are installed separately from inside Bottled Kraken.
-# AMD ROCm backend installation is currently intended for Linux.
+# Release builds use requirements-lock-windows.txt for reproducibility. The build
+# script installs kraken==7.0.3 separately with --no-deps because Kraken's CoreML
+# dependency is not part of the Windows OCR target.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # -------------------------------------------------
-# Core OCR / HTR
+# Core OCR / HTR runtime used by kraken
 # -------------------------------------------------
-kraken==7.0.2
-
-# Kraken 7.0.2 supports torch >=2.4.0, <=2.10.
-# Use the official CPU wheels for the standard Bottled Kraken release.
 torch==2.10.0+cpu
 torchvision==0.25.0+cpu
-
-# Kraken runtime dependencies that may be imported directly.
+jsonschema
+lxml
+requests
+click>=8.1,<8.3
+numpy
+Pillow>=9.2.0
+regex
+scipy~=1.15.3
+protobuf>=3.0.0
+jinja2~=3.1.6
+scikit-learn~=1.7.2
+scikit-image~=0.25.2
+shapely~=2.1.2
 pyarrow
-coremltools
+htrmopo>=0.5,~=0.5
+lightning==2.6.1
+torchmetrics>=1.1.0
+threadpoolctl~=3.6.0
+platformdirs
+rich<14.1.0
+safetensors~=0.7.0
+iso639-lang
+packaging
 
 # -------------------------------------------------
 # GUI / image / document handling
 # -------------------------------------------------
 PySide6
-Pillow
 PyMuPDF
 reportlab
-numpy
 
 # -------------------------------------------------
 # Audio input / microphone support
@@ -43,7 +56,6 @@ faster-whisper
 ctranslate2
 transformers
 accelerate
-safetensors
 tokenizers
 tiktoken
 
@@ -51,4 +63,6 @@ tiktoken
 # DOCX / XML export support
 # -------------------------------------------------
 python-docx
-lxml
+
+setuptools<81
+backports.tarfile

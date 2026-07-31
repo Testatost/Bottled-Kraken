@@ -1,5 +1,8 @@
 from bottled_kraken.common import _normalize_ai_script_mode
 from bottled_kraken._workers.ai_revision_worker import AIRevisionWorker
+from bottled_kraken.cancellation import operation_was_cancelled
+from bottled_kraken.runtime_logging import get_logger
+
 from bottled_kraken.common import (
     AI_SCRIPT_PRINT,
     Any,
@@ -132,8 +135,12 @@ class AIBatchRevisionWorker(QThread):
                 self.file_finished.emit(item.path, revised_lines, i, total)
             except Exception as e:
                 msg = str(e)
+                if not operation_was_cancelled(worker=self, message=msg):
+                    get_logger("workers.ai_revision").exception(
+                        "AI batch revision failed for %s", item.path
+                    )
                 self.file_failed.emit(item.path, msg, i, total)
-                if "abgebrochen" in msg.lower():
+                if self.isInterruptionRequested() or self._cancel_requested:
                     break
             self.progress_changed.emit(int((i / total) * 100))
         self.status_changed.emit(self._tr("status_ai_batch_done"))

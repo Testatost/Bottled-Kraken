@@ -223,32 +223,6 @@ def _ptr_followup_init_v3(self, parent=None):
     self.ai_neo_btn.clicked.connect(lambda: self._choose(self.CHOICE_AI_NEO4J))
     self.ai_both_btn.clicked.connect(lambda: self._choose(self.CHOICE_AI_BOTH))
     self.cancel_btn.clicked.connect(self.reject)
-def _ptr_install_feature_actions_v3(self):
-    if getattr(self, "_ptr_feature_actions_installed", False):
-        return
-    self._ptr_feature_actions_installed = True
-    self.act_ptr_multi_ocr = QAction(_ptr_ui_tr(self, "ptr_multi_ocr_btn"), self)
-    self.act_ptr_multi_ocr.triggered.connect(self.ptr_start_multi_ocr)
-    self.act_ptr_ai_tools = QAction(_ptr_ui_tr(self, "ptr_ai_tools_title"), self)
-    self.act_ptr_ai_tools.triggered.connect(self.ptr_open_ai_tools_for_current_task)
-    self.act_ptr_multi_reopen = QAction(_ptr_ui_tr(self, "ptr_ai_reopen"), self)
-    self.act_ptr_multi_reopen.triggered.connect(self.ptr_reopen_multi_followup)
-    if hasattr(self, "toolbar") and self.toolbar is not None:
-        try:
-            self.toolbar.removeAction(self.act_ptr_multi_ocr)
-        except Exception:
-            pass
-        try:
-            self.toolbar.removeAction(self.act_ptr_ai_tools)
-        except Exception:
-            pass
-    if hasattr(self, "models_menu") and self.models_menu is not None:
-        self.models_menu.addSeparator()
-        self.models_menu.addAction(self.act_ptr_multi_ocr)
-        self.models_menu.addAction(self.act_ptr_multi_reopen)
-        if hasattr(self, "_place_kraken_auto_revision_action_at_bottom"):
-            self._place_kraken_auto_revision_action_at_bottom()
-    self.ptr_update_feature_texts()
 def _ptr_ai_dialog_save_merged_v3(self):
     text = self.merged_edit.toPlainText().strip()
     if not text:
@@ -293,86 +267,17 @@ def _ptr_ai_dialog_save_result_v3(self):
             path += ".txt"
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(str(data))
-def _ptr_apply_local_merge_to_task_v3(self, path: str):
-    variants = list((getattr(self, "_ptr_multi_ocr_variants_by_path", {}) or {}).get(path, []))
-    if not variants:
-        QMessageBox.information(self, _ptr_ui_tr(self, "ptr_multi_ocr_title"), _ptr_ui_tr(self, "ptr_multi_no_variants"))
-        return
-    merged_text = _ptr_merge_ocr_texts_local(variants)
-    if not merged_text.strip():
-        QMessageBox.information(self, _ptr_ui_tr(self, "ptr_multi_ocr_title"), _ptr_ui_tr(self, "ptr_multi_local_merge_empty"))
-        return
-    self._ptr_ai_merged_by_path[path] = merged_text
-    task = _ptr_find_task(self, path)
-    if task and task.results:
-        text, kr_records, im, recs = task.results
-        merged_lines = [ln for ln in merged_text.splitlines()]
-        if merged_lines and len(merged_lines) == len(recs):
-            new_recs = [RecordView(i, merged_lines[i], recs[i].bbox) for i in range(len(merged_lines))]
-            task.results = ("\n".join(merged_lines).strip(), kr_records, im, new_recs)
-            if self._current_task() and self._current_task().path == path:
-                self.load_results(path)
-        self._update_queue_row(path)
-    self.status_bar.showMessage(_ptr_ui_tr(self, "ptr_multi_local_merge_done", os.path.basename(path)), 3000)
-def _ptr_open_ai_tools_v3(self, target_path: Optional[str] = None, auto_mode: Optional[str] = None):
-    if not target_path:
-        task = self._current_task()
-        if not task:
-            QMessageBox.warning(self, self._tr("warn_title"), _ptr_ui_tr(self, "ptr_select_file_first"))
-            return
-        target_path = task.path
-    task = _ptr_find_task(self, target_path)
-    if not task:
-        QMessageBox.warning(self, self._tr("warn_title"), _ptr_ui_tr(self, "ptr_selected_file_missing"))
-        return
-    texts = list(self._ptr_multi_ocr_variants_by_path.get(target_path, []))
-    if not texts and task.results:
-        texts = [task.results[0]] if task.results[0] else []
-    if not texts:
-        QMessageBox.warning(self, self._tr("warn_title"), _ptr_ui_tr(self, "ptr_no_ocr_texts"))
-        return
-    dlg = PtrAIToolsDialog(self, config=_ptr_feature_config_from_window(self))
-    dlg.setAttribute(Qt.WA_DeleteOnClose, True)
-    dlg.set_ocr_inputs(texts)
-    dlg.set_existing_merged_text(self._ptr_ai_merged_by_path.get(target_path, ""))
-    def _remember():
-        try:
-            _ptr_save_feature_config_to_window(self, dlg.get_config())
-        except Exception:
-            pass
-    dlg.finished.connect(_remember)
-    dlg.merge_completed.connect(lambda text, p=target_path: self._ptr_store_ai_merge(p, text))
-    dlg.postgres_completed.connect(lambda data, p=target_path: self._ptr_store_ai_postgres(p, data))
-    dlg.neo4j_completed.connect(lambda data, p=target_path: self._ptr_store_ai_neo4j(p, data))
-    dlg.pipeline_completed.connect(lambda merged, pg, neo, p=target_path: self._ptr_store_ai_pipeline(p, merged, pg, neo))
-    try:
-        dlg.showMaximized()
-    except Exception:
-        dlg.show()
-    self._ptr_last_ai_dialog = dlg
-    if auto_mode:
-        dlg.auto_run(auto_mode)
-def _ptr_store_ai_merge_v3(self, path: str, merged_text: str):
-    merged_text = (merged_text or "").strip()
-    if not merged_text:
-        return
-    self._ptr_ai_merged_by_path[path] = merged_text
-    self.status_bar.showMessage(_ptr_ui_tr(self, "ptr_ai_merge_done", os.path.basename(path)), 3000)
 __all__ = [
     '_ptr_ai_build_postgres_json',
     '_ptr_ai_build_postgres_json_local',
     '_ptr_ai_build_postgres_json_v3',
     '_ptr_ai_dialog_save_merged_v3',
     '_ptr_ai_dialog_save_result_v3',
-    '_ptr_apply_local_merge_to_task_v3',
     '_ptr_extract_org_candidates_from_line',
     '_ptr_extract_place_candidates',
     '_ptr_extract_street_candidates_from_line',
     '_ptr_extract_year_candidates',
     '_ptr_followup_init_v3',
-    '_ptr_install_feature_actions_v3',
     '_ptr_multi_dialog_init_v3',
-    '_ptr_open_ai_tools_v3',
-    '_ptr_store_ai_merge_v3',
 ]
 register_globals('ptr', globals(), __all__)

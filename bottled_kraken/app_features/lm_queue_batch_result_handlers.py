@@ -155,18 +155,18 @@ def _bk_lm_on_queue_batch_file_started(self, path: str, current: int, total: int
                 task.lm_locked_bboxes = []
         task.status = STATUS_AI_PROCESSING
         self._update_queue_row(path)
-    self.status_bar.showMessage(f"LM-Batch {current}/{total}: {os.path.basename(path)}")
+    self.status_bar.showMessage(self._tr("msg_lm_batch_progress", current, total, os.path.basename(path)))
 def _bk_lm_on_queue_batch_file_done(self, path: str, mode: str, target_rows, revised_lines, current: int, total: int):
     _bk_lm_apply_queue_batch_result(self, path, mode, list(target_rows or []), list(revised_lines or []))
-    self._log(f"LM-Batch {current}/{total} abgeschlossen: {os.path.basename(path)}")
+    self._log(self._tr("log_lm_batch_file_done", current, total, os.path.basename(path)))
 def _bk_lm_on_queue_batch_file_failed(self, path: str, msg: str, current: int, total: int):
     task = next((i for i in getattr(self, "queue_items", []) if i.path == path), None)
     if task:
         task.status = STATUS_ERROR
         self._update_queue_row(path)
-    self._log(f"LM-Batch {current}/{total} Fehler: {os.path.basename(path)} -> {msg}")
+    self._log(self._tr("log_lm_batch_file_error", current, total, os.path.basename(path), msg))
 def _bk_lm_on_queue_batch_file_skipped(self, path: str, reason: str, current: int, total: int):
-    self._log(f"LM-Batch {current}/{total} übersprungen: {os.path.basename(path)} -> {reason}")
+    self._log(self._tr("log_lm_batch_file_skipped", current, total, os.path.basename(path), reason))
 def _bk_lm_on_queue_batch_finished(self):
     finished_mode = getattr(self, "_bk_lm_queue_batch_mode", "")
     self.act_ai_revise.setEnabled(True)
@@ -187,7 +187,7 @@ def _bk_lm_on_queue_batch_finished(self):
             pass
     self._bk_lm_queue_batch_worker = None
     self._bk_lm_queue_batch_mode = ""
-    self.status_bar.showMessage("LM-Batch abgeschlossen.")
+    self.status_bar.showMessage(self._tr("msg_lm_batch_done"))
     if finished_mode == _BK_LM_BATCH_MODE_LM_OCR:
         try:
             QMessageBox.information(

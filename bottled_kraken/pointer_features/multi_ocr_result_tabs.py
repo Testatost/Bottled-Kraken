@@ -13,12 +13,6 @@ except Exception:
     def configure_ocr_variant_tab_buttons(window):
         return None
 _PTR_ADD_TAB_TEXT = "+"
-def _ptr_model_display_name(path: str) -> str:
-    try:
-        base = os.path.basename(str(path or ""))
-        return base or str(path or "")
-    except Exception:
-        return str(path or "")
 def _ptr_clone_record_views(record_views):
     cloned = []
     for i, rv in enumerate(record_views or []):
@@ -30,8 +24,6 @@ def _ptr_clone_record_views(record_views):
             text = str(rv or "")
         cloned.append(RecordView(i, text, bbox))
     return cloned
-def _ptr_recs_from_text(text: str):
-    return [RecordView(i, line, None) for i, line in enumerate(str(text or "").splitlines())]
 def _ptr_variant_label(window, index: int) -> str:
     try:
         return window._tr("multi_ocr_variant_tab", int(index) + 1)
@@ -45,12 +37,6 @@ def _ptr_variant_tooltip(window, index: int, model_name: str = "") -> str:
         except Exception:
             return f"{label}: {model_name}"
     return label
-def _ptr_entry_to_results(entry, image_obj=None):
-    recs = _ptr_clone_record_views(entry.get("record_views", []) or [])
-    if not recs:
-        recs = _ptr_recs_from_text(entry.get("text", ""))
-    text = "\n".join(rv.text for rv in recs).strip()
-    return text, entry.get("kr_sorted", []) or [], image_obj, recs
 def _ptr_entry_from_task(task, index: int = 0, model_path: str = "", model_name: str = ""):
     text = ""
     kr_sorted = []
@@ -75,18 +61,6 @@ def _ptr_entry_from_task(task, index: int = 0, model_path: str = "", model_name:
         "undo_stack": list(getattr(task, "undo_stack", []) or []) if task is not None else [],
         "redo_stack": list(getattr(task, "redo_stack", []) or []) if task is not None else [],
         "edited": bool(getattr(task, "edited", False)) if task is not None else False,
-    }
-def _ptr_blank_entry(index: int = 0):
-    return {
-        "run_index": int(index) + 1,
-        "model_path": "",
-        "model_name": "",
-        "text": "",
-        "kr_sorted": [],
-        "record_views": [],
-        "undo_stack": [],
-        "redo_stack": [],
-        "edited": False,
     }
 def _ptr_variant_entries_from_raw(raw_variants):
     entries = []
@@ -132,11 +106,6 @@ def _ptr_task_image_object(task):
         except Exception:
             pass
     return None
-def _ptr_current_path(self):
-    task = self._current_task() if hasattr(self, "_current_task") else None
-    if task is not None:
-        return str(getattr(task, "path", "") or "")
-    return str(getattr(self, "_loaded_preview_path", "") or "")
 def _ptr_get_task(self, path: str):
     try:
         return _ptr_find_task(self, path)
@@ -332,35 +301,16 @@ def _ptr_add_variant(self, path: str):
     _ptr_refresh_tabs(self, path)
     _ptr_apply_variant(self, path, len(entries) - 1, save_current=False)
     return True
-def _ptr_on_tab_changed(self, index: int):
-    if getattr(self, "_ptr_updating_variant_tabs", False):
-        return
-    if getattr(self, "_ocr_variant_plus_handling", False):
-        return
-    path = _ptr_current_path(self)
-    if not path or index < 0:
-        return
-    entries = _ptr_entries_for_path(self, path, create=True)
-    if index >= len(entries):
-        _ptr_add_variant(self, path)
-        return
-    _ptr_apply_variant(self, path, index, save_current=True)
 __all__ = [
     '_PTR_ADD_TAB_TEXT',
     '_ptr_add_variant',
     '_ptr_apply_variant',
-    '_ptr_blank_entry',
     '_ptr_clone_record_views',
-    '_ptr_current_path',
     '_ptr_ensure_tabs',
     '_ptr_entries_for_path',
     '_ptr_entry_from_task',
-    '_ptr_entry_to_results',
     '_ptr_get_task',
-    '_ptr_model_display_name',
-    '_ptr_on_tab_changed',
     '_ptr_place_tabs',
-    '_ptr_recs_from_text',
     '_ptr_refresh_tabs',
     '_ptr_save_active_variant',
     '_ptr_task_image_object',

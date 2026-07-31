@@ -232,7 +232,10 @@ class MainWindowUiBuildMixin:
         queue_head.addWidget(self.btn_clear_queue, 0, Qt.AlignRight)
         self.btn_delete_checked_queue = QPushButton(self._tr("act_delete_checked_queue"))
         self.btn_delete_checked_queue.setToolTip(self._tr("act_delete_checked_queue_tip"))
-        self.btn_delete_checked_queue.setIcon(QIcon.fromTheme("edit-delete"))
+        self.btn_delete_checked_queue.setIcon(
+            self._auto_tinted_theme_or_standard_icon("edit-delete", QStyle.SP_TrashIcon)
+            if hasattr(self, "_auto_tinted_theme_or_standard_icon")
+            else QIcon.fromTheme("edit-delete"))
         if self.btn_delete_checked_queue.icon().isNull():
             self.btn_delete_checked_queue.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         self.btn_delete_checked_queue.clicked.connect(lambda checked=False: self.delete_selected_queue_items(reset_preview=True))

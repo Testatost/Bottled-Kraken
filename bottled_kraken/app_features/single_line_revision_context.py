@@ -1,23 +1,48 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
-from bottled_kraken.common import _ai_script_crop_profile, _clean_ocr_text, _crop_single_line_to_data_url, _extract_json_payload, _extract_text_lines, _force_text, _page_to_data_url
+from bottled_kraken.common import _ai_script_crop_profile, _clean_ocr_text, _crop_overlay_box_to_data_url_strict, _crop_single_line_to_data_url, _extract_json_payload, _extract_text_lines, _force_text, _page_to_data_url
 from bottled_kraken.workers import AIRevisionRuntimeMixin
 from bottled_kraken.common import List, RecordView, json, os, re, socket, traceback, urllib
 from bottled_kraken.workers import AIRevisionWorker
 from bottled_kraken.main_window import MainWindow
-def _bk_fix46_context_excerpt_for_line(rv, page_lines: List[str], max_chars: int = 4200) -> str:
+def _bk_fix46_context_excerpt_for_line(rv, page_lines: List[str], max_chars: int = 900) -> str:
+    """Return only nearby textual page context for one overlay box.
+
+    The full-page OCR is performed once at the start when enabled. Re-sending the
+    complete page transcript with every box request makes each line request nearly
+    as expensive as another page pass. Therefore only a small neighborhood around
+    the current line is attached to the crop request.
+    """
     lines = [str(x or '').strip() for x in (page_lines or []) if str(x or '').strip()]
     if not lines:
         return ''
-    joined = '\n'.join(lines)
-    if len(joined) <= max_chars:
-        return joined
-    needle = _clean_ocr_text(getattr(rv, 'text', '') or '')[:40]
-    pos = joined.find(needle) if needle else -1
-    if pos >= 0:
-        start = max(0, pos - max_chars // 2)
-        return joined[start:start + max_chars]
-    return joined[:max_chars]
+
+    target_idx = None
+    try:
+        raw_idx = int(getattr(rv, 'idx', -1))
+        if 0 <= raw_idx < len(lines):
+            target_idx = raw_idx
+    except Exception:
+        target_idx = None
+
+    if target_idx is None:
+        needle = _clean_ocr_text(getattr(rv, 'text', '') or '')[:48]
+        if needle:
+            needle_cf = needle.casefold()
+            for i, line in enumerate(lines):
+                if needle_cf in _clean_ocr_text(line).casefold():
+                    target_idx = i
+                    break
+
+    if target_idx is None:
+        target_idx = 0
+
+    start = max(0, target_idx - 2)
+    end = min(len(lines), target_idx + 3)
+    excerpt = '\n'.join(lines[start:end]).strip()
+    if len(excerpt) > max_chars:
+        excerpt = excerpt[:max_chars].rstrip()
+    return excerpt
 def _bk_fix46_parse_single_text(content: str) -> str:
     raw = str(content or '').strip()
     if not raw:
@@ -81,7 +106,7 @@ def _bk_fix49_is_usable_visual_text(text: str) -> bool:
         return False
     # Valid OCR snippets can be extremely short: page numbers, column numbers,
     # roman numerals, separators, or one-letter headings.
-    if re.fullmatch(r"[0-9IVXLCDMivxlcdmA-Za-zÄÖÜäöüß]{1,4}[.)]?", t):
+    if re.fullmatch(r"[0-9IVXLCDMivxlcdmA-Za-zÄÖÜäöüß]{1,4}[.,;:)]?", t):
         return True
     if len(t) <= 8 and re.search(r"[A-Za-zÀ-ÿÄÖÜäöüß0-9]", t):
         return True
@@ -108,11 +133,11 @@ def _bk_fix46_is_truncated_against(ref: str, cand: str) -> bool:
     return False
 def _bk_fix46_request_overlay_box_revision(self, rv, page_context_lines: List[str], local_pos: int, total: int) -> str:
     crop_profile = _ai_script_crop_profile(self.script_mode)
-    line_data_url = _crop_single_line_to_data_url(
+    line_data_url = _crop_overlay_box_to_data_url_strict(
         self.path,
         rv,
-        pad_x=max(18, int(crop_profile.get('single_pad_x', 18) or 18)),
-        pad_y=max(8, int(crop_profile.get('single_pad_y', 8) or 8)),
+        pad_x=max(0, int(crop_profile.get('single_pad_x', 0) or 0)),
+        pad_y=max(0, int(crop_profile.get('single_pad_y', 0) or 0)),
         extra_context_y=max(0, int(crop_profile.get('single_extra_context_y', 0) or 0)),
     )
     kraken_text = _clean_ocr_text(getattr(rv, 'text', '') or '')
@@ -130,7 +155,7 @@ def _bk_fix46_request_overlay_box_revision(self, rv, page_context_lines: List[st
         ],
         **self._build_sampling_payload(
             response_format=self._response_format_single_text(),
-            override_max_tokens=max(280, min(max(700, int(getattr(self, 'max_tokens', 1200) or 1200)), 1600)),
+            override_max_tokens=max(1, min(int(getattr(self, 'max_tokens', 1200) or 1200), 512)),
         ),
     }
     data = self._post_json(payload)
@@ -410,37 +435,53 @@ try:
 except Exception:
     pass
 def _bk_fix48_request_true_full_page_ocr_context(self):
+    # Context OCR is optional and may be requested at most once per worker.
+    # In particular, a parse/response-format failure must never trigger a second
+    # complete-page vision request before the per-overlay-box requests begin.
+    cached = getattr(self, "_bk_fix48_page_context_cache", None)
+    if isinstance(cached, list):
+        return list(cached)
+
     try:
-        self.status_changed.emit(self._tr("ai_status_fix48_mandatory_page_ocr", os.path.basename(getattr(self, "path", ""))))
+        self.status_changed.emit(
+            self._tr("ai_status_fix48_mandatory_page_ocr", os.path.basename(getattr(self, "path", "")))
+        )
         self.progress_changed.emit(1)
     except Exception:
         pass
+
+    out = []
     try:
         page_data_url = _page_to_data_url(self.path)
-        lines = []
+        # Remember the exact one allowed page image payload. A low-level request
+        # guard rejects or rewrites any later attempt to use this page image during
+        # overlay-box transcription.
+        self._bk_full_page_context_image_url = page_data_url
+        self._bk_full_page_context_request_active = True
         try:
             lines = BKFullPageLMOCRWorker._request_full_page_ocr(self, page_data_url)
-        except Exception as exc:
-            try:
-                print(f"FIX8.48 mandatory full-page LM OCR failed, falling back to line-context OCR: {exc}")
-            except Exception:
-                pass
-            all_recs = getattr(self, "_bk_fix48_all_page_recs", None) or []
-            if all_recs:
-                lines = self._request_page_ocr_with_fixed_linecount(page_data_url, all_recs)
-        out = []
+        finally:
+            self._bk_full_page_context_request_active = False
         for line in lines or []:
             txt = _clean_ocr_text(line)
             if txt and not _bk_fix41_is_json_debris_text(txt):
                 out.append(txt)
         out = _bk_fix43_resolve_ditto_marks_in_lines(out)
+    except Exception as exc:
+        if self._cancelled or self.isInterruptionRequested():
+            raise RuntimeError(self._tr("msg_ai_cancelled")) from exc
         try:
-            self.progress_changed.emit(8)
+            print(f"FIX8.48 optional full-page LM context failed; continuing directly with overlay boxes: {exc}")
         except Exception:
             pass
-        return out
+        out = []
+
+    self._bk_fix48_page_context_cache = list(out)
+    try:
+        self.progress_changed.emit(8)
     except Exception:
-        return []
+        pass
+    return list(out)
 def _bk_fix46_get_page_context(self):
     return _bk_fix48_request_true_full_page_ocr_context(self)
 try:

@@ -198,7 +198,7 @@ def _bk_db_worker_build_postgres(self) -> dict:
     rows = _bk_db_regs_from_text(getattr(self, "source_text", ""))
     if _bk_db_text_looks_like_register(getattr(self, "source_text", ""), rows):
         try:
-            self.status_changed.emit("PostgreSQL: Register-/Tabellenseite erkannt; erzeuge Datensätze direkt aus OCR-Zeilen.")
+            self.status_changed.emit(self._tr("status_local_json_generating_fallback"))
         except Exception:
             pass
         return _bk_db_postgres_from_register_rows(getattr(self, "source_text", ""), rows)
@@ -209,7 +209,7 @@ def _bk_db_worker_build_neo4j(self) -> dict:
     rows = _bk_db_regs_from_text(getattr(self, "source_text", ""))
     if _bk_db_text_looks_like_register(getattr(self, "source_text", ""), rows):
         try:
-            self.status_changed.emit("Neo4j: Register-/Tabellenseite erkannt; erzeuge Graph direkt aus OCR-Zeilen.")
+            self.status_changed.emit(self._tr("status_local_json_generating_fallback"))
         except Exception:
             pass
         return _bk_db_neo4j_from_register_rows(getattr(self, "source_text", ""), rows)
@@ -231,42 +231,6 @@ def _bk_fix37_sqlite_rows_from_current_text_db_register(text: str) -> list:
     return rows
 _bk_fix37_sqlite_rows_from_current_text = _bk_fix37_sqlite_rows_from_current_text_db_register
 _BK_DB_PREV_SQLITE_JSON_PAYLOAD = globals().get("_bk_sqlite_json_payload_from_rows")
-def _bk_sqlite_json_payload_from_rows(self, task, rows):
-    if not rows:
-        if callable(_BK_DB_PREV_SQLITE_JSON_PAYLOAD):
-            return _BK_DB_PREV_SQLITE_JSON_PAYLOAD(self, task, rows)
-    source_path = str(getattr(task, "path", "") or "")
-    title = os.path.basename(source_path)
-    persons = []
-    entries = []
-    places = []
-    years = []
-    place_seen = {}
-    year_seen = {}
-    person_places = []
-    person_years = []
-    for row in rows or []:
-        pid = str(row.get("id") or f"person_{len(persons)+1}")
-        entry_id = str(row.get("entry_id") or f"entry_{len(entries)+1}")
-        persons.append({"id": pid, "full_name": row.get("full_name", ""), "first_name": row.get("first_name", ""), "last_name": row.get("last_name", "")})
-        entries.append({"id": entry_id, "person_id": pid, "age": row.get("age", ""), "event_date": row.get("event_date", ""), "event_place": row.get("event_place", ""), "source_excerpt": row.get("source_excerpt", "")})
-        place = row.get("event_place")
-        if place:
-            pkey = str(place).lower()
-            place_id = place_seen.get(pkey) or f"place_{len(place_seen)+1:04d}_{_bk_db_reg_slug(place, 'place')}"
-            if pkey not in place_seen:
-                place_seen[pkey] = place_id
-                places.append({"id": place_id, "name": place, "type": "event_place"})
-            person_places.append({"person_id": pid, "place_id": place_id, "relation_type": "EVENT_PLACE", "source_excerpt": row.get("source_excerpt", "")})
-        year = row.get("event_year") or _bk_db_reg_year_from_date(row.get("event_date"))
-        if year:
-            ykey = str(year)
-            year_id = year_seen.get(ykey) or f"year_{ykey}"
-            if ykey not in year_seen:
-                year_seen[ykey] = year_id
-                years.append({"id": year_id, "year": int(year), "context": "event_date"})
-            person_years.append({"person_id": pid, "year_id": year_id, "relation_type": "EVENT_YEAR", "source_excerpt": row.get("source_excerpt", "")})
-    return {"schema": "bottled_kraken.sqlite_json.v2", "database_hint": "sqlite", "tables": {"documents": [{"id": 1, "source_path": source_path, "title": title}], "persons": persons, "entries": entries, "places": places, "years": years, "person_places": person_places, "person_years": person_years}}
 __all__ = [
     '_BK_DB_PREV_PG_LOCAL',
     '_BK_DB_PREV_SQLITE_JSON_PAYLOAD',
@@ -285,7 +249,6 @@ __all__ = [
     '_bk_db_worker_build_postgres',
     '_bk_fix37_sqlite_rows_from_current_text',
     '_bk_fix37_sqlite_rows_from_current_text_db_register',
-    '_bk_sqlite_json_payload_from_rows',
     '_ptr_ai_build_postgres_json_local',
     '_ptr_ai_build_postgres_json_local_db_register',
 ]

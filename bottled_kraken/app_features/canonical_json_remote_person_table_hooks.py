@@ -138,63 +138,6 @@ def _bk_ptr_dialog_collect_source_for_canonical(dialog) -> str:
     except Exception:
         result_text = ""
     return (merged or result_text or "").strip()
-def _bk_ptr_dialog_generate_remote_canonical_sync_legacy(self):
-    try:
-        source_text = _bk_ptr_dialog_collect_source_for_canonical(self)
-        if not source_text:
-            QMessageBox.warning(self, _ptr_ui_tr(self, "warn_title"), _ptr_ui_tr(self, "ptr_canonical_no_text"))
-            return False
-        cfg = self.get_config()
-        self._set_busy(True)
-        self.progress_label.setText(_ptr_ui_tr(self, "ptr_ai_running_canonical"))
-        self.progress_bar.setRange(0, 0)
-        QApplication.processEvents()
-        owner = _bk_owner_for_prompt_settings(self)
-        system_prompt, user_prompt = _bk_remote_canonical_prompt(source_text, lambda k, *a: _ptr_ui_tr(self, k, *a), owner=owner)
-        max_tokens = _bk_canonical_token_limit(owner, 12000)
-        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-        try:
-            raw = _ptr_remote_chat_completion(
-                cfg,
-                messages,
-                expect_json=True,
-                max_tokens=max_tokens,
-            )
-            content = _ptr_extract_content_from_chat_response(raw)
-        except Exception:
-            retry_messages = [
-                {"role": "system", "content": "Return JSON only. The response must be one parseable JSON object."},
-                {"role": "user", "content": user_prompt[:22000]},
-            ]
-            try:
-                raw = _ptr_remote_chat_completion(
-                    cfg,
-                    retry_messages,
-                    expect_json=False,
-                    max_tokens=max_tokens,
-                )
-                content = _ptr_extract_content_from_chat_response(raw)
-            except Exception as retry_exc:
-                raise RuntimeError(_ptr_ui_tr(self, "ptr_canonical_remote_failed", retry_exc)) from retry_exc
-        try:
-            data = _ptr_extract_json_object(content)
-            canonical = _bk_prepare_canonical_json(data, source_text)
-        except Exception as parse_exc:
-            raise RuntimeError(_ptr_ui_tr(self, "ptr_canonical_remote_invalid_json", parse_exc)) from parse_exc
-        self._bk_remote_canonical_json = canonical
-        self.result_output_edit.setPlainText(json.dumps(canonical, ensure_ascii=False, indent=2))
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        self.progress_label.setText(_ptr_ui_tr(self, "ptr_ai_canonical_ready"))
-        return True
-    except Exception as exc:
-        QMessageBox.warning(self, _ptr_ui_tr(self, "warn_title"), str(exc))
-        return False
-    finally:
-        try:
-            self._set_busy(False)
-        except Exception:
-            pass
 def _bk_ptr_dialog_show_remote_canonical_graph(self):
     try:
         canonical = getattr(self, "_bk_remote_canonical_json", None)
@@ -220,12 +163,6 @@ def _bk_ptr_dialog_show_remote_canonical_graph(self):
         QMessageBox.warning(self, _ptr_ui_tr(self, "warn_title"), str(exc))
 _BK_CANONICAL_PREV_PTR_INIT = PtrAIToolsDialog.__init__ if "PtrAIToolsDialog" in globals() else None
 _BK_CANONICAL_PREV_PTR_SET_BUSY = PtrAIToolsDialog._set_busy if "PtrAIToolsDialog" in globals() and hasattr(PtrAIToolsDialog, "_set_busy") else None
-def _bk_ptr_dialog_generate_and_show_remote_canonical_sync_legacy(self):
-    if _bk_ptr_dialog_generate_remote_canonical_sync_legacy(self):
-        try:
-            _bk_ptr_dialog_show_remote_canonical_graph(self)
-        except Exception as exc:
-            QMessageBox.warning(self, _ptr_ui_tr(self, "warn_title"), str(exc))
 
 def _bk_ptr_dialog_init_with_canonical(self, *args, **kwargs):
     if _BK_CANONICAL_PREV_PTR_INIT is not None:

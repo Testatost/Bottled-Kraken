@@ -7,6 +7,7 @@ from bottled_kraken.workers import (
     PDFRenderWorker,
 )
 from bottled_kraken.main_window import MainWindow
+from bottled_kraken.cancellation import operation_was_cancelled
 def _bk_cancel_lang_text(window, key_or_de: str, en: str | None = None, fr: str | None = None) -> str:
     try:
         lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
@@ -30,12 +31,8 @@ def _bk_cancel_done_text(window, subject: str = "action") -> str:
         "lm": "cancel_done_lm",
     }
     return _bk_cancel_lang_text(window, key_by_subject.get(subject, "cancel_done_action"))
-def _bk_is_cancel_message(msg) -> bool:
-    txt = str(msg or "").lower()
-    return any(token in txt for token in (
-        "abgebrochen", "abbruch", "cancelled", "canceled", "cancel",
-        "annulé", "annule", "annulée", "annulee",
-    ))
+def _bk_is_cancel_message(msg, worker=None) -> bool:
+    return operation_was_cancelled(worker=worker, message=msg)
 def _bk_mark_worker_cancelled(worker):
     if worker is None:
         return

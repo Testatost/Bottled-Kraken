@@ -20,7 +20,7 @@ def _bk_lm_show_token_settings_dialog(self):
             spin.setRange(64, 64000)
         spin.setSingleStep(100)
         spin.setValue(max(9000, _lm_token_limit(self, kind)) if kind == "canonical" else _lm_token_limit(self, kind))
-        spin.setSuffix(" tokens")
+        spin.setSuffix(_bk_lm_opt_text(self, "unit_tokens_suffix"))
         spins[kind] = spin
         form.addRow(_bk_lm_opt_text(self, label_key), spin)
     layout.addLayout(form)

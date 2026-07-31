@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('ptr', globals())
 def _ptr_multi_default_variant_keys():
     return ["original", "autocontrast", "contrast", "sharp", "gray_autocontrast"]
@@ -129,7 +130,7 @@ def _ptr_multi_build_selected_image_variants(im, variant_keys, job=None):
     return variants or [("original", _ptr_multi_translate_job(job, "multi_ocr_variant_original"), base.copy())]
 def _ptr_build_model_variant_run_plan(self, rec_paths, runs):
     if not rec_paths:
-        raise ValueError("No recognition models selected.")
+        raise ValueError(_ptr_multi_translate_job(self.job, "ptr_err_no_rec_models"))
     try:
         count = max(1, int(runs))
     except Exception:
@@ -410,9 +411,7 @@ def _ptr_preview_image_with_variant_tabs(self, path: str, *args, **kwargs):
     except Exception:
         pass
     return result
-_PTR_TABS_PREV_MAINWINDOW_INIT = MainWindow.__init__
 def _ptr_mainwindow_init_with_variant_tabs(self, *args, **kwargs):
-    _PTR_TABS_PREV_MAINWINDOW_INIT(self, *args, **kwargs)
     self._ptr_multi_ocr_variant_meta_by_path = getattr(self, "_ptr_multi_ocr_variant_meta_by_path", {}) or {}
     self._ptr_multi_ocr_active_index_by_path = getattr(self, "_ptr_multi_ocr_active_index_by_path", {}) or {}
     self._ptr_multi_ocr_variants_by_path = getattr(self, "_ptr_multi_ocr_variants_by_path", {}) or {}
@@ -423,16 +422,14 @@ def _ptr_mainwindow_init_with_variant_tabs(self, *args, **kwargs):
         _ptr_refresh_tabs(self, _ptr_current_path(self))
     except Exception:
         pass
-_PTR_TABS_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _ptr_retranslate_with_variant_tabs(self, *args, **kwargs):
-    _PTR_TABS_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _ptr_refresh_tabs(self, _ptr_current_path(self))
     except Exception:
         pass
 try:
-    MainWindow.__init__ = _ptr_mainwindow_init_with_variant_tabs
-    MainWindow.retranslate_ui = _ptr_retranslate_with_variant_tabs
+    register_init_delta(_ptr_mainwindow_init_with_variant_tabs)
+    register_retranslate_delta(_ptr_retranslate_with_variant_tabs)
     MainWindow.load_results = _ptr_load_results_with_variant_tabs
     MainWindow.preview_image = _ptr_preview_image_with_variant_tabs
     MainWindow._ptr_on_multi_file_done = _ptr_on_multi_file_done
@@ -446,8 +443,6 @@ except Exception:
 __all__ = [
     '_PTR_PREV_LOAD_RESULTS',
     '_PTR_PREV_PREVIEW_IMAGE',
-    '_PTR_TABS_PREV_MAINWINDOW_INIT',
-    '_PTR_TABS_PREV_RETRANSLATE',
     '_ptr_build_model_variant_run_plan',
     '_ptr_dialog_image_variant_count',
     '_ptr_dialog_image_variants_enabled',

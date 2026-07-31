@@ -55,12 +55,35 @@ class AIRevisionAnalysisMixin:
         self.max_tokens = int(max_tokens)
         self._cancelled = False
         self._active_conn = None
+        self._active_response = None
     def cancel(self):
+        """Cancel promptly, including a currently blocking LM HTTP request."""
         self._cancelled = True
-        self.requestInterruption()
+        try:
+            self.requestInterruption()
+        except Exception:
+            pass
+
+        response = self._active_response
+        self._active_response = None
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
         conn = self._active_conn
         self._active_conn = None
         if conn is not None:
+            # Closing HTTPConnection alone does not reliably wake a blocking
+            # recv()/read() on every Windows/Linux Python build. Explicitly
+            # shutting down the underlying socket makes cancellation immediate.
+            try:
+                sock = getattr(conn, "sock", None)
+                if sock is not None:
+                    sock.shutdown(2)  # socket.SHUT_RDWR without another import
+            except Exception:
+                pass
             try:
                 conn.close()
             except Exception:
@@ -175,10 +198,10 @@ class AIRevisionAnalysisMixin:
         if "\n" in txt:
             return True
         if len(txt) <= 2:
-            # Short standalone OCR results such as "2", "3.", "U" or roman numerals
-            # are valid in registers and page-number columns. Treat only pure
-            # punctuation/control fragments as suspicious.
-            return not bool(re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß0-9IVXLCDMivxlcdm][.)]?", txt))
+            # Short standalone OCR results such as "2", "2,", "3.", "U" or
+            # roman numerals are valid in registers and page-number columns.
+            # Treat only pure punctuation/control fragments as suspicious.
+            return not bool(re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß0-9IVXLCDMivxlcdm][.,;:)]?", txt))
         if txt.isupper() and len(txt) >= 5 and " " not in txt:
             return True
         return False

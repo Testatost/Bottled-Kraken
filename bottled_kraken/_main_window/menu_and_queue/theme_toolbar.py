@@ -9,6 +9,7 @@ from bottled_kraken.common import (
     QColor,
     QPalette,
     QToolButton,
+    _bk_refresh_widget_button_icons,
     Qt,
     QKeySequence,
     QShortcut,
@@ -16,10 +17,6 @@ from bottled_kraken.common import (
     translation,
 )
 from bottled_kraken.common.theme_and_help_styles import _theme_is_dark
-from bottled_kraken.workers import (
-    BackendInstallDialog,
-    clear_external_ocr_backend_cache,
-)
 from PySide6.QtWidgets import (
     QColorDialog,
     QDialog,
@@ -240,6 +237,11 @@ class MainWindowThemeToolbarMixin:
         self._set_primary_toolbar_icons()
         self._set_secondary_button_icons()
         self._apply_lines_tree_theme()
+        try:
+            for top in QApplication.topLevelWidgets():
+                _bk_refresh_widget_button_icons(top, include_actions=(top is self))
+        except Exception:
+            pass
 
     def toggle_theme(self):
         new_theme = "dark" if not self._theme_dark() else "bright"
@@ -829,7 +831,6 @@ class MainWindowThemeToolbarMixin:
         self.log_lang = self.current_lang
         self.settings.setValue("ui/language", self.current_lang)
         self.retranslate_ui()
-        self._refresh_hw_menu_availability()
         self._update_toolbar_language_theme_ui()
 
     def _build_toolbar_language_theme_menus(self):
@@ -897,23 +898,3 @@ class MainWindowThemeToolbarMixin:
         self.btn_seg_model.setCursor(Qt.PointingHandCursor)
         if hasattr(self, "btn_import_lines"):
             self.btn_import_lines.setCursor(Qt.PointingHandCursor)
-
-    def open_integrated_backend_installer(self, backend_kind: str):
-        dlg = BackendInstallDialog(backend_kind, tr_func=self._tr, parent=self)
-        dlg.install_finished.connect(self._on_integrated_backend_install_finished)
-        dlg.exec()
-
-    def _on_integrated_backend_install_finished(self, ok: bool, backend_kind: str):
-        try:
-            clear_external_ocr_backend_cache()
-        except Exception:
-            pass
-        try:
-            self._refresh_hw_menu_availability()
-        except Exception:
-            pass
-        if ok:
-            try:
-                self._log(self._tr("backend_install_success"))
-            except Exception:
-                pass

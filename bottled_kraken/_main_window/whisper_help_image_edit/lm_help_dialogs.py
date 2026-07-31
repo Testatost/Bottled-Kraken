@@ -10,7 +10,9 @@ from bottled_kraken.common import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMessageBox,
     QPushButton,
+    QProgressDialog,
     QScrollArea,
     QSize,
     QSizePolicy,
@@ -20,8 +22,14 @@ from bottled_kraken.common import (
     QWidget,
     Qt,
 )
+from bottled_kraken.kraken_update import current_kraken_summary
+from bottled_kraken._workers.kraken_update_worker import KrakenUpdateWorker
+
+
 class MainWindowLmHelpDialogsMixin:
-        def show_lm_help_dialog(self):
+        def show_lm_help_dialog(self, initial_page=None):
+            if isinstance(initial_page, bool):
+                initial_page = None
             dlg = QDialog(self)
             dlg.setWindowTitle(self._tr("dlg_help_title"))
             dlg.resize(1380, 860)
@@ -76,6 +84,120 @@ class MainWindowLmHelpDialogsMixin:
             lm_server_html = self._tr("help_html_lm_server")
             ssh_html = self._tr("help_html_ssh")
             openrouter_html = self._tr("help_html_openrouter")
+
+            page_kraken = QWidget()
+            page_kraken_layout = QVBoxLayout(page_kraken)
+            page_kraken_layout.setContentsMargins(0, 0, 0, 0)
+            page_kraken_layout.setSpacing(8)
+            browser_kraken = make_page(kraken_html)
+            page_kraken_layout.addWidget(browser_kraken, 1)
+            kraken_summary = current_kraken_summary()
+            kraken_status = QLabel(
+                self._tr(
+                    "kraken_update_current_version",
+                    kraken_summary.get("version", "-"),
+                )
+            )
+            kraken_status.setWordWrap(True)
+            page_kraken_layout.addWidget(kraken_status, 0)
+            kraken_update_row = QHBoxLayout()
+            kraken_update_row.setContentsMargins(0, 0, 0, 0)
+            kraken_update_button = QPushButton(self._tr("kraken_update_button"))
+            kraken_update_button.setMinimumHeight(34)
+            kraken_update_button.setToolTip(self._tr("kraken_update_button_tip"))
+            kraken_update_row.addWidget(kraken_update_button, 0)
+            kraken_source = QLabel(self._tr("kraken_update_source"))
+            kraken_source.setWordWrap(True)
+            kraken_update_row.addWidget(kraken_source, 1)
+            page_kraken_layout.addLayout(kraken_update_row, 0)
+
+            def _start_kraken_update():
+                existing = getattr(self, "_kraken_update_worker", None)
+                if existing is not None and existing.isRunning():
+                    QMessageBox.information(
+                        self,
+                        self._tr("info_title"),
+                        self._tr("kraken_update_already_running"),
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    self._tr("kraken_update_confirm_title"),
+                    self._tr("kraken_update_confirm_text"),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
+                progress_dialog = QProgressDialog(
+                    self._tr("kraken_update_checking"),
+                    self._tr("btn_cancel"),
+                    0,
+                    100,
+                    self,
+                )
+                progress_dialog.setWindowTitle(self._tr("kraken_update_dialog_title"))
+                progress_dialog.setMinimumDuration(0)
+                progress_dialog.setAutoClose(False)
+                progress_dialog.setAutoReset(False)
+                progress_dialog.setValue(0)
+                worker = KrakenUpdateWorker(self)
+                self._kraken_update_worker = worker
+                self._kraken_update_progress_dialog = progress_dialog
+                kraken_update_button.setEnabled(False)
+
+                def _on_progress(percent: int, detail: str):
+                    progress_dialog.setValue(max(0, min(100, int(percent))))
+                    progress_dialog.setLabelText(str(detail))
+                    kraken_status.setText(str(detail))
+
+                def _finish_common():
+                    kraken_update_button.setEnabled(True)
+                    progress_dialog.close()
+                    self._kraken_update_worker = None
+                    self._kraken_update_progress_dialog = None
+
+                def _on_completed(version: str, sha: str, changed: bool):
+                    _finish_common()
+                    if changed:
+                        kraken_status.setText(
+                            self._tr("kraken_update_pending_restart", version, sha[:12])
+                        )
+                        QMessageBox.information(
+                            self,
+                            self._tr("info_title"),
+                            self._tr("kraken_update_success", version, sha[:12]),
+                        )
+                    else:
+                        kraken_status.setText(self._tr("kraken_update_up_to_date", version))
+                        QMessageBox.information(
+                            self,
+                            self._tr("info_title"),
+                            self._tr("kraken_update_up_to_date", version),
+                        )
+
+                def _on_failed(message: str):
+                    _finish_common()
+                    if str(message).strip().lower() == "cancelled":
+                        kraken_status.setText(self._tr("kraken_update_cancelled"))
+                        return
+                    kraken_status.setText(self._tr("kraken_update_failed", message))
+                    QMessageBox.warning(
+                        self,
+                        self._tr("warn_title"),
+                        self._tr("kraken_update_failed", message),
+                    )
+
+                worker.progress.connect(_on_progress)
+                worker.completed.connect(_on_completed)
+                worker.failed.connect(_on_failed)
+                worker.finished.connect(worker.deleteLater)
+                progress_dialog.canceled.connect(worker.cancel)
+                progress_dialog.show()
+                worker.start()
+
+            kraken_update_button.clicked.connect(_start_kraken_update)
+
             page_whisper = QWidget()
             page_whisper_layout = QVBoxLayout(page_whisper)
             page_whisper_layout.setContentsMargins(0, 0, 0, 0)
@@ -140,11 +262,12 @@ class MainWindowLmHelpDialogsMixin:
             legal_html = self._tr("help_html_legal")
             quick_browser = make_page(quick_html)
             stack.addWidget(quick_browser)
-            stack.addWidget(make_page(kraken_html))
+            stack.addWidget(page_kraken)
             stack.addWidget(make_page(lm_server_html))
             stack.addWidget(make_page(ssh_html))
             stack.addWidget(make_page(openrouter_html))
             stack.addWidget(page_whisper)
+            stack.addWidget(self._make_escriptorium_help_page(dlg))
             stack.addWidget(make_page(shortcuts_html))
             stack.addWidget(make_page(data_protection_html))
             stack.addWidget(make_page(legal_html))
@@ -156,6 +279,7 @@ class MainWindowLmHelpDialogsMixin:
                 self._tr("help_nav_ssh"),
                 self._tr("help_nav_openrouter"),
                 self._tr("help_nav_whisper"),
+                self._tr("help_nav_escriptorium"),
                 self._tr("help_nav_shortcuts"),
                 self._tr("help_nav_data_protection"),
                 self._tr("help_nav_legal"),
@@ -185,10 +309,11 @@ class MainWindowLmHelpDialogsMixin:
                     nav_list.setCurrentRow(-1)
                 finally:
                     nav_list.blockSignals(False)
-                stack.setCurrentIndex(9)
+                stack.setCurrentIndex(10)
             nav_list.currentRowChanged.connect(_select_top)
             nav_bottom.currentRowChanged.connect(_select_bottom)
-            nav_list.setCurrentRow(0)
+            initial_rows = {"escriptorium": 6}
+            nav_list.setCurrentRow(initial_rows.get(str(initial_page or "").strip().lower(), 0))
             nav_panel_layout.addWidget(nav_list, 1)
             nav_panel_layout.addWidget(nav_bottom, 0)
             content_layout.addWidget(nav_panel, 0)

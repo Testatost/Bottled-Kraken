@@ -11,7 +11,7 @@ def _ptr_dialog_lang(obj) -> str:
             return str(lang)
     except Exception:
         pass
-    return "de"
+    return translation.DEFAULT_LANGUAGE
 def _ptr_dialog_tr(obj, key: str, *args) -> str:
     try:
         lang = _ptr_dialog_lang(obj)
@@ -33,14 +33,13 @@ class PtrRemoteAICancelled(RuntimeError):
 
 class PtrMultiOCRJob:
     def __init__(self, input_paths: List[str], recognition_model_paths: List[str],
-                 segmentation_model_path: Optional[str], device: str,
+                 segmentation_model_path: Optional[str],
                  reading_direction: int, runs: int,
                  image_variants_enabled: bool = False,
                  image_variant_count: int = 1):
         self.input_paths = input_paths or []
         self.recognition_model_paths = recognition_model_paths or []
         self.segmentation_model_path = segmentation_model_path
-        self.device = device
         self.reading_direction = int(reading_direction)
         self.runs = int(runs)
         self.image_variants_enabled = bool(image_variants_enabled)
@@ -55,40 +54,23 @@ class PtrMultiOCRWorker(QThread):
     progress = Signal(int)
     finished_batch = Signal()
     failed = Signal(str)
-    device_resolved = Signal(str)
-    gpu_info = Signal(str)
     def __init__(self, job: PtrMultiOCRJob, parent=None):
         super().__init__(parent)
         self.job = job
         self._device = None
-        self._device_label = (job.device or "cpu").lower().strip()
         self._seg_model = None
         self._rec_models: Dict[str, Any] = {}
-    def _resolve_device(self):
-        dev = (self.job.device or "cpu").lower().strip()
-        self._device_label = dev
-        if dev in ("cuda", "rocm") and torch.cuda.is_available() and torch.cuda.device_count() > 0:
-            return torch.device("cuda")
-        self._device_label = "cpu"
-        return torch.device("cpu")
-    def _emit_gpu_info(self, device):
-        try:
-            if device.type == "cuda":
-                name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "GPU"
-                hip_ver = getattr(torch.version, "hip", None)
-                cuda_ver = getattr(torch.version, "cuda", None)
-                if self._device_label == "rocm" or hip_ver:
-                    self.gpu_info.emit(f"{name} (ROCm/HIP {hip_ver})" if hip_ver else f"{name} (ROCm)")
-                else:
-                    self.gpu_info.emit(f"{name} (CUDA {cuda_ver})" if cuda_ver else f"{name} (CUDA)")
-            else:
-                self.gpu_info.emit("CPU")
-        except Exception:
-            pass
     def _load_rec_model(self, path: str, device):
         return load_kraken_recognition_model(path, device=device)
     def _load_seg_model(self, path: str, device):
         return load_kraken_segmentation_model(path, device=device)
+    def _tr(self, key: str, *args):
+        try:
+            lang = str(getattr(self.job, "language", None) or translation.DEFAULT_LANGUAGE)
+            return translation.translate(lang, key, *args)
+        except Exception:
+            return str(key)
+
     def _normalize_recognition_paths(self) -> List[str]:
         cleaned = []
         seen = set()
@@ -101,18 +83,16 @@ class PtrMultiOCRWorker(QThread):
         return cleaned
     def _build_run_plan(self, rec_paths: List[str], runs: int) -> List[str]:
         if not rec_paths:
-            raise ValueError("No recognition models selected.")
+            raise ValueError(self._tr("ptr_err_no_rec_models"))
         if runs <= 0:
-            raise ValueError("Runs must be >= 1.")
+            raise ValueError(self._tr("ptr_err_runs_min"))
         return [rec_paths[i % len(rec_paths)] for i in range(runs)]
     def _ensure_models_loaded(self):
         if self._device is None:
-            self._device = self._resolve_device()
-            self.device_resolved.emit(f"{self._device_label} -> {self._device}")
-            self._emit_gpu_info(self._device)
+            self._device = torch.device("cpu")
         if self._seg_model is None:
             if not self.job.segmentation_model_path:
-                raise ValueError("No segmentation/baseline model selected.")
+                raise ValueError(self._tr("ptr_err_no_seg_model"))
             self._seg_model = self._load_seg_model(self.job.segmentation_model_path, self._device)
         for p in self._normalize_recognition_paths():
             if p not in self._rec_models:
@@ -125,11 +105,6 @@ class PtrMultiOCRWorker(QThread):
             pass
         try:
             gc.collect()
-        except Exception:
-            pass
-        try:
-            if hasattr(torch, "cuda") and torch.cuda.is_available():
-                torch.cuda.empty_cache()
         except Exception:
             pass
     def _emit_overall_progress(self, file_idx: int, total_files: int, frac: float):
@@ -207,16 +182,16 @@ class PtrMultiOCRWorker(QThread):
         try:
             rec_paths = self._normalize_recognition_paths()
             if not self.job.input_paths:
-                raise ValueError("No input files selected.")
+                raise ValueError(self._tr("ptr_err_no_input_files"))
             if not rec_paths:
-                raise ValueError("No recognition models selected.")
+                raise ValueError(self._tr("ptr_err_no_rec_models"))
             if self.job.runs <= 0:
-                raise ValueError("Runs must be >= 1.")
+                raise ValueError(self._tr("ptr_err_runs_min"))
             for p in rec_paths:
                 if not os.path.exists(p):
-                    raise ValueError(f"Recognition model not found: {p}")
+                    raise ValueError(self._tr("ptr_err_rec_model_missing", p))
             if not os.path.exists(self.job.segmentation_model_path or ""):
-                raise ValueError("Baseline model not found.")
+                raise ValueError(self._tr("ptr_err_baseline_missing"))
             self._ensure_models_loaded()
             total = len(self.job.input_paths)
             for i, path in enumerate(self.job.input_paths):
@@ -451,7 +426,7 @@ class PtrRemoteAITaskWorker(QThread):
                     "neo4j": neo,
                 })
                 return
-            raise ValueError(f"Unknown remote AI mode: {self.mode}")
+            raise ValueError(self._tr("ptr_err_unknown_remote_mode", self.mode))
         except PtrRemoteAICancelled as exc:
             self.canceled.emit(str(exc) or self._tr("ptr_ai_request_cancelled"))
         except Exception as exc:

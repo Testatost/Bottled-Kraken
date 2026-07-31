@@ -130,7 +130,7 @@ except Exception:
     pass
 def _bk_fix53_tr_queue_ref(parent, number: int) -> str:
     try:
-        return _bk_fix36_tr(parent, 'busy_queue_ref', 'Wartebereich #{}').format(int(number))
+        return _bk_fix36_tr(parent, 'busy_queue_ref').format(int(number))
     except Exception:
         return f'Wartebereich #{int(number)}'
 def _bk_fix53_queue_index_for_text(parent, text: str):
@@ -251,29 +251,6 @@ def _bk_fix53_write_csv(path: str, record_views: List[RecordView], image_size=No
                 if text:
                     writer.writerow([text])
 try:
-    _BK_FIX53_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX53_PREV_RENDER_FILE = None
-def _bk_fix53_render_file(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or '').lower()
-    if fmt_l == 'csv':
-        if not item or not getattr(item, 'results', None):
-            return
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-            image_size = export_image.size
-        except Exception:
-            image_size = getattr(pil_image, 'size', None)
-        return _bk_fix53_write_csv(path, record_views, image_size)
-    if callable(_BK_FIX53_PREV_RENDER_FILE):
-        return _BK_FIX53_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix53_render_file
-except Exception:
-    pass
-try:
     from PySide6.QtWidgets import QMenuBar
     from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu as _BKStayOpenMenu53
     def _bk_fix53_cursor_inside_chain_or_menubar(chain):
@@ -314,7 +291,6 @@ __all__ = [
     '_bk_fix53_patch_status_method',
     '_bk_fix53_queue_index_for_text',
     '_bk_fix53_refresh_overlay_display',
-    '_bk_fix53_render_file',
     '_bk_fix53_sanitize_wait_text',
     '_bk_fix53_tr_queue_ref',
     '_bk_fix53_update_task_preset_bboxes',

@@ -83,14 +83,8 @@ class BKCanonicalGraphDialogSetupMixin:
             except Exception:
                 pass
 
-        def _tr2(self, key: str, fallback: str) -> str:
-            try:
-                value = self._tr(key)
-                if value and value != key:
-                    return str(value)
-            except Exception:
-                pass
-            return fallback
+        def _tr2(self, key: str, *args) -> str:
+            return self._tr(key, *args)
         def _node_attr(self, node: Dict[str, Any], *keys: str) -> str:
             attrs = node.get("attributes") if isinstance(node.get("attributes"), dict) else {}
             for key in keys:

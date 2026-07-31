@@ -28,16 +28,11 @@ def _bk_gedcom_robust_install_translations():
         except Exception:
             pass
 def _bk_gedcom_robust_tr(self, key: str, *args) -> str:
+    lang = getattr(self, "current_lang", translation.DEFAULT_LANGUAGE)
     try:
-        return self._tr(key, *args)
+        return translation.translate(lang, key, *args)
     except Exception:
-        lang = getattr(self, "current_lang", translation.DEFAULT_LANGUAGE) if hasattr(self, "current_lang") else "de"
-        data = _BK_GEDCOM_ROBUST_TEXTS.get(lang) or _BK_GEDCOM_ROBUST_TEXTS["de"]
-        text = data.get(key, _BK_GEDCOM_ROBUST_TEXTS["de"].get(key, key))
-        try:
-            return text.format(*args) if args else text
-        except Exception:
-            return text
+        return key
 def _bk_gedcom_extract_text_from_jsonish(value) -> str:
     if isinstance(value, str):
         return value.strip()

@@ -47,36 +47,10 @@ def _lagrange_surface_point(grid, u: float, v: float):
             x += w * float(px)
             y += w * float(py)
     return (x, y)
-def _lagrange_basis_5(t: float):
-    t = max(0.0, min(1.0, float(t)))
-    nodes = (0.0, 0.25, 0.5, 0.75, 1.0)
-    basis = []
-    for i, xi in enumerate(nodes):
-        num = 1.0
-        den = 1.0
-        for j, xj in enumerate(nodes):
-            if i == j:
-                continue
-            num *= (t - xj)
-            den *= (xi - xj)
-        basis.append(num / den if abs(den) > 1e-12 else 0.0)
-    return tuple(basis)
 def _grid_point_5(grid, col: int, row: int):
     col = max(0, min(4, int(col)))
     row = max(0, min(4, int(row)))
     return grid[row * 5 + col]
-def _lagrange_surface_point_5(grid, u: float, v: float):
-    bu = _lagrange_basis_5(u)
-    bv = _lagrange_basis_5(v)
-    x = 0.0
-    y = 0.0
-    for row in range(5):
-        for col in range(5):
-            w = float(bu[col]) * float(bv[row])
-            px, py = _grid_point_5(grid, col, row)
-            x += w * float(px)
-            y += w * float(py)
-    return (x, y)
 def _piecewise_bilinear_surface_point_5(grid, u: float, v: float):
     u = max(0.0, min(1.0, float(u)))
     v = max(0.0, min(1.0, float(v)))

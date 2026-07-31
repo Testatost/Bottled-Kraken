@@ -6,6 +6,7 @@ from bottled_kraken.common import (
     TaskItem,
     os,
 )
+from bottled_kraken.cancellation import operation_was_cancelled
 from bottled_kraken.workers import (
     AIBatchRevisionWorker,
     AIRevisionWorker,
@@ -14,6 +15,19 @@ from bottled_kraken.dialogs import (
     ProgressStatusDialog,
 )
 class MainWindowAiRevisionExecutionMixin:
+        def _ai_revision_was_cancelled(self, message: str) -> bool:
+            """Detect cancellation by worker state or any shipped translation."""
+            return operation_was_cancelled(
+                worker=getattr(self, "ai_worker", None),
+                workers=(getattr(self, "ai_batch_worker", None),),
+                message=message,
+                keys=(
+                    "msg_ai_cancelled",
+                    "msg_ai_cancelled_short",
+                    "msg_ai_single_cancelled",
+                    "msg_ai_multi_cancelled",
+                ),
+            )
         def run_ai_revision(self):
             target_tasks = self._ai_revision_queue_targets()
             if target_tasks:
@@ -288,7 +302,7 @@ class MainWindowAiRevisionExecutionMixin:
         def on_ai_single_line_revision_failed(self, path: str, msg: str):
             self._ai_single_line_context = None
             self.act_ai_revise.setEnabled(True)
-            if "abgebrochen" in str(msg).lower():
+            if self._ai_revision_was_cancelled(msg):
                 self.status_bar.showMessage(self._tr("msg_ai_single_cancelled"))
                 self._log(self._tr_log("log_ai_single_cancelled", os.path.basename(path)))
             else:
@@ -298,9 +312,9 @@ class MainWindowAiRevisionExecutionMixin:
             self._close_ai_progress_dialog()
         def on_ai_revision_failed(self, path: str, msg: str):
             self.act_ai_revise.setEnabled(True)
-            if "abgebrochen" in str(msg).lower():
+            if self._ai_revision_was_cancelled(msg):
                 self.status_bar.showMessage(self._tr("msg_ai_cancelled_short"))
-                self._log(f"Überarbeitung abgebrochen: {os.path.basename(path)}")
+                self._log(self._tr_log("log_ai_revision_cancelled", os.path.basename(path)))
             else:
                 self.status_bar.showMessage(self._tr("msg_ai_failed_short"))
                 self._log(self._tr_log("log_ai_error", os.path.basename(path), msg))

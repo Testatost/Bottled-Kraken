@@ -1,7 +1,11 @@
+from bottled_kraken.cancellation import operation_was_cancelled
+from bottled_kraken.runtime_logging import get_logger
+
 from bottled_kraken.common import (
     _ai_script_crop_profile,
     _clean_ocr_text,
     _crop_block_to_data_url_context,
+    _crop_overlay_box_to_data_url_strict,
     _crop_single_line_to_data_url,
 )
 from bottled_kraken.common import (
@@ -34,7 +38,7 @@ class AIRevisionRuntimeMixin:
                     self._tr("ai_status_step1_line", i + 1, total, os.path.basename(self.path))
                 )
                 try:
-                    line_data_url = _crop_single_line_to_data_url(
+                    line_data_url = _crop_overlay_box_to_data_url_strict(
                         self.path,
                         rv,
                         pad_x=crop_profile["single_pad_x"],
@@ -46,8 +50,13 @@ class AIRevisionRuntimeMixin:
                         idx=rv.idx,
                         current_text=str(rv.text or "")
                     )
-                except Exception as e:
-                    print(f"BOX OCR ERROR idx={rv.idx}: {e}")
+                except Exception:
+                    get_logger("workers.ai_revision").warning(
+                        "Overlay-box OCR fallback for %s, index %s",
+                        self.path,
+                        rv.idx,
+                        exc_info=True,
+                    )
                     box_text = "" if self._looks_like_manual_placeholder(str(rv.text or "")) else rv.text
                 if not str(box_text).strip():
                     box_text = "" if self._looks_like_manual_placeholder(str(rv.text or "")) else rv.text
@@ -92,8 +101,14 @@ class AIRevisionRuntimeMixin:
                             txt = _clean_ocr_text(txt)
                             if txt:
                                 page_lines[start + local_i] = txt
-                except Exception as e:
-                    print(f"BLOCK OCR ERROR {start}-{end}: {e}")
+                except Exception:
+                    get_logger("workers.ai_revision").warning(
+                        "Block OCR fallback for %s, records %s-%s",
+                        self.path,
+                        start,
+                        end,
+                        exc_info=True,
+                    )
                 self.progress_changed.emit(55 + int((chunk_idx / max(1, len(chunks))) * 15))
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError(self._tr("msg_ai_cancelled"))
@@ -143,15 +158,28 @@ class AIRevisionRuntimeMixin:
             self.progress_changed.emit(100)
             self.finished_revision.emit(self.path, final_lines)
         except urllib.error.HTTPError as e:
+            get_logger("workers.ai_revision").warning(
+                "AI revision HTTP error for %s", self.path, exc_info=True
+            )
             try:
                 body = e.read().decode("utf-8", errors="replace")
             except Exception:
                 body = str(e)
             self.failed_revision.emit(self.path, self._tr("err_http_with_body", e, body))
         except urllib.error.URLError as e:
+            get_logger("workers.ai_revision").warning(
+                "AI revision server error for %s", self.path, exc_info=True
+            )
             self.failed_revision.emit(self.path, self._tr("ai_err_server_unreachable", e))
         except socket.timeout:
+            get_logger("workers.ai_revision").warning(
+                "AI revision timeout for %s", self.path, exc_info=True
+            )
             self.failed_revision.emit(self.path, self._tr("ai_err_timeout"))
         except Exception as e:
+            if not operation_was_cancelled(worker=self, message=str(e)):
+                get_logger("workers.ai_revision").exception(
+                    "AI revision failed for %s", self.path
+                )
             msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
             self.failed_revision.emit(self.path, msg)

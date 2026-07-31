@@ -108,23 +108,8 @@ def _ptr_remote_ai_config_repr_v23(self):
         ')'
     )
 def _ptr_ai_dialog_apply_key_hints_v23(self):
-    lang = _ptr_ui_lang(self)
-    if lang == 'de':
-        placeholder = 'leer lassen = OPENROUTER_API_KEY / .env verwenden'
-        tooltip = (
-            'API-Key optional direkt hier eingeben. '            'Sicherer ist es, den Key über OPENROUTER_API_KEY '            'oder BOTTLED_KRAKEN_OPENROUTER_API_KEY in einer .env/.env.local zu laden.'
-        )
-    elif lang == 'fr':
-        placeholder = 'laisser vide = utiliser OPENROUTER_API_KEY / .env'
-        tooltip = (
-            "Vous pouvez saisir la clé ici, mais il est plus sûr de la charger via "
-            "OPENROUTER_API_KEY ou BOTTLED_KRAKEN_OPENROUTER_API_KEY dans .env/.env.local."
-        )
-    else:
-        placeholder = 'leave empty = use OPENROUTER_API_KEY / .env'
-        tooltip = (
-            'You can enter the API key here, but it is safer to load it via '            'OPENROUTER_API_KEY or BOTTLED_KRAKEN_OPENROUTER_API_KEY from .env/.env.local.'
-        )
+    placeholder = 'OPENROUTER_API_KEY / BOTTLED_KRAKEN_OPENROUTER_API_KEY / .env'
+    tooltip = _ptr_ui_tr(self, 'ptr_err_openrouter_key_required')
     try:
         self.api_key_edit.setPlaceholderText(placeholder)
         self.api_key_edit.setToolTip(tooltip)
@@ -146,9 +131,9 @@ def _ptr_remote_chat_completion_v3(config: PtrRemoteAIConfig, messages: List[Dic
     provider_name = (config.provider_name or '').strip().lower()
     base_url = _ptr_normalize_remote_base_url(config.base_url or '', provider_name)
     if not base_url:
-        raise ValueError('Base URL must not be empty.')
+        raise ValueError(_bk_patch24_tr(config, 'ptr_err_base_url_empty'))
     if not re.match(r'^https?://', base_url, flags=re.IGNORECASE):
-        raise ValueError('Base URL must start with http:// or https://')
+        raise ValueError(_bk_patch24_tr(config, 'ptr_err_base_url_scheme'))
     url = base_url.rstrip('/')
     if not url.endswith('/chat/completions'):
         url += '/chat/completions'
@@ -158,7 +143,7 @@ def _ptr_remote_chat_completion_v3(config: PtrRemoteAIConfig, messages: List[Dic
         'temperature': float(config.temperature),
     }
     if not payload['model']:
-        raise ValueError('Model must not be empty.')
+        raise ValueError(_bk_patch24_tr(config, 'ptr_err_model_empty'))
     if max_tokens is not None:
         payload['max_tokens'] = int(max_tokens)
     if expect_json:
@@ -170,9 +155,7 @@ def _ptr_remote_chat_completion_v3(config: PtrRemoteAIConfig, messages: List[Dic
     is_openrouter = provider_name == 'openrouter' or 'openrouter.ai' in url.lower()
     if is_openrouter:
         if not resolved_api_key:
-            raise RuntimeError(
-                'OpenRouter requires a valid API key. '                'Leave the field empty only if OPENROUTER_API_KEY or '                'BOTTLED_KRAKEN_OPENROUTER_API_KEY is available in the environment or in a local .env file.'
-            )
+            raise RuntimeError(_bk_patch24_tr(config, 'ptr_err_openrouter_key_required'))
         if (config.app_url or '').strip():
             headers['HTTP-Referer'] = config.app_url.strip()
         if (config.app_name or '').strip():
@@ -226,6 +209,11 @@ def _help_theme_values_v24(theme: str) -> Dict[str, str]:
     return colors
 _help_theme_values = _help_theme_values_v24
 def _bk_patch24_lang(obj) -> str:
+    if isinstance(obj, str):
+        try:
+            return translation.normalize_language_code(obj)
+        except Exception:
+            return obj
     try:
         lang = getattr(obj, "current_lang", None)
         if lang:
@@ -244,7 +232,7 @@ def _bk_patch24_lang(obj) -> str:
             return _bk_patch24_lang(parent)
     except Exception:
         pass
-    return "de"
+    return translation.DEFAULT_LANGUAGE
 def _bk_patch24_tr(obj, key: str, *args) -> str:
     lang = _bk_patch24_lang(obj)
     try:

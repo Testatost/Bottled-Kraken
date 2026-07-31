@@ -3,187 +3,106 @@
   <img src="splash.png" alt="Splash" width="260">
 </p>
 
-# Bottled Kraken
+# Bottled Kraken – Windows 10/11
 
 [Kraken](https://github.com/mittagessen/kraken) · [faster-whisper](https://github.com/SYSTRAN/faster-whisper) · [Zenodo OCR-Modelle](https://zenodo.org/communities/ocr_models/)
 
-Bottled Kraken is a desktop OCR workbench based on **Kraken**.  
-The project is aimed at anyone who does not just need some quick OCR text, but a **traceable and editable workflow** instead:
+Bottled Kraken ist eine Desktop-OCR-Workbench auf Basis von **Kraken**.  
+Das Projekt richtet sich an alle, die nicht einfach nur schnell irgendeinen OCR-Text brauchen, sondern einen **nachvollziehbaren und bearbeitbaren Workflow**:
 
-- prepare difficult scans
-- run OCR
-- review lines
-- correct segmentation
-- post-edit text
-- and export results in useful formats
+- schwierige Scans vorbereiten
+- OCR ausführen
+- Zeilen prüfen
+- Segmentierung korrigieren
+- Text nachbearbeiten
+- und Ergebnisse in brauchbaren Formaten exportieren
 
-Bottled Kraken is especially useful for **historical prints, manuscripts, forms**, and other page layouts where a purely automatic OCR pass is often not enough.
+Besonders sinnvoll ist Bottled Kraken für **historische Drucke, Handschriften, Formulare** und andere Seitenlayouts, bei denen ein rein automatischer OCR-Durchlauf oft nicht ausreicht.
 
 <p align="center">
-  <img src="Bottled Kraken Screenshot v3.3.png" alt="Bottled Kraken Screenshot" width="1000">
+  <img src="Bottled Kraken Screenshot.png" alt="Bottled Kraken Screenshot" width="1000">
 </p>
 
 ---
 
-## Current Release Model
+## Ansatz
 
-Bottled Kraken v3.1 is designed as a **CPU-first desktop application**.
+Bottled Kraken verbindet mehrere Arbeitsschritte, die sonst oft auf verschiedene Werkzeuge verteilt sind:
 
-The standard release already includes the core Kraken OCR workflow. Optional GPU support can be installed later from inside the application. This keeps the main executable smaller and avoids bundling very large CUDA or ROCm packages into the default release.
+- **vorbereitende Bildbearbeitung** für schwierige Vorlagen
+- **layoutbezogene OCR mit Kraken**
+- **interaktive Bearbeitung von Zeilen und Overlay-Boxen**
+- **optionale lokale LM-Überarbeitung**
+- **optionale Mikrofonkorrektur mit Faster-Whisper**
+- **strukturierte Exportformate** für die Weiterverarbeitung
 
-The intended release structure is:
-
-- **Bottled Kraken CPU**  
-  Standard version with Kraken OCR and all core features.
-
-- **Optional NVIDIA CUDA Backend**  
-  Installed separately when NVIDIA GPU acceleration is needed.
-
-- **Optional AMD ROCm Backend**  
-  Installed separately when ROCm acceleration is needed.
-
-The optional GPU backends are installed into a separate user directory and do **not** modify the Bottled Kraken executable.
-
-Typical backend locations are:
-
-```text
-Windows:
-%LOCALAPPDATA%\BottledKraken\backends\
-
-Linux:
-~/.local/share/BottledKraken/backends/
-```
-
-The backend installation does not remove or modify system-wide NVIDIA, CUDA, ROCm, or driver installations.
-
----
-
-## Approach
-
-Bottled Kraken combines several processing steps that would otherwise often be spread across different tools:
-
-- **preprocessing for difficult source images**
-- **layout-aware OCR with Kraken**
-- **interactive editing of lines and overlay boxes**
-- **optional local LM post-editing**
-- **optional microphone-based correction with Faster-Whisper**
-- **structured export formats** for downstream processing
-
-OCR is therefore not treated here as a one-time black-box click, but as an **editable working process**. That is exactly the core idea of the project.
+OCR wird hier also nicht als einmaliger Blackbox-Klick behandelt, sondern als **editierbarer Arbeitsprozess**. Genau das ist die Grundidee des Projekts.
 
 ---
 
 ## Features
 
-- OCR with **Kraken** using separate recognition and segmentation models
-- support for **images and PDFs**
-- queue-based batch workflow for multiple files
-- interactive display of recognized lines
-- editable **overlay boxes** and line structure
-- line operations such as **move, swap, add, delete, split, and reorder**
-- configurable **reading direction**
-- integrated **image editing** before OCR
-- optional **local LM post-editing** via OpenAI-compatible servers
-- optional **speech correction with Faster-Whisper**
-- import of lines from **TXT** or **JSON**
-- save / load projects via **JSON project files**
-- multilingual interface (**German, English, French**)
-- light and dark mode
-- hardware selection for **CPU, CUDA, ROCm, and MPS**
-- optional external backend installation for GPU acceleration
-- hardware overview in the help dialog
+- OCR mit **Kraken** über getrennte Recognition- und Segmentierungsmodelle
+- Unterstützung für **Bilder und PDFs**
+- queue-basierter Batch-Workflow für mehrere Dateien
+- interaktive Anzeige erkannter Zeilen
+- bearbeitbare **Overlay-Boxen** und Zeilenstruktur
+- Zeilenfunktionen wie **verschieben, tauschen, ergänzen, löschen, teilen und neu ordnen**
+- konfigurierbare **Leserichtung**
+- integrierte **Bildbearbeitung** vor dem OCR-Lauf
+- optionale **lokale LM-Überarbeitung** über OpenAI-kompatible Server
+- optionale **Sprachkorrektur mit Faster-Whisper**
+- lokaler **eScriptorium-Server** mit automatischer nativer Installation für Fedora, Linux Mint und Windows/WSL2
+- Import von Zeilen aus **TXT** oder **JSON**
+- Projekt speichern / laden über **JSON-Projektdateien**
+- mehrsprachige Oberfläche in **16 Sprachen**
+- Hell- und Dunkelmodus
+- Hardware-Auswahl für **CPU, CUDA, ROCm und MPS**
 
 ---
 
-## Image Editing
+## Bildbearbeitung
 
-Bottled Kraken includes a preprocessing layer for documents that need more than just a simple OCR pass.
+Bottled Kraken bringt eine vorgeschaltete Bearbeitungsebene mit, wenn Dokumente mehr als nur einen simplen OCR-Durchlauf brauchen.
 
-Available tools include:
+Verfügbare Werkzeuge sind unter anderem:
 
-- rotation
-- crop area
-- separator bars for double pages or split layouts
-- grayscale
-- contrast adjustment
-- add white border
-- smart splitting
+- Rotation
+- Crop-Bereich
+- Trennbalken für Doppelseiten oder geteilte Layouts
+- Graustufen
+- Kontrastanpassung
+- weißen Rand hinzufügen
+- Smart-Splitting
 
-This is especially helpful for poorly cropped scans, double pages, archive material, form pages, and low-contrast historical sources.
-
----
-
-## OCR Workflow
-
-A typical workflow in Bottled Kraken looks like this:
-
-1. load an image or PDF
-2. optionally prepare the page with image editing
-3. load the **recognition model**
-4. load the **segmentation model**
-5. start Kraken OCR
-6. review recognized lines and boxes
-7. correct lines manually, with a local LM, or by voice input
-8. export the result
-
-Bottled Kraken uses Kraken directly from Python and is strongly built around the idea that OCR quality depends heavily on clean segmentation. That is why working with **`blla`** is the preferred approach whenever a suitable segmentation model is available.
+Das ist besonders hilfreich bei schlecht beschnittenen Scans, Doppelseiten, Archivmaterial, Formularseiten und kontrastarmen historischen Vorlagen.
 
 ---
 
-## Overlay Boxes and Manual Segmentation
+## OCR-Workflow
 
-Bottled Kraken allows recognized line boxes to be edited manually.
+Ein typischer Ablauf in Bottled Kraken sieht so aus:
 
-This is useful when:
+1. Bild oder PDF laden
+2. Seite optional mit der Bildbearbeitung vorbereiten
+3. **Recognition-Modell** laden
+4. **Segmentierungs-Modell** laden
+5. Kraken-OCR starten
+6. erkannte Zeilen und Boxen prüfen
+7. Zeilen manuell, per lokalem LM oder per Spracheingabe korrigieren
+8. Ergebnis exportieren
 
-- automatic segmentation does not match the page structure
-- individual lines need to be corrected
-- historical forms or tables need manual box placement
-- double pages or rotated scans require additional control
-
-If needed, overlay boxes can be drawn or adjusted manually per line. This makes the OCR workflow more transparent and easier to correct than a fully automatic black-box process.
-
----
-
-## Optional GPU Backends
-
-The standard Bottled Kraken release is CPU-based. GPU support can be added later from inside the application.
-
-The GPU backend installer can be started from:
-
-```text
-Options → CPU/GPU
-```
-
-Available backend targets include:
-
-```text
-CUDA (NVIDIA)
-ROCm (AMD)
-MPS (Apple Silicon, platform-dependent)
-```
-
-For NVIDIA CUDA and AMD ROCm, Bottled Kraken installs a separate backend environment outside the main executable. This backend contains its own Python environment and the required OCR runtime packages.
-
-The main application remains unchanged.
-
-This design has several advantages:
-
-- the default release remains smaller
-- users without GPU support do not need large GPU packages
-- CUDA and ROCm can be installed only when needed
-- backend installations stay isolated from the operating system
-- system-wide CUDA, ROCm, and driver installations are not removed or modified
+Bottled Kraken nutzt Kraken direkt aus Python heraus und ist stark auf die Idee ausgerichtet, dass die OCR-Qualität wesentlich von sauberer Segmentierung abhängt. Deshalb ist die Arbeit mit **`blla`** der bevorzugte Weg, sobald ein passendes Segmentierungsmodell vorhanden ist.
 
 ---
 
-## Local LM Post-Editing
+## Lokale LM-Überarbeitung
 
-Bottled Kraken can post-process OCR results with a **local language model server**, as long as it provides an **OpenAI-compatible base URL**.
+Bottled Kraken kann OCR-Ergebnisse mit einem **lokalen Sprachmodell-Server** nachbearbeiten, solange dieser eine **OpenAI-kompatible Basis-URL** bereitstellt.
 
-Typical local setups include:
+Typische lokale Setups sind:
 
-| Server | Typical Base URL |
+| Server | Typische Basis-URL |
 |---|---|
 | LM Studio | `http://localhost:1234/v1` |
 | Ollama | `http://localhost:11434/v1` |
@@ -193,29 +112,21 @@ Typical local setups include:
 | LocalAI | `http://localhost:8080/v1` |
 | vLLM | `http://HOST:8000/v1` |
 
-This post-editing is intended for local workflows in which OCR lines should be linguistically smoothed, standardized, or reviewed without moving the entire workflow into a cloud service.
+Diese Nachbearbeitung ist für lokale Arbeitsabläufe gedacht, in denen OCR-Zeilen sprachlich geglättet, vereinheitlicht oder kontrolliert werden sollen, ohne den gesamten Workflow in einen Cloud-Dienst zu verlagern.
 
 ---
 
-## LM Page OCR and Manual Boxes
+## Remote-Zugriff per SSH-Tunnel
 
-Bottled Kraken also contains LM-based page OCR helpers.
+Wenn dein lokaler LM-Server auf einem anderen Rechner läuft, dort aber nur an `127.0.0.1` gebunden ist, lässt er sich trotzdem über einen SSH-Tunnel verwenden.
 
-If the result does not match the visual line structure well enough, manual overlay boxes can be drawn per line by right-clicking a line. This allows the user to guide the OCR/post-processing workflow manually when automatic segmentation is not sufficient.
-
----
-
-## Remote Access via SSH Tunnel
-
-If your local LM server is running on another machine but is only bound to `127.0.0.1`, you can still use it via an SSH tunnel.
-
-Example:
+Beispiel:
 
 ```bash
 ssh -L 1234:127.0.0.1:1234 user@192.168.1.50
 ```
 
-Then simply use the following in Bottled Kraken:
+Danach verwendest du in Bottled Kraken einfach:
 
 ```text
 http://127.0.0.1:1234/v1
@@ -223,171 +134,264 @@ http://127.0.0.1:1234/v1
 
 ---
 
-## Speech Correction with Faster-Whisper
+## Sprachkorrektur mit Faster-Whisper
 
-Bottled Kraken can use **Faster-Whisper** for line-based microphone correction.
+Bottled Kraken kann **Faster-Whisper** für eine zeilenbezogene Mikrofonkorrektur verwenden.
 
-This is useful when:
+Das ist nützlich, wenn:
 
-- an OCR line is heavily damaged
-- individual fields or names are faster to speak than to type
-- or a correction should intentionally remain limited to exactly one line
+- eine OCR-Zeile stark beschädigt ist
+- einzelne Felder oder Namen schneller eingesprochen als getippt werden
+- oder eine Korrektur bewusst auf genau eine Zeile begrenzt bleiben soll
 
-So this is not about full transcription of long audio files, but about **targeted corrections within the OCR workflow**.
+Es geht hier also nicht um die Volltranskription langer Audiodateien, sondern um **gezielte Korrekturen innerhalb des OCR-Workflows**.
 
 ---
 
-## Export Formats
+## Lokales eScriptorium
 
-Bottled Kraken supports export to multiple output formats.
+Rechts neben **Whisper-Optionen** befindet sich der Hauptmenüpunkt
+**eScriptorium**. Im Dialog wird einmalig das verwendete Betriebssystem
+gewählt:
 
-| Category | Formats |
+- Fedora Linux
+- Linux Mint
+- Windows 10/11 mit WSL2
+
+Die Installation und der Serverstart sind bewusst getrennt. Unter Windows
+richtet Bottled Kraken dafür eine eigene WSL2-Ubuntu-24.04-Distribution ein.
+Zuerst wird **eScriptorium installieren / aktualisieren** ausgeführt. Bottled
+Kraken lädt und konfiguriert dabei im Hintergrund PostgreSQL, Redis, Python,
+Kraken, Celery, Django und das Web-Frontend. **Server starten** startet
+anschließend ausschließlich die bereits installierten Dienste. Sobald
+`http://127.0.0.1:8000/` antwortet, wird eScriptorium im nativen Windows-
+Standardbrowser geöffnet. Docker und Docker Compose werden nicht verwendet.
+
+Während der Installation zeigt eine animierte Kreis-Ladeanzeige, dass der
+Vorgang weiterläuft. Die Ausgabe von `dnf`, `apt`, `pip`, `npm`, Django und den
+übrigen Einrichtungsprogrammen wird fortlaufend im Dialog angezeigt, statt bis
+zum Prozessende unsichtbar gepuffert zu werden. Über **Abbrechen** kann der
+aktuelle Unterprozess kontrolliert beendet werden. Ein abgebrochener oder
+fehlgeschlagener Erstlauf hinterlässt keinen Fertig-Marker; der nächste Klick
+auf **eScriptorium installieren / aktualisieren** setzt die Einrichtung
+reparierend erneut an.
+
+Die offizielle Datei `app/requirements.txt` bleibt die Quelle der
+eScriptorium-Python-Abhängigkeiten. Bottled Kraken erzeugt daraus in der WSL2-
+Laufzeit eine nachvollziehbare Kompatibilitätskopie: Der veraltete pyvips-2.1-
+Pin und direkte Torch-Pins werden dort entfernt und separat plattformgerecht
+installiert. In WSL2 erhält eScriptorium pyvips 3.1.1 für die Ubuntu-libvips-
+Bibliothek; falls der optionale CFFI-API-Build scheitert, wird automatisch auf
+den ABI-Modus mit der System-libvips-Bibliothek zurückgefallen. Torch 2.12.0 und
+torchvision 0.27.0 werden als getestetes CPU-Paar installiert und anschließend
+exakt für den übrigen Resolver fixiert. Die bewusst nicht verwendete Version
+2.12.1 überschreitet Krakens Metadatenobergrenze `torch<=2.12`. Eine
+`requirements-native.txt` wird weder erwartet noch erzeugt.
+
+Fehlt WSL2, zuerst in einer administrativen PowerShell `wsl --install` ausführen, Windows neu starten und sicherstellen, dass Virtualisierung im BIOS/UEFI aktiviert ist. Unter Windows importiert Bottled Kraken eine eigene Ubuntu-24.04-Umgebung in
+WSL2 und steuert die eScriptorium-Dienste automatisch über `wsl.exe` und
+systemd. Die Aktivierung von WSL2 kann einen einmaligen Windows-Neustart
+erfordern. Danach wird die Installation über **eScriptorium installieren /
+aktualisieren** fortgesetzt. Der Browser läuft weiterhin nativ unter Windows und
+erreicht den WSL2-Server über localhost. PostgreSQL verwendet in WSL2 ein kurzes
+systemd-`RuntimeDirectory` unter `/run`, damit keine Windows-Pfade und keine zu
+langen Unix-Socket-Pfade in den Datenpfad geraten.
+
+Der Reiter **Hinweise → eScriptorium** enthält dieselbe Betriebssystemauswahl,
+den Installations-/Aktualisierungsbutton, die Dokumentation sowie Schaltflächen
+zum Öffnen des ausgewählten eScriptorium-Ordners und der Zugangsdaten. Der
+Ordner-Button verwendet unter Windows den Explorer und unter Linux den
+installierten Desktop-Dateimanager.
+
+Die Standardpfade sind:
+
+```text
+Windows: %LOCALAPPDATA%\BottledKraken\escriptorium\platforms\windows_wsl\
+WSL:     \\wsl.localhost\BottledKraken-eScriptorium\opt\bottled-kraken-escriptorium
+```
+
+Der Basisordner kann mit `BOTTLED_KRAKEN_USER_DIR` überschrieben werden. Der
+Quellstand kann mit `BOTTLED_KRAKEN_ESCRIPTORIUM_REF` festgelegt werden;
+Standard ist `26.04.1`. Ein normales Stoppen beendet nur die Dienste und
+löscht keine Projekte, Datenbanken, Modelle oder Medien.
+
+---
+
+## Exportformate
+
+Bottled Kraken unterstützt den Export in mehrere Ausgabeformate:
+
+| Kategorie | Formate |
 |---|---|
-| plain text | `txt` |
-| structured data | `csv`, `json` |
-| OCR formats | `ALTO XML`, `hOCR` |
-| PDF | searchable PDF with image + invisible text layer |
+| Fließtext | `txt` |
+| strukturierte Daten | `csv`, `json` |
+| OCR-Formate | `ALTO XML`, `hOCR` |
+| Bilder | `png`, `jpg`, `bmp` |
+| PDF | durchsuchbares PDF mit Bild + unsichtbarer Textebene |
 
-This makes it possible to use the same OCR pass both for readable end results and for structured downstream processing.
-
----
-
-## Project Files
-
-Bottled Kraken can save and load project states as JSON project files.
-
-This is useful when OCR work should be continued later, checked again, or transferred between machines. Project files can contain the loaded page structure, recognized text, line information, and related workflow data.
+Dadurch lässt sich derselbe OCR-Durchlauf sowohl für lesbare Endergebnisse als auch für strukturierte Weiterverarbeitung nutzen.
 
 ---
 
-## Run from Source
+## Aus dem Quellcode starten
 
-### Requirements
+### Voraussetzungen
 
-- Windows, Linux, or macOS
-- recommended: **Python 3.10 to 3.13**
-- a working Python virtual environment
-- a working Kraken / PyTorch CPU environment
+- Windows 10 oder Windows 11, 64 Bit
+- Python 3.13 x64 empfohlen; Python 3.12 x64 wird vom Buildskript ebenfalls akzeptiert
+- PowerShell 5.1 oder PowerShell 7
+- eine funktionsfähige Kraken- / PyTorch-CPU-Umgebung
 
-The standard source setup installs the CPU baseline. Optional GPU backends can be installed separately from inside Bottled Kraken.
+### Repository klonen
 
-### Clone the Repository
-
-```bash
+```powershell
 git clone https://github.com/Testatost/Bottled-Kraken.git
 cd Bottled-Kraken
 ```
 
-### Create a Virtual Environment
+### Build-Umgebung prüfen
 
-```bash
-python -m venv .venv
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\check_windows_10_11_build_environment.ps1
 ```
 
-Activate it:
+### Virtuelle Umgebung erstellen
 
-```bash
-# Linux / macOS
-source .venv/bin/activate
-
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
-### Install Dependencies
+### Abhängigkeiten installieren
 
-Install the runtime dependencies from `requirements.txt`:
+Für eine bestehende PyCharm-venv:
 
-```bash
+```powershell
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-lock-windows.txt
+python -m pip install --no-deps kraken==7.0.3
 ```
 
-The requirements file is intended for the CPU baseline. GPU support should be installed through the optional backend system inside Bottled Kraken.
+`requirements.txt` beschreibt die Windows-Abhängigkeiten lesbar. Der reproduzierbare
+Release-Build verwendet `requirements-lock-windows.txt`. Kraken wird anschließend
+mit `--no-deps` installiert, weil die für Bottled Kraken nicht benötigte
+CoreML-Abhängigkeit auf Windows nicht zum Zielumfang gehört.
 
-### Start the Application
+### Anwendung starten
 
-```bash
+```powershell
 python main.py
 ```
 
----
-
-## Build with PyInstaller
-
-Bottled Kraken can be built with PyInstaller.
-
-A typical build command is:
-
-```bash
-python -m PyInstaller --clean --noconfirm main.spec
-```
-
-On Windows PowerShell, a clean rebuild can be done with:
+### PyInstaller-Build für Windows 10/11
 
 ```powershell
-Remove-Item -Recurse -Force build, dist
-python -m PyInstaller --clean --noconfirm main.spec
+Set-ExecutionPolicy -Scope Process Bypass
+.\build_windows_10_11.ps1
 ```
 
-On Linux:
+Das fertige Onefile-Programm liegt danach unter `dist\Bottled Kraken.exe`.
 
-```bash
-rm -rf build dist
-python -m PyInstaller --clean --noconfirm main.spec
-```
+## Modellverwaltung
 
-The exact build result depends on the platform-specific `main.spec`.
+Bottled Kraken bringt OCR-Modelle nicht direkt mit. Stattdessen lädst du die Modelle, die zu deinem Material passen.
 
----
+In der Praxis brauchst du meistens:
 
-## Model Management
+- ein **Recognition-Modell** für Schrift und Material
+- und optional ein **Segmentierungs-Modell** für `blla`
 
-Bottled Kraken does not ship with OCR models directly. Instead, you load the models that fit your material.
-
-In practice, you will usually need:
-
-- a **recognition model** for the script and source material
-- and optionally a **segmentation model** for `blla`
-
-A good public source for Kraken-compatible models is the Zenodo collection:
+Eine gute öffentliche Fundstelle für Kraken-kompatible Modelle ist die Zenodo-Sammlung:
 
 - <https://zenodo.org/communities/ocr_models/>
 
-As a rule of thumb, a model trained on historical prints is usually much better for historical prints than a general-purpose model. The same applies to handwriting and form-heavy material.
+Als Faustregel gilt: Ein Modell, das auf historische Drucke trainiert wurde, ist für historische Drucke meist deutlich besser als ein allgemeines Modell. Dasselbe gilt für Handschrift und formularlastiges Material.
 
 ---
 
-## Hardware Notes
+## Warum Bottled Kraken?
 
-Bottled Kraken can run on CPU only. GPU acceleration is optional.
+Viele OCR-Werkzeuge enden nach der Erkennung. Bottled Kraken setzt genau in der Phase **zwischen OCR und fertigem Endtext** an:
 
-The help dialog contains a hardware overview that checks the current system and installed external backends. This check is meant as a practical orientation, not as a strict compatibility guarantee.
+- wenn Segmentierung noch korrigiert werden muss
+- wenn Zeilenstruktur wichtig ist
+- wenn Formulare oder Archivseiten Nacharbeit brauchen
+- und wenn möglichst lokal und transparent gearbeitet werden soll
 
-General notes:
-
-- CPU mode is the default and most portable mode.
-- NVIDIA CUDA can be added through the optional CUDA backend.
-- AMD ROCm can be added through the optional ROCm backend.
-- Apple Silicon MPS support depends on the macOS/PyTorch environment.
-- GPU backends are installed separately from the main application.
+Wenn du eine GUI rund um Kraken suchst, die OCR nicht nur ausführt, sondern als editierbaren Workflow behandelt, dann ist Bottled Kraken genau für diesen Anwendungsfall gebaut.
 
 ---
 
-## Why Bottled Kraken?
+## Whisper-Zeilendiktat und UTF-8
 
-Many OCR tools stop after recognition. Bottled Kraken focuses exactly on the phase **between OCR and the finished final text**:
+Das Diktieren einzelner OCR-Zeilen wird in einem getrennten Bottled-Kraken-
+Prozess ausgeführt. Dieser Prozess startet ausdrücklich im UTF-8-Modus und
+überträgt das Ergebnis als ASCII-sicheres JSON. Dadurch hängen Umlaute,
+Nicht-ASCII-Gerätenamen und Modellpfade nicht von der Terminal- oder
+System-Locale ab. Temporäre WAV- und Protokolldateien liegen in einem privaten,
+kurzen Laufzeitordner und werden nach dem Vorgang wieder entfernt.
 
-- when segmentation still needs correction
-- when line structure matters
-- when forms or archive pages require post-processing
-- and when the work should remain as local and transparent as possible
+## Kraken-Aktualisierung
 
-If you are looking for a GUI around Kraken that does not just run OCR, but treats it as an editable workflow, then Bottled Kraken is built exactly for that use case.
+Unter **Hinweise → Kraken** kann die aktive Kraken-Version über
+**Kraken aktualisieren** auf den neuesten Stand des offiziellen
+`mittagessen/kraken`-Repositories gebracht werden. Der Updater ermittelt das neueste stabile GitHub-Release, löst dessen Tag auf
+einen konkreten Commit auf und lädt das zu genau diesem Commit gehörende
+GitHub-Quellarchiv in einen privaten Benutzerordner und prüft dort die für
+Bottled Kraken benötigten Kraken-Module. Erst nach erfolgreicher Prüfung wird
+der neue Stand atomar aktiviert; wirksam wird er nach einem Neustart der
+Anwendung.
+
+Die mit der Anwendung gebündelte Kraken-Fassung bleibt als Rückfallversion
+erhalten. Die aktualisierte Fassung wird zur Laufzeit gezielt vor der
+gebündelten Fassung geladen, auch in einem PyInstaller-Build. Mit
+`BOTTLED_KRAKEN_DISABLE_KRAKEN_OVERLAY=1` lässt sich die externe Fassung für
+einen Start deaktivieren. Für den Vorgang ist keine separate Git-, Python- oder
+`pip`-Installation nötig; der Updater verwendet die vorhandene Bottled-Kraken-
+Laufzeit und lädt ausschließlich das festgelegte GitHub-Commitarchiv.
 
 ---
 
-## License
+## Lizenz
 
-This repository is licensed under **MIT**.  
-Please also note the licenses of the external models and libraries you use together with the application.
+Der originale Bottled-Kraken-Code steht unter **MIT**. Abhängigkeiten und
+optionale Downloads behalten ihre eigenen Lizenzen. Besonders wichtig:
+PyMuPDF/MuPDF ist dual unter **AGPL-3.0** oder einer kommerziellen
+Artifex-Lizenz verfügbar. Vor der Weitergabe eines gebündelten Binaries muss
+die passende Lizenzroute geklärt und vollständig eingehalten werden. Details
+stehen in `THIRD_PARTY_NOTICES.md`.
+
+## Windows 10/11: native Desktop-App und eScriptorium über WSL2
+
+Die Windows-Ausgabe wird als native PyInstaller-EXE gebaut. eScriptorium läuft
+unter Windows in einer eigenen Ubuntu-24.04-WSL2-Distribution. Eine fehlgeschlagene
+Teilinstallation kann über **eScriptorium installieren / aktualisieren** fortgesetzt
+werden. Weitere Windows-, WSL2-, Audio-, SmartScreen-, Langpfad-, icon.ico- und PyInstaller-Hinweise stehen in
+`WINDOWS_10_11_HINWEISE.txt`.
+
+## Registry- und MainWindow-Diagnose
+
+Die historische Kompatibilitätsschicht kann bei Bedarf nach einem echten
+Anwendungsstart protokolliert werden. Dazu Bottled Kraken einmal mit folgender
+Umgebungsvariable starten:
+
+```bash
+BOTTLED_KRAKEN_WRITE_REGISTRY_DIAGNOSTICS=1 python main.py
+```
+
+Der Lauf erzeugt anschließend unter dem Bottled-Kraken-Benutzerdatenordner die
+Datei `logs/registry_diagnostics.json`. Sie enthält die tatsächlich während
+dieses Prozesses aufgetretenen Registry-Kollisionen sowie alle mehrfachen
+`MainWindow.<Attribut> = ...`-Bindungen. Für jede Bindung wird markiert, welche
+Fassung am Ende tatsächlich aktiv ist.
+
+Für neue Änderungen gilt:
+
+- keine neuen Funktionsnamen mit `_vN`, `_vNc`, `_final` oder `_finalN`
+- bestehende Implementierung ersetzen, statt eine weitere Variante anzuhängen
+- gewollte Erweiterungsketten müssen ihren unmittelbaren Vorgänger in einer
+  eindeutig benannten `_PREV_...`-Variable festhalten und aufrufen
+- neue `MainWindow`-Attribute dürfen nicht von mehr als zwei Modulen geschrieben
+  werden; bestehende Ausnahmen sind in der Testsuite eingefroren und dürfen nur
+  abgebaut, nicht erweitert werden

@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.common import _crop_overlay_box_to_data_url_strict
 def _bk_lm_behavior_for_parent(parent, scope: str = "all_lines") -> dict:
     try:
         if parent is not None and hasattr(parent, "_lm_behavior_for_scope"):
@@ -118,8 +119,23 @@ try:
 except Exception:
     _BK_LM_BEHAVIOR_PREV_QUEUE_MAKE_WORKER = None
 def _bk_lm_behavior_queue_make_worker(self, item, worker_recs):
-    behavior = getattr(self, "lm_behavior", None) or _BK_LM_BEHAVIOR_DEFAULTS
-    return _bk_lm_with_active_behavior(behavior, lambda: _BK_LM_BEHAVIOR_PREV_QUEUE_MAKE_WORKER(self, item, worker_recs))
+    behavior = _bk_lm_behavior_normalized(getattr(self, "lm_behavior", None) or _BK_LM_BEHAVIOR_DEFAULTS)
+    worker = _bk_lm_with_active_behavior(
+        behavior,
+        lambda: _BK_LM_BEHAVIOR_PREV_QUEUE_MAKE_WORKER(self, item, worker_recs),
+    )
+    # Make the settings explicit on the child worker instead of relying only
+    # on the temporary module-global active behavior. This prevents later
+    # wrappers/import-order changes from silently falling back to defaults.
+    try:
+        worker.lm_behavior_scope = str(getattr(self, "lm_behavior_scope", "all_lines") or "all_lines")
+        worker.lm_behavior = dict(behavior)
+        worker.script_mode = _normalize_ai_script_mode(
+            behavior.get("script_mode", getattr(worker, "script_mode", AI_SCRIPT_PRINT))
+        )
+    except Exception:
+        pass
+    return worker
 if callable(_BK_LM_BEHAVIOR_PREV_QUEUE_MAKE_WORKER):
     BKQueueLMBatchWorker._make_worker = _bk_lm_behavior_queue_make_worker
 try:
@@ -174,10 +190,10 @@ def _bk_lm_behavior_is_short_valid_text(text: str) -> bool:
     if not t or "\n" in t or _bk_lm_behavior_is_json_debris(t):
         return False
     return bool(
-        re.fullmatch(r"\d{1,4}\.?", t)
-        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\s*\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[IVXLCDM]{1,8}\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß]\.?", t)
+        re.fullmatch(r"\d{1,4}[.,;:)]?", t)
+        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\s*[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[IVXLCDM]{1,8}[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß][.,;:)]?", t)
     )
 
 
@@ -216,9 +232,15 @@ def _bk_lm_behavior_request_overlay_box_revision(self, rv, page_context_lines: L
     behavior = _bk_lm_behavior_for_worker(self)
     kraken_text = _bk_lm_behavior_filter_text(self, getattr(rv, "text", "") or "")
     mode = _bk_lm_behavior_revision_mode(behavior)
-    if not behavior.get("use_overlay", True) or not getattr(rv, "bbox", None):
+    # Standard LM transcription is always driven by the target overlay box.
+    # The page-OCR checkbox controls context only; it must never replace or skip
+    # the independent crop request for this line.
+    if not getattr(rv, "bbox", None):
         return kraken_text
-    line_data_url = _crop_single_line_to_data_url(
+    # Build the request from the exact target overlay box.  This helper has
+    # deliberately no full-page fallback: a malformed/missing box is an error,
+    # not permission to send the whole page again.
+    line_data_url = _crop_overlay_box_to_data_url_strict(
         self.path,
         rv,
         pad_x=int(behavior.get("pad_x", 0) or 0),
@@ -233,20 +255,22 @@ def _bk_lm_behavior_request_overlay_box_revision(self, rv, page_context_lines: L
             page_context = ""
     if mode == "lm_first":
         system_prompt = (
-            "Du bist ein reiner OCR-Leser. Lies ausschließlich den übergebenen Bildausschnitt neu. "
-            "Der vorhandene Kraken-Text ist nicht die Quelle und darf nicht bevorzugt werden. "
-            "Gib nur die tatsächlich im Bildausschnitt sichtbare einzelne Zeile zurück."
+            "Du bist ein OCR-Leser. Transkribiere die gezeigte Bildzeile exakt. "
+            "Antworte sofort, ohne Analyse."
         )
         user_prompt = (
-            f"Zeilen-ID: {int(getattr(rv, 'idx', local_pos))}\n\n"
-            f"Kraken-OCR nur als grober Hinweis, nicht als Zieltext:\n{kraken_text}\n\n"
-            f"Seitenkontext, nur zur Orientierung falls aktiviert:\n{page_context}\n\n"
-            "Aufgabe: Transkribiere den Bildausschnitt selbstständig neu. "
-            "Übernimm nicht automatisch den Kraken-Text. Keine Erklärung, kein Markdown, genau eine Zeile."
+            f"Zeilen-ID: {int(getattr(rv, 'idx', local_pos))}\n"
+            f"Kraken-Hinweis (nicht Zieltext): {kraken_text}\n"
+            + (f"Kontext: {page_context}\n" if page_context else "")
+            + "Gib genau eine Zeile zurück, kein Markdown."
         )
     else:
-        system_prompt = self._tr("ai_prompt_overlay_compare_system")
+        system_prompt = str(self._tr("ai_prompt_overlay_compare_system"))
         user_prompt = _bk_lm_behavior_prompt(self, getattr(rv, "idx", local_pos), kraken_text, page_context)
+    if not bool(getattr(self, "enable_thinking", False)):
+        system_prompt = "/no_think\n" + str(system_prompt)
+        user_prompt = "/no_think\n" + str(user_prompt)
+
     payload = {
         "model": self.lm_model,
         "messages": [
@@ -258,10 +282,15 @@ def _bk_lm_behavior_request_overlay_box_revision(self, rv, page_context_lines: L
         ],
         **self._build_sampling_payload(
             response_format=self._response_format_single_text(),
-            override_max_tokens=max(360, min(max(900, int(getattr(self, "max_tokens", 1200) or 1200)), 1800)),
+            override_max_tokens=max(1, int(getattr(self, "max_tokens", 1200) or 1200)),
         ),
     }
-    data = self._post_json(payload)
+    self._bk_strict_overlay_transcription_active = True
+    self._bk_active_overlay_crop_data_url = line_data_url
+    try:
+        data = self._post_json(payload)
+    finally:
+        self._bk_active_overlay_crop_data_url = None
     content = self._extract_message_content(data)
     text = _bk_lm_behavior_filter_text(self, _bk_fix46_parse_single_text(content))
     if _bk_lm_behavior_is_json_debris(text) or "\n" in str(text or ""):
@@ -307,7 +336,7 @@ def _bk_lm_behavior_post_single_line(worker, system_prompt: str, user_prompt: st
         ],
         **worker._build_sampling_payload(
             response_format=worker._response_format_single_text(),
-            override_max_tokens=max(160, min(max_tokens, int(getattr(worker, 'max_tokens', max_tokens) or max_tokens))),
+            override_max_tokens=max(1, min(int(max_tokens), int(getattr(worker, 'max_tokens', max_tokens) or max_tokens))),
         ),
     }
     data = worker._post_json(payload)
@@ -417,12 +446,210 @@ def _bk_lm_behavior_sanity_merge_line(worker, kraken_text: str, lm_box_text: str
         return _BK_LM_BEHAVIOR_PREV_SANITY_MERGE(worker, kt, lm_visible or lt, page_visible or pt, prev_final_text)
     return lm_visible or kt or page_visible
 _bk_fix46_sanity_merge_line = _bk_lm_behavior_sanity_merge_line
+
+
+# ---------------------------------------------------------------------------
+# Settings-faithful, one-overlay-box-per-request LM transcription path
+# ---------------------------------------------------------------------------
+# Standard LM transcription scopes (current line, selected lines, all lines)
+# always transcribe every target overlay box separately. A full-page OCR may be
+# requested once as optional context when the user enables it, but it never
+# replaces the line-by-line overlay transcription.
+
+
+
+
+def _bk_lm_behavior_overlay_ocr_per_line(worker, recs, page_context_lines=None) -> dict:
+    """Transcribe exactly one overlay crop per model request.
+
+    The optional full-page OCR is only passed in as textual context. It never
+    replaces a crop request and several overlay boxes are never combined into
+    one vision request.
+    """
+    behavior = _bk_lm_behavior_for_worker(
+        worker,
+        getattr(worker, "lm_behavior_scope", "all_lines"),
+    )
+    recs = list(recs or [])
+    results = {}
+    targets = [rv for rv in recs if getattr(rv, "bbox", None)]
+    if not targets:
+        return results
+
+    total = len(targets)
+    for local_pos, rv in enumerate(targets):
+        if worker._cancelled or worker.isInterruptionRequested():
+            raise RuntimeError(worker._tr("msg_ai_cancelled"))
+
+        idx = int(getattr(rv, "idx", local_pos))
+        try:
+            worker.status_changed.emit(
+                worker._tr(
+                    "ai_status_fix46_overlay_line",
+                    local_pos + 1,
+                    total,
+                    os.path.basename(getattr(worker, "path", "")),
+                )
+            )
+        except Exception:
+            pass
+        try:
+            text = _bk_lm_behavior_request_overlay_box_revision(
+                worker,
+                rv,
+                page_context_lines or [],
+                local_pos,
+                total,
+            )
+            text = _bk_lm_behavior_candidate_visible_text(worker, text)
+        except Exception as exc:
+            # Cancellation is control flow, not a recoverable line failure.
+            # Re-raise immediately so no following overlay box is requested.
+            if worker._cancelled or worker.isInterruptionRequested():
+                raise RuntimeError(worker._tr("msg_ai_cancelled")) from exc
+            # A real failure of one overlay box must not destroy the whole page.
+            # Preserve the original line for this one box and continue.
+            try:
+                print(f"LM overlay line {idx} failed: {exc}")
+            except Exception:
+                pass
+            text = ""
+
+        if text:
+            results[idx] = text
+
+        try:
+            # Keep progress monotonic while reserving the first 10% for optional
+            # full-page context OCR and the last 10% for final assembly.
+            worker.progress_changed.emit(10 + int(((local_pos + 1) / max(1, total)) * 80))
+        except Exception:
+            pass
+
+    return results
+
+
+# Compatibility name retained because older feature modules/tests may still
+# import it. The implementation is deliberately sequential and one-image-only.
+
+try:
+    _BK_LM_BEHAVIOR_PREV_FAST_AI_RUN = AIRevisionWorker.run
+except Exception:
+    _BK_LM_BEHAVIOR_PREV_FAST_AI_RUN = None
+
+
+def _bk_lm_behavior_fast_ai_run(self):
+    # Dedicated full-page LM OCR is a separate explicit mode and remains on its
+    # specialized worker path. The crop-only guard applies to normal line
+    # transcription, not to that dedicated full-page command.
+    if isinstance(self, BKFullPageLMOCRWorker):
+        if callable(_BK_LM_BEHAVIOR_PREV_FAST_AI_RUN):
+            return _BK_LM_BEHAVIOR_PREV_FAST_AI_RUN(self)
+        return None
+
+    # Authoritative line-transcription mode: at most one full-page image request
+    # for optional context; every later image request must be the active overlay
+    # crop. The low-level guard installed late in app_features enforces this.
+    self._bk_strict_overlay_transcription_active = True
+    self._bk_active_overlay_crop_data_url = None
+    if self._cancelled or self.isInterruptionRequested():
+        self.failed_revision.emit(self.path, self._tr("msg_ai_cancelled"))
+        return
+    try:
+        recs = list(getattr(self, "recs", []) or [])
+        if not recs:
+            self.finished_revision.emit(self.path, [])
+            return
+        behavior = _bk_lm_behavior_for_worker(
+            self,
+            getattr(self, "lm_behavior_scope", "all_lines"),
+        )
+        original = [_clean_ocr_text(getattr(rv, "text", "") or "") for rv in recs]
+        mode = _bk_lm_behavior_revision_mode(behavior)
+        self.progress_changed.emit(2)
+
+        page_lines = []
+        if behavior.get("page_ocr", False):
+            page_lines = _bk_fix46_get_page_context(self) or []
+        if self._cancelled or self.isInterruptionRequested():
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
+        self.progress_changed.emit(10)
+
+        # Standard transcription always uses every available overlay box,
+        # one box per independent vision request. The full-page OCR, when
+        # enabled, is context only and is never used as a substitute result.
+        overlay_by_idx = _bk_lm_behavior_overlay_ocr_per_line(self, recs, page_lines)
+        if self._cancelled or self.isInterruptionRequested():
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
+
+        try:
+            self.status_changed.emit(self._tr("ai_status_fix46_finalize", os.path.basename(self.path)))
+        except Exception:
+            pass
+        self.progress_changed.emit(92)
+
+        lm_candidates = []
+        for i, rv in enumerate(recs):
+            idx = int(getattr(rv, "idx", i))
+            candidate = overlay_by_idx.get(idx, "")
+            lm_candidates.append(_bk_lm_behavior_candidate_visible_text(self, candidate))
+
+        if mode == "lm_first":
+            final_lines = [lm_candidates[i] or original[i] for i in range(len(original))]
+        elif mode == "kraken_first":
+            final_lines = []
+            for i, kt in enumerate(original):
+                if not kt or _bk_lm_behavior_is_placeholder_source_text(kt):
+                    final_lines.append(lm_candidates[i] or kt)
+                else:
+                    final_lines.append(kt)
+        else:
+            # The per-overlay vision request already receives the Kraken line,
+            # optional page context and the selected revision-mode prompt. Use
+            # that one line-level answer directly; do not perform a second LM
+            # decision/revision request, which was the main source of slowness.
+            final_lines = [lm_candidates[i] or original[i] for i in range(len(original))]
+
+        try:
+            tmp_recs = [RecordView(i, final_lines[i], recs[i].bbox) for i in range(len(final_lines))]
+            tmp_recs = _bk_fix43_resolve_ditto_marks_in_recs(tmp_recs)
+            final_lines = [_clean_ocr_text(getattr(rv, "text", "") or "") for rv in tmp_recs]
+        except Exception:
+            try:
+                final_lines = _bk_fix43_resolve_ditto_marks_in_lines(final_lines)
+            except Exception:
+                pass
+        if len(final_lines) != len(recs):
+            raise ValueError(self._tr("ai_err_final_merge_count", len(final_lines), len(recs)))
+        if self._cancelled or self.isInterruptionRequested():
+            raise RuntimeError(self._tr("msg_ai_cancelled"))
+        self.progress_changed.emit(100)
+        self.status_changed.emit(self._tr("ai_status_done", os.path.basename(self.path)))
+        self.finished_revision.emit(self.path, final_lines)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(e)
+        self.failed_revision.emit(self.path, self._tr("err_http_with_body", e, body))
+    except urllib.error.URLError as e:
+        self.failed_revision.emit(self.path, self._tr("ai_err_server_unreachable", e))
+    except socket.timeout:
+        self.failed_revision.emit(self.path, self._tr("ai_err_timeout"))
+    except RuntimeError as e:
+        self.failed_revision.emit(self.path, str(e))
+    except Exception as e:
+        self.failed_revision.emit(self.path, "".join(traceback.format_exception(type(e), e, e.__traceback__)))
+
+
+if callable(_BK_LM_BEHAVIOR_PREV_FAST_AI_RUN):
+    AIRevisionWorker.run = _bk_lm_behavior_fast_ai_run
 __all__ = [
     '_bk_fix46_request_overlay_box_revision',
     '_bk_fix46_sanity_merge_line',
     '_bk_lm_behavior_ai_init',
     '_bk_lm_behavior_batch_init',
     '_bk_lm_behavior_batch_revise_one',
+    '_bk_lm_behavior_overlay_ocr_per_line',
     '_bk_lm_behavior_candidate_visible_text',
     '_bk_lm_behavior_filter_config',
     '_bk_lm_behavior_for_parent',

@@ -1,4 +1,26 @@
 EN_AI_PROMPT_TEXTS_TRANSLATIONS = {
+    'ai_prompt_export_orientation_portrait': (
+        'The target document will be exported in portrait orientation (A4 portrait). Plan the number of columns and column widths for a tall, narrow page.'
+    ),
+    'ai_prompt_export_orientation_landscape': (
+        'The target document will be exported in landscape orientation (A4 landscape). There is more horizontal space available for columns.'
+    ),
+    'ai_prompt_export_zones_user_compact': (
+        '/no_think\n'
+        'Immediately return final JSON only. No analysis, no thinking text, no explanation.\n'
+        'Create a table exclusively from candidates_from_selected_zones_only.\n'
+        'The page image may only serve as reading context. Do not export any row that is not in the candidates.\n'
+        'Use only these JSON keys: {0}.\n'
+        'Columns: {1}\n'
+        'Rules:\n'
+        '- Each candidate n is at most one table row. Never merge or duplicate candidates.\n'
+        '- Values from cells are already assigned to the drawn selection zones; stick to that.\n'
+        '- If unknown exists as a column: only write real text from cells.unknown, never the word Unknown as a placeholder.\n'
+        '- heading and subheading are normal free text columns, but not an instruction to create additional data rows.\n'
+        '- Leave missing or uncertain cells empty.\n'
+        '- Answer format exactly: {{"rows":[{{...}}]}}.\n'
+        'Context:\n{2}\n/no_think'
+    ),
     'ai_prompt_export_zones_system': (
         'You are a table extractor. Without analysis, immediately return valid JSON only in the format {{"rows":[{{...}}]}}. No markdown, no explanation, no processing notes. Use real register entries only. Ignore page headers, headings, separators, and decorative marks. Each output row must represent exactly one visual register row; never merge several OCR candidates into one table cell. Fill unknown only when that column has a real row value; never fill it with the whole original line.'
     ),

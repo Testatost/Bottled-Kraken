@@ -93,8 +93,7 @@ class MainWindowExportDialogsAndBatchFlowMixin:
                 QMessageBox.warning(
                     self,
                     self._tr("warn_title"),
-                    f"Die Datei kann nicht geschrieben werden:\n\n{dest_path}\n\n"
-                    "Möglicherweise ist sie noch in einem anderen Programm geöffnet."
+                    self._tr("export_permission_error", dest_path),
                 )
                 return
             except Exception as e:
@@ -160,6 +159,16 @@ class MainWindowExportDialogsAndBatchFlowMixin:
             width, height = export_image.size
             c.setPageSize((width, height))
             c.drawImage(ImageReader(export_image), 0, 0, width=width, height=height)
+            # BK-OPT: reportlab has already consumed the pixel data by this point
+            # (verified: closing here produces a byte-identical PDF vs. leaving it
+            # open until GC). Closing explicitly matters most for combined
+            # multi-page PDF export, where this function runs in a loop over many
+            # large scanned pages and previously kept every one of them alive in
+            # memory until Python's garbage collector got around to it.
+            try:
+                export_image.close()
+            except Exception:
+                pass
             for rv in record_views:
                 if not rv.bbox or not str(rv.text or "").strip():
                     continue
@@ -188,8 +197,7 @@ class MainWindowExportDialogsAndBatchFlowMixin:
                 c.save()
             except PermissionError as e:
                 raise PermissionError(
-                    f"PDF konnte nicht gespeichert werden:\n{path}\n\n"
-                    "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
+                    self._tr("err_pdf_save_locked").format(path)
                 ) from e
         def _checked_or_selected_export_tasks(self):
             checked_tasks = self._checked_queue_tasks()

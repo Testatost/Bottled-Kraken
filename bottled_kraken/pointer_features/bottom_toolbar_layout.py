@@ -1,44 +1,9 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('ptr', globals())
 def _ptr_rebuild_secondary_button_rows_v4(window):
     return
-_ptr_prev_mainwindow_init_v4 = MainWindow.__init__
-_ptr_prev_mainwindow_retranslate_v4 = MainWindow.retranslate_ui
-def _ptr_mainwindow_init_wrapper_v4(self, *args, **kwargs):
-    _ptr_prev_mainwindow_init_v4(self, *args, **kwargs)
-    _ptr_remove_toolbar_feature_buttons_v4(self)
-    _ptr_remove_secondary_feature_buttons_v4(self)
-def _ptr_mainwindow_retranslate_ui_wrapper_v4(self, *args, **kwargs):
-    _ptr_prev_mainwindow_retranslate_v4(self, *args, **kwargs)
-    try:
-        self.ptr_update_feature_texts()
-    except Exception:
-        pass
-    _ptr_remove_toolbar_feature_buttons_v4(self)
-    _ptr_remove_secondary_feature_buttons_v4(self)
-def _ptr_install_feature_actions_v4(self):
-    if getattr(self, "_ptr_feature_actions_installed", False):
-        return
-    self._ptr_feature_actions_installed = True
-    self.act_ptr_multi_ocr = QAction(_ptr_ui_tr(self, "ptr_multi_ocr_title"), self)
-    self.act_ptr_multi_ocr.triggered.connect(self.ptr_start_multi_ocr)
-    self.act_ptr_ai_tools = QAction(_ptr_ui_tr(self, "ptr_ai_tools_title"), self)
-    self.act_ptr_ai_tools.triggered.connect(self.ptr_open_ai_tools_for_current_task)
-    self.act_ptr_multi_reopen = QAction(_ptr_ui_tr(self, "ptr_ai_reopen"), self)
-    self.act_ptr_multi_reopen.triggered.connect(self.ptr_reopen_multi_followup)
-    if hasattr(self, "models_menu") and self.models_menu is not None:
-        self.models_menu.addSeparator()
-        self.models_menu.addAction(self.act_ptr_multi_ocr)
-        self.models_menu.addAction(self.act_ptr_multi_reopen)
-        if hasattr(self, "_place_kraken_auto_revision_action_at_bottom"):
-            self._place_kraken_auto_revision_action_at_bottom()
-    self.ptr_update_feature_texts()
-    _ptr_remove_toolbar_feature_buttons_v4(self)
-    _ptr_remove_secondary_feature_buttons_v4(self)
 _ptr_rebuild_secondary_button_rows = _ptr_rebuild_secondary_button_rows_v4
-MainWindow.__init__ = _ptr_mainwindow_init_wrapper_v4
-MainWindow.retranslate_ui = _ptr_mainwindow_retranslate_ui_wrapper_v4
-MainWindow._ptr_install_feature_actions = _ptr_install_feature_actions_v4
 def _ptr_remove_bottom_feature_row_container_v7(window):
     for attr in ("_ptr_bottom_feature_row_container_v5", "_ptr_bottom_rows_container_v7"):
         container = getattr(window, attr, None)
@@ -171,11 +136,9 @@ def _ptr_rebuild_secondary_feature_rows_v7(window):
     except Exception:
         pass
 def _ptr_mainwindow_init_wrapper_v7(self, *args, **kwargs):
-    _ptr_prev_mainwindow_init_v4(self, *args, **kwargs)
     _ptr_remove_toolbar_feature_buttons_v4(self)
     _ptr_rebuild_secondary_feature_rows_v7(self)
 def _ptr_mainwindow_retranslate_ui_wrapper_v7(self, *args, **kwargs):
-    _ptr_prev_mainwindow_retranslate_v4(self, *args, **kwargs)
     try:
         self.ptr_update_feature_texts()
     except Exception:
@@ -201,19 +164,14 @@ def _ptr_install_feature_actions_v7(self):
     self.ptr_update_feature_texts()
     _ptr_remove_toolbar_feature_buttons_v4(self)
     _ptr_rebuild_secondary_feature_rows_v7(self)
-MainWindow.__init__ = _ptr_mainwindow_init_wrapper_v7
-MainWindow.retranslate_ui = _ptr_mainwindow_retranslate_ui_wrapper_v7
+register_init_delta(_ptr_mainwindow_init_wrapper_v7)
+register_retranslate_delta(_ptr_mainwindow_retranslate_ui_wrapper_v7)
 MainWindow._ptr_install_feature_actions = _ptr_install_feature_actions_v7
 __all__ = [name for name in globals() if not name.startswith("__")]
 __all__ = [
-    '_ptr_install_feature_actions_v4',
     '_ptr_install_feature_actions_v7',
-    '_ptr_mainwindow_init_wrapper_v4',
     '_ptr_mainwindow_init_wrapper_v7',
-    '_ptr_mainwindow_retranslate_ui_wrapper_v4',
     '_ptr_mainwindow_retranslate_ui_wrapper_v7',
-    '_ptr_prev_mainwindow_init_v4',
-    '_ptr_prev_mainwindow_retranslate_v4',
     '_ptr_rebuild_secondary_button_rows',
     '_ptr_rebuild_secondary_button_rows_v4',
     '_ptr_rebuild_secondary_feature_rows_v7',

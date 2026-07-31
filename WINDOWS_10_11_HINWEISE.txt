@@ -1,0 +1,166 @@
+BOTTLED KRAKEN 3.4 – WINDOWS 10/11 HINWEISE
+=============================================
+
+Zielsystem
+----------
+Diese Ausgabe ist für Windows 10 und Windows 11 als native PyInstaller-EXE
+vorgesehen. Der Build muss unter Windows erstellt werden; PyInstaller ist kein
+Cross-Compiler.
+
+Empfohlene Build-Umgebung
+-------------------------
+- Windows 10 oder Windows 11, 64 Bit
+- Python 3.13.x, 64 Bit, mit aktivierter Option "Add python.exe to PATH"
+- PowerShell 5.1 oder PowerShell 7
+- kurzer Projektpfad, zum Beispiel C:\bk
+- Visual C++ Build Tools für Pakete, die aus Quellcode gebaut werden müssen
+- Internetzugang für pip, PyTorch-CPU-Wheels, Whisper-Modelle, Kraken-Updates
+  und eScriptorium/WSL-Downloads
+
+Vorprüfung
+----------
+Vor einem Release-Build kann die lokale Umgebung geprüft werden:
+
+    .\check_windows_10_11_build_environment.ps1
+
+Das Skript prüft unter anderem 64-Bit-Python, WSL-Status, Langpfade, icon.ico,
+Projektpfadlänge und Visual-C++-Build-Tools.
+
+Schnellbuild
+------------
+PowerShell im Projektwurzelverzeichnis öffnen und ausführen:
+
+    Set-ExecutionPolicy -Scope Process Bypass
+    .\build_windows_10_11.ps1
+
+Das Skript erstellt .venv-win, installiert die gesperrten Windows-Abhängigkeiten,
+installiert Kraken ohne seine POSIX/CoreML-Zusatzabhängigkeit, prüft die Kraken-
+Abhängigkeiten, führt die Tests im Qt-Offscreen-Modus aus, entfernt diese Qt-
+Variable wieder und baut anschließend mit PyInstaller:
+
+    dist\Bottled Kraken.exe
+
+Manuelle Installation der Python-Pakete
+---------------------------------------
+Für eine bestehende PyCharm-venv:
+
+    python -m pip install --upgrade pip wheel
+    python -m pip install "setuptools==80.10.2" "backports.tarfile==1.2.0"
+    python -m pip install -r requirements-lock-windows.txt
+    python -m pip install --no-deps kraken==7.0.3
+    python -m pip check
+    python -c "import kraken; print('kraken OK')"
+    python -c "import pkg_resources, backports.tarfile, faster_whisper; print('runtime OK')"
+    python -m pip install pyinstaller pytest
+
+Hinweis: Im automatischen Build wird die bekannte Kraken/coremltools-Meldung aus
+`pip check` unter Windows gezielt ignoriert. Jede andere fehlende oder
+widersprüchliche Abhängigkeit bricht den Build ab.
+
+Warum wird Kraken mit --no-deps installiert?
+--------------------------------------------
+Kraken 7.x deklariert coremltools als Abhängigkeit. coremltools 9.0 liefert
+keine normalen Windows-Wheels. Für Bottled Krakens OCR-Pfad wird CoreML nicht
+benötigt; die Windows-Ausgabe installiert daher die konkret benötigten Kraken-
+Laufzeitabhängigkeiten explizit und Kraken selbst anschließend ohne automatische
+Abhängigkeitsauflösung. macOS-/CoreML-Konvertierung ist in dieser Windows-Ausgabe
+nicht Bestandteil des Zielumfangs. Bottled Kraken installiert beim Start unter
+Windows einen kleinen CoreML-Import-Shim, damit Krakens VGSL-Module trotz
+fehlendem coremltools importierbar bleiben. Dieser Shim ist kein CoreML-Ersatz
+für Konvertierung oder CoreML-Inferenz.
+
+PyInstaller
+-----------
+Der Build erfolgt mit:
+
+    python -m PyInstaller --clean --noconfirm main.spec
+
+Alte Artefakte werden vorher gelöscht:
+
+    Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+
+Bei langen Projektpfaden kann Windows trotz moderner Python-Versionen an der
+klassischen 260-Zeichen-Grenze scheitern, weil PyInstaller tiefe Zwischenpfade in
+`build\` anlegt. Für Release-Builds wird ein kurzer Pfad wie `C:\bk` empfohlen.
+Zusätzlich sollte die Windows-Langpfadunterstützung aktiviert sein.
+
+Programmsymbol
+--------------
+`main.spec` bindet `icon.ico` nur ein, wenn die Datei im Projektwurzelverzeichnis
+existiert. Fehlt sie, wird die EXE ohne eigenes Programmsymbol gebaut. Das ist
+kein Buildfehler, sollte vor einem Release aber bewusst geprüft werden.
+
+SmartScreen und Defender
+------------------------
+Ohne Codesignatur kann Windows SmartScreen beim ersten Start einer heruntergeladenen
+EXE warnen. In diesem Fall über "Weitere Informationen" und "Trotzdem ausführen"
+fortfahren, sofern die Datei aus der eigenen Release-Quelle stammt. Microsoft
+Defender kann neue PyInstaller-Builds außerdem verzögert prüfen; beim ersten Start
+kann es deshalb einige Sekunden dauern.
+
+Whisper und Mikrofon
+--------------------
+Whisper nutzt faster-whisper/CTranslate2 und sounddevice. In der Windows-EXE läuft
+das Zeilendiktat über einen getrennten UTF-8-Unterprozess. Umlaute und andere
+Unicode-Zeichen werden JSON-sicher übertragen. Bei fehlendem Mikrofonzugriff die
+Windows-Datenschutzeinstellungen für Mikrofonzugriff prüfen.
+
+eScriptorium unter Windows
+--------------------------
+eScriptorium läuft nicht als native Windows-Django-Installation, sondern in einer
+eigenen Ubuntu-24.04-WSL2-Distribution namens BottledKraken-eScriptorium.
+Bottled Kraken nutzt wsl.exe, importiert die Distribution und verwaltet die
+systemd-Dienste dort. PostgreSQL und Redis laufen ausschließlich in dieser
+WSL2-Umgebung.
+
+WSL2 einrichten
+---------------
+Auf einem Windows-System ohne WSL zuerst eine PowerShell mit Administratorrechten
+öffnen und ausführen:
+
+    wsl --install
+
+Danach Windows neu starten. Im BIOS/UEFI muss Virtualisierung aktiviert sein.
+Falls `wsl --install` meldet, dass Virtualisierung fehlt, die Option dort zuerst
+aktivieren. Bottled Kraken kann eScriptorium erst installieren, wenn `wsl.exe`
+verfügbar ist und WSL2 funktioniert.
+
+Benutzerdaten
+-------------
+Native Windows-Daten liegen unter:
+
+    %LOCALAPPDATA%\BottledKraken
+
+eScriptorium/WSL-Profildaten liegen unter:
+
+    %LOCALAPPDATA%\BottledKraken\escriptorium\platforms\windows_wsl
+
+Die WSL-Linux-Daten sind zusätzlich erreichbar über:
+
+    \\wsl.localhost\BottledKraken-eScriptorium\opt\bottled-kraken-escriptorium
+
+Browser und Explorer
+--------------------
+Browserlinks werden unter Windows über os.startfile() an den Standardbrowser
+übergeben. Ordner- und Zugangsdaten-Buttons verwenden den Explorer bzw. die
+registrierte Standardanwendung.
+
+Kraken-Update
+-------------
+Der Update-Button im Reiter "Kraken" lädt das neueste veröffentlichte Kraken-
+Release, prüft das Archiv und aktiviert die neue Version erst nach erfolgreicher
+Importprüfung. Nach dem Update ist ein Neustart von Bottled Kraken nötig.
+
+Fehlersuche
+-----------
+Das Anwendungslog liegt unter:
+
+    %LOCALAPPDATA%\BottledKraken\logs\bottled_kraken.log
+
+Für mehr Details vor dem Start setzen:
+
+    $env:BOTTLED_KRAKEN_LOG_LEVEL = "DEBUG"
+    & ".\dist\Bottled Kraken.exe"
+
+WSL-Pfadumwandlung:
+Bottled Kraken wandelt lokale Windows-Pfade selbst in /mnt/c/... um. Das Paket wslu beziehungsweise der Befehl wslpath wird fuer den Bottled-Kraken-Installer nicht mehr vorausgesetzt.

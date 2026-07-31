@@ -559,6 +559,8 @@ class MainWindowMenuConstructionMixin:
             self._scan_whisper_models()
             self._rebuild_whisper_model_submenu()
             self._update_whisper_menu_status()
+            self.act_escriptorium = menubar.addAction(self._tr("menu_escriptorium"))
+            self.act_escriptorium.triggered.connect(self.show_escriptorium_dialog)
             self.act_lm_help = menubar.addAction(self._tr("act_help"))
             self.act_lm_help.triggered.connect(self.show_lm_help_dialog)
             self.act_set_manual_lm_url = QAction(self._tr("act_set_manual_lm_url"), self)
@@ -589,31 +591,6 @@ class MainWindowMenuConstructionMixin:
             self.act_appearance = QAction(self._tr("menu_appearance"), self)
             self.act_appearance.triggered.connect(self.open_appearance_dialog)
             self.options_menu.addAction(self.act_appearance)
-            self.options_menu.addSeparator()
-            self.hw_menu = BKStayOpenMenu(self._tr("menu_hw"), self.options_menu); self.options_menu.addMenu(self.hw_menu)
-            hw_group = QActionGroup(self)
-            self.hw_actions: Dict[str, QAction] = {}
-            for key, dev in [("hw_cpu", "cpu"), ("hw_cuda", "cuda"), ("hw_rocm", "rocm")]:
-                act = QAction(self._tr(key), self)
-                act.setCheckable(True)
-                if dev == self.device_str:
-                    act.setChecked(True)
-                act.triggered.connect(lambda checked, d=dev: self.set_device(d))
-                hw_group.addAction(act)
-                self.hw_menu.addAction(act)
-                self.hw_actions[dev] = act
-                if dev == "cuda":
-                    self.act_install_cuda_backend = QAction(self._tr("hw_install_cuda_backend"), self)
-                    self.act_install_cuda_backend.triggered.connect(
-                        lambda checked=False: self.open_integrated_backend_installer("nvidia-cuda")
-                    )
-                    self.hw_menu.addAction(self.act_install_cuda_backend)
-                elif dev == "rocm":
-                    self.act_install_rocm_backend = QAction(self._tr("hw_install_rocm_backend"), self)
-                    self.act_install_rocm_backend.triggered.connect(
-                        lambda checked=False: self.open_integrated_backend_installer("amd-rocm")
-                    )
-                    self.hw_menu.addAction(self.act_install_rocm_backend)
             self.options_menu.addSeparator()
             self.reading_menu = BKStayOpenMenu(self._tr("menu_reading"), self.options_menu); self.options_menu.addMenu(self.reading_menu)
             read_group = QActionGroup(self)
@@ -654,5 +631,3 @@ class MainWindowMenuConstructionMixin:
             self.act_overlay_resize_boxes = QAction(self._tr("overlay_resize_menu"), self)
             self.act_overlay_resize_boxes.triggered.connect(self.resize_overlay_boxes_dialog)
             self.act_overlay = self.overlay_menu.menuAction()
-            if self.device_str in self.hw_actions:
-                self.hw_actions[self.device_str].setChecked(True)

@@ -191,9 +191,13 @@ class MainWindowImageEditApplicationAndCloseMixin:
         self._is_closing = True
         self.setEnabled(False)
         try:
-            self.settings.setValue("ui/language", self.current_lang)
-            self.settings.setValue("ui/theme", self.current_theme)
-            self.settings.sync()
+            # During the explicit "delete all local data" action the settings
+            # file has already been removed. Writing here would recreate the
+            # BottledKraken/settings directory while the application closes.
+            if not getattr(self, "_uninstall_delete_in_progress", False):
+                self.settings.setValue("ui/language", self.current_lang)
+                self.settings.setValue("ui/theme", self.current_theme)
+                self.settings.sync()
             self._request_all_workers_stop()
             for w in self._all_workers():
                 try:
@@ -202,6 +206,10 @@ class MainWindowImageEditApplicationAndCloseMixin:
                 except Exception:
                     pass
             self._cleanup_temp_dirs()
+            if getattr(self, "_uninstall_delete_in_progress", False):
+                finalizer = getattr(self, "_finalize_bottled_kraken_delete", None)
+                if callable(finalizer):
+                    finalizer()
             event.accept()
         except Exception:
             event.accept()

@@ -48,30 +48,7 @@ def _bk_on_export_batch_finished_safe(self):
         return _BK_PREV_ON_EXPORT_BATCH_FINISHED(self)
 MainWindow._cancel_export_batch = _bk_cancel_export_batch_safe
 MainWindow.on_export_batch_finished = _bk_on_export_batch_finished_safe
-_BK_PREV_STOP_OCR = getattr(MainWindow, "stop_ocr", None)
 _BK_PREV_ON_BATCH_FINISHED = getattr(MainWindow, "on_batch_finished", None)
-def _bk_stop_ocr_safe(self):
-    did_cancel_extra = False
-    if callable(_BK_PREV_STOP_OCR):
-        try:
-            result = _BK_PREV_STOP_OCR(self)
-        except Exception:
-            result = None
-    else:
-        result = None
-    for attr in ("_ptr_multi_ocr_worker", "_bk_lm_queue_batch_worker"):
-        try:
-            worker = getattr(self, attr, None)
-            if worker is not None and worker.isRunning():
-                did_cancel_extra = _bk_request_worker_cancel(worker) or did_cancel_extra
-        except Exception:
-            pass
-    if did_cancel_extra:
-        try:
-            self.status_bar.showMessage(_bk_cancel_pending_text(self))
-        except Exception:
-            pass
-    return result
 def _bk_on_batch_finished_safe(self):
     worker = getattr(self, "worker", None)
     cancelled = bool(getattr(worker, "_bk_cancelled_by_user", False)) or bool(
@@ -102,7 +79,6 @@ def _bk_on_batch_finished_safe(self):
         return
     if callable(_BK_PREV_ON_BATCH_FINISHED):
         return _BK_PREV_ON_BATCH_FINISHED(self)
-MainWindow.stop_ocr = _bk_stop_ocr_safe
 MainWindow.on_batch_finished = _bk_on_batch_finished_safe
 _BK_PREV_CLOSE_EVENT = getattr(MainWindow, "closeEvent", None)
 def _bk_all_running_workers(self):
@@ -174,13 +150,11 @@ __all__ = [
     '_BK_PREV_CLOSE_EVENT',
     '_BK_PREV_ON_BATCH_FINISHED',
     '_BK_PREV_ON_EXPORT_BATCH_FINISHED',
-    '_BK_PREV_STOP_OCR',
     '_bk_all_running_workers',
     '_bk_cancel_export_batch_safe',
     '_bk_close_event_safe',
     '_bk_on_batch_finished_safe',
     '_bk_on_export_batch_finished_safe',
     '_bk_request_all_running_workers_cancel',
-    '_bk_stop_ocr_safe',
 ]
 register_globals('bk', globals(), __all__)

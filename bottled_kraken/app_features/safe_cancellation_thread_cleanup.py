@@ -25,18 +25,11 @@ def _bk_fix54_request_worker_cancel(worker) -> bool:
         worker._bk_cancelled_by_user = True
     except Exception:
         pass
+
     did = False
-    try:
-        if isinstance(worker, QThread):
-            if not _bk_fix54_is_main_qthread(worker):
-                try:
-                    worker.requestInterruption()
-                    did = True
-                except Exception:
-                    pass
-            return did
-    except Exception:
-        pass
+    # Important for LM workers: their cancel() closes the active HTTP connection.
+    # requestInterruption() alone only flips a flag and cannot wake a blocking
+    # getresponse()/read() call.
     try:
         cancel = getattr(worker, "cancel", None)
         if callable(cancel):
@@ -44,6 +37,7 @@ def _bk_fix54_request_worker_cancel(worker) -> bool:
             did = True
     except Exception:
         pass
+
     try:
         req = getattr(worker, "requestInterruption", None)
         if callable(req) and not _bk_fix54_is_main_qthread(worker):
@@ -62,8 +56,7 @@ def _bk_fix54_disconnect_ocr_worker_signals(window, worker):
         ("progress", "on_progress_update"),
         ("finished_batch", "on_batch_finished"),
         ("failed", "on_failed"),
-        ("device_resolved", "on_device_resolved"),
-        ("gpu_info", "on_gpu_info"),
+        ("status_info", "on_ocr_status_info"),
     )
     for sig_name, slot_name in pairs:
         try:
@@ -130,38 +123,72 @@ def _bk_fix54_reset_ocr_ui(window, message=None):
     except Exception:
         pass
 def _bk_fix54_stop_ocr_safe(window, *args, **kwargs):
-    worker = getattr(window, "worker", None)
-    running = _bk_fix54_is_running_qthread(worker)
-    if running:
+    worker_attrs = (
+        "worker",
+        "ai_worker",
+        "ai_batch_worker",
+        "_bk_lm_queue_batch_worker",
+        "_ptr_multi_ocr_worker",
+    )
+    running_workers = []
+    for attr in worker_attrs:
+        worker = getattr(window, attr, None)
+        if _bk_fix54_is_running_qthread(worker):
+            running_workers.append((attr, worker))
+
+    if running_workers:
         try:
             window._ocr_cancel_requested = True
             window._ocr_stop_requested = True
         except Exception:
             pass
-        _bk_fix54_request_worker_cancel(worker)
-        _bk_fix54_disconnect_ocr_worker_signals(window, worker)
-        try:
-            abandoned = list(getattr(window, "_bk_abandoned_ocr_workers", []) or [])
-            if worker not in abandoned:
-                abandoned.append(worker)
-            window._bk_abandoned_ocr_workers = abandoned
-            try:
-                worker.finished.connect(lambda w=worker, win=window: _bk_fix54_forget_abandoned_worker(win, w))
-            except Exception:
-                pass
-        except Exception:
-            pass
-        try:
-            window.worker = None
-        except Exception:
-            pass
+
+        for attr, worker in running_workers:
+            _bk_fix54_request_worker_cancel(worker)
+
+            # The normal OCR worker is managed by the queue/overlay callbacks.
+            # Disconnect it exactly as before so late signals cannot mutate UI.
+            if attr == "worker":
+                _bk_fix54_disconnect_ocr_worker_signals(window, worker)
+                try:
+                    abandoned = list(getattr(window, "_bk_abandoned_ocr_workers", []) or [])
+                    if worker not in abandoned:
+                        abandoned.append(worker)
+                    window._bk_abandoned_ocr_workers = abandoned
+                    try:
+                        worker.finished.connect(lambda w=worker, win=window: _bk_fix54_forget_abandoned_worker(win, w))
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    window.worker = None
+                except Exception:
+                    pass
+
         try:
             window._log(window._tr_log("log_stop_requested"))
         except Exception:
             pass
-        _bk_fix54_reset_ocr_ui(window, _bk_cancel_done_text(window, "ocr") if callable(globals().get("_bk_cancel_done_text")) else translation.translate(translation.DEFAULT_LANGUAGE, "cancel_done_ocr"))
+
+        # Keep the LM progress dialogs alive until their worker emits finished;
+        # their own completion handlers close and clean them up safely.
+        has_lm = any(attr in {"ai_worker", "ai_batch_worker", "_bk_lm_queue_batch_worker"} for attr, _ in running_workers)
+        try:
+            if has_lm:
+                msg = _bk_cancel_pending_text(window) if callable(globals().get("_bk_cancel_pending_text")) else translation.translate(translation.DEFAULT_LANGUAGE, "cancel_pending_text")
+                window.status_bar.showMessage(msg, 5000)
+            else:
+                msg = _bk_cancel_done_text(window, "ocr") if callable(globals().get("_bk_cancel_done_text")) else translation.translate(translation.DEFAULT_LANGUAGE, "cancel_done_ocr")
+                _bk_fix54_reset_ocr_ui(window, msg)
+        except Exception:
+            pass
         return None
-    _bk_fix54_reset_ocr_ui(window, _bk_cancel_done_text(window, "ocr") if callable(globals().get("_bk_cancel_done_text")) else translation.translate(translation.DEFAULT_LANGUAGE, "cancel_done_ocr"))
+
+    _bk_fix54_reset_ocr_ui(
+        window,
+        _bk_cancel_done_text(window, "ocr") if callable(globals().get("_bk_cancel_done_text")) else translation.translate(translation.DEFAULT_LANGUAGE, "cancel_done_ocr"),
+    )
     return None
 def _bk_fix54_stop_everything_now(window):
     return _bk_fix54_stop_ocr_safe(window)

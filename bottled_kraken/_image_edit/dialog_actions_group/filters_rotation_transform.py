@@ -115,14 +115,36 @@ class ImageEditDialogFiltersRotationTransformMixin:
                 self.canvas._rotate_base_source_order = None
             self.canvas.transform_mode = mode
             if mode == "warp" and self.canvas.transform_src_rect is not None:
+                # Beim Wechsel zu Verkruemmen MUSS das Gitter zur aktuellen
+                # Geometrie (Quad inkl. Perspektive/Neigung/Verschiebung)
+                # gehoeren. Ein vorhandenes Gitter darf nur weiterleben, wenn
+                # seine Ecken exakt den aktuellen Quad-Ecken entsprechen -
+                # sonst stammt es aus einem frueheren Zustand und liess die
+                # gesamte Transformation optisch "zuruecksetzen".
                 grid = getattr(self.canvas, "transform_warp_grid", None)
-                if not grid or len(grid) not in (9, 25):
+                quad = [QPointF(p) for p in (getattr(self.canvas, "transform_quad", None) or [])]
+
+                def _grid_matches_quad(g, q):
+                    if not g or not q or len(q) != 4 or len(g) not in (9, 25):
+                        return False
+                    idx = (0, 4, 24, 20) if len(g) == 25 else (0, 2, 8, 6)
+                    try:
+                        return all(
+                            abs(g[i].x() - qq.x()) <= 1.5 and abs(g[i].y() - qq.y()) <= 1.5
+                            for i, qq in zip(idx, q)
+                        )
+                    except Exception:
+                        return False
+
+                if _grid_matches_quad(grid, quad):
+                    if len(grid) == 9 and hasattr(self.canvas, "_warp_grid_points"):
+                        self.canvas._warp_grid_points()
+                else:
                     if hasattr(self.canvas, "_warp_grid_points_from_quad"):
                         self.canvas.transform_warp_grid = self.canvas._warp_grid_points_from_quad()
                     else:
+                        self.canvas.transform_warp_grid = None
                         self.canvas._warp_grid_points()
-                elif len(grid) == 9 and hasattr(self.canvas, "_warp_grid_points"):
-                    self.canvas._warp_grid_points()
             if mode != "warp":
                 self.canvas.transform_warp_x = 0.0
                 self.canvas.transform_warp_y = 0.0

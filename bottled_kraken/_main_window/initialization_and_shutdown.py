@@ -127,8 +127,21 @@ class MainWindowInitializationAndShutdownMixin:
                 workers.append(self.voice_worker)
             except Exception:
                 pass
-        for w in workers:
+        escriptorium_thread = getattr(self, "_escriptorium_active_thread", None)
+        if escriptorium_thread is not None and escriptorium_thread.isRunning():
             try:
-                w.wait(1500)
+                escriptorium_thread.requestInterruption()
+                workers.append(escriptorium_thread)
+            except Exception:
+                pass
+        for worker in workers:
+            try:
+                worker.wait(1500)
+            except Exception:
+                pass
+            try:
+                if worker.isRunning():
+                    worker.terminate()
+                    worker.wait(1000)
             except Exception:
                 pass

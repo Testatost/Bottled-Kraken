@@ -172,6 +172,66 @@ class MainWindowToolbarIconFactoryMixin:
             return QIcon(tinted)
         def _themed_or_standard_icon(self, theme_name: str, std_icon):
             return self._tinted_theme_or_standard_icon(theme_name, std_icon)
+
+        def _auto_tinted_theme_or_standard_icon(self, theme_name: str, std_icon,
+                                                size: Optional[QSize] = None):
+            """Luminanz-bewusste Toenung fuer System-Icons.
+
+            Problemlage: QIcon.fromTheme() liefert Symbole des DESKTOP-Themes -
+            auf dunklem Desktop weisse Glyphen, die im hellen App-Modus
+            unsichtbar sind. Die pauschale Toenung wiederum machte aus Icons
+            mit deckendem Hintergrund "schwarze Quadrate". Diese Variante:
+            1. misst Deckung und mittlere Helligkeit des Icons,
+            2. weicht bei fast vollflaechig deckenden Kacheln auf das
+               (sicher toenbare) Qt-Standard-Icon aus,
+            3. toent NUR, wenn die Icon-Helligkeit dem App-Modus widerspricht
+               (helles Icon im Hellmodus / dunkles im Dunkelmodus) -
+               farbige Symbole bleiben unangetastet."""
+            icon = QIcon.fromTheme(theme_name)
+            if icon.isNull():
+                icon = self.style().standardIcon(std_icon)
+            if icon.isNull():
+                return icon
+            if size is None:
+                size = self.toolbar.iconSize() if hasattr(self, "toolbar") else QSize(20, 20)
+            src = icon.pixmap(size)
+            if src.isNull():
+                return icon
+            img = src.toImage()
+            w, h = img.width(), img.height()
+            opaque = 0
+            lum_sum = 0.0
+            step = max(1, min(w, h) // 24)
+            samples = 0
+            for y in range(0, h, step):
+                for x in range(0, w, step):
+                    samples += 1
+                    c = img.pixelColor(x, y)
+                    if c.alpha() > 40:
+                        opaque += 1
+                        lum_sum += (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255.0
+            if samples == 0 or opaque == 0:
+                return icon
+            coverage = opaque / samples
+            mean_lum = lum_sum / opaque
+            if coverage > 0.9:
+                # Vollflaechige Kachel: Toenung wuerde ein Quadrat erzeugen ->
+                # sicheres Standard-Icon nehmen und dieses toenen.
+                icon = self.style().standardIcon(std_icon)
+                return self._tinted_theme_or_standard_icon("", std_icon, size) \
+                    if not icon.isNull() else icon
+            is_dark = self._is_current_theme_dark()
+            mismatched = (mean_lum > 0.72 and not is_dark) or (mean_lum < 0.28 and is_dark)
+            if not mismatched:
+                return icon
+            tinted = QPixmap(src.size())
+            tinted.fill(Qt.transparent)
+            painter = QPainter(tinted)
+            painter.drawPixmap(0, 0, src)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(tinted.rect(), self._icon_fg_color())
+            painter.end()
+            return QIcon(tinted)
         def _first_theme_icon(self, *theme_names: str) -> QIcon:
             for name in theme_names:
                 if not name:

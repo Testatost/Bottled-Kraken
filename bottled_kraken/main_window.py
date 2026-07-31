@@ -64,7 +64,9 @@ from bottled_kraken._main_window.line_editing_and_overlay_sync import MainWindow
 from bottled_kraken._main_window.export_rendering_and_paths import MainWindowExportRenderingAndPathsMixin
 from bottled_kraken._main_window.whisper_download_help_and_image_edit_queue import MainWindowWhisperDownloadHelpAndImageEditQueueMixin
 from bottled_kraken._main_window.image_edit_application_and_close import MainWindowImageEditApplicationAndCloseMixin
+from bottled_kraken._main_window.escriptorium_integration import MainWindowEScriptoriumMixin
 class MainWindow(
+    MainWindowEScriptoriumMixin,
     MainWindowInitializationAndShutdownMixin,
     MainWindowWhisperSetupAndModelSelectionMixin,
     MainWindowVoiceInputSelectionAndAiSelectedLinesMixin,
@@ -143,7 +145,6 @@ class MainWindow(
         self.whisper_selected_input_device = None
         self.whisper_selected_input_device_label = ""
         self.reading_direction = READING_MODES["TB_LR"]
-        self.device_str = "cpu"
         self.show_overlay = True
         self.overlay_display_mode = self.settings.value("ui/overlay_display_mode", "all", str)
         if self.overlay_display_mode not in {"none", "current", "selected", "all"}:
@@ -286,7 +287,10 @@ class MainWindow(
         self._reset_ai_server_cache()
         self._ai_server_cache_ttl = 2.0
         self._update_ai_model_ui()
-        self.act_toggle_log = QAction(QIcon.fromTheme("document-preview"), self._tr("log_toggle_show"), self)
+        _log_icon = (self._auto_tinted_theme_or_standard_icon("document-preview", QStyle.SP_FileDialogContentsView)
+                     if hasattr(self, "_auto_tinted_theme_or_standard_icon")
+                     else QIcon.fromTheme("document-preview"))
+        self.act_toggle_log = QAction(_log_icon, self._tr("log_toggle_show"), self)
         self.act_toggle_log.setCheckable(True)
         self.act_toggle_log.setChecked(False)
         self.act_toggle_log.toggled.connect(self.toggle_log_area)
@@ -395,7 +399,6 @@ class MainWindow(
         self.btn_lang_menu.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self._pending_box_for_row: Optional[int] = None
         self._pending_new_line_box: bool = False
-        self._auto_select_best_device()
         self._scan_kraken_models()
         self._load_default_segmentation_model()
         self._init_ui()
@@ -404,7 +407,6 @@ class MainWindow(
         self.retranslate_ui()
         QTimer.singleShot(0, self._fit_queue_columns_exact)
         QTimer.singleShot(0, self._update_queue_hint)
-        QTimer.singleShot(0, self._refresh_hw_menu_availability)
         self.canvas.set_overlay_enabled(False)
         self._log(self._tr_log("log_started"))
         self._is_closing = False

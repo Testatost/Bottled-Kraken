@@ -23,6 +23,5 @@ class OCRWorker(
         progress = Signal(int)
         finished_batch = Signal()
         failed = Signal(str)
-        device_resolved = Signal(str)
-        gpu_info = Signal(str)
+        status_info = Signal(str)
 __all__ = ["PDFRenderWorker", "OCRWorker"]

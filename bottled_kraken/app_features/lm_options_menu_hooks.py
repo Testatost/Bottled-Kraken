@@ -1,5 +1,9 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('bk', globals())
+# BK-CLEANUP: zuvor in lm_options_prompt_dialog.py (Modul entfernt, Dialog durch
+# gedcom_prompt_ux_dialog ersetzt); Capture-Position in der Ladekette unveraendert.
+_BK_LM_OPTIONS_PREV_TR = MainWindow._tr
 def _bk_lm_options_tr(self, key: str, *args):
     if key == "help_nav_quick":
         return _bk_lm_opt_text(self, "help_nav_overview")
@@ -26,9 +30,7 @@ def _bk_lm_options_tr(self, key: str, *args):
             text = _BK_LM_OPTIONS_PREV_TR(self, key, *args)
         return _bk_lm_apply_custom_context(self, key, text)
     return _BK_LM_OPTIONS_PREV_TR(self, key, *args)
-_BK_LM_OPTIONS_PREV_INIT = MainWindow.__init__
 def _bk_lm_options_init(self, *args, **kwargs):
-    _BK_LM_OPTIONS_PREV_INIT(self, *args, **kwargs)
     _bk_lm_load_token_settings(self)
     _bk_lm_load_custom_context(self)
 _BK_LM_OPTIONS_PREV_INIT_MENU = MainWindow._init_menu
@@ -55,9 +57,7 @@ def _bk_lm_options_init_menu(self, *args, **kwargs):
         self.options_menu.addAction(self.act_lm_prompt_settings)
         self.options_menu.addAction(self.act_lm_custom_context)
         self.options_menu.addSeparator()
-_BK_LM_OPTIONS_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_lm_options_retranslate(self, *args, **kwargs):
-    _BK_LM_OPTIONS_PREV_RETRANSLATE(self, *args, **kwargs)
     if hasattr(self, "act_lm_token_settings"):
         self.act_lm_token_settings.setText(_bk_lm_opt_text(self, "act_lm_token_settings"))
     if hasattr(self, "act_lm_prompt_settings"):
@@ -65,18 +65,16 @@ def _bk_lm_options_retranslate(self, *args, **kwargs):
     if hasattr(self, "act_lm_custom_context"):
         self.act_lm_custom_context.setText(_bk_lm_opt_text(self, "act_lm_custom_context"))
 MainWindow._tr = _bk_lm_options_tr
-MainWindow.__init__ = _bk_lm_options_init
+register_init_delta(_bk_lm_options_init)
 MainWindow._init_menu = _bk_lm_options_init_menu
-MainWindow.retranslate_ui = _bk_lm_options_retranslate
+register_retranslate_delta(_bk_lm_options_retranslate)
 MainWindow._lm_token_limit = _lm_token_limit
 MainWindow._bk_lm_token_limit_for_json = _bk_lm_token_limit_for_json
 MainWindow._bk_lm_show_token_settings_dialog = _bk_lm_show_token_settings_dialog
-MainWindow._bk_lm_show_prompt_settings_dialog = _bk_lm_show_prompt_settings_dialog
 MainWindow._bk_lm_show_custom_context_dialog = _bk_lm_show_custom_context_dialog
 __all__ = [
-    '_BK_LM_OPTIONS_PREV_INIT',
+    '_BK_LM_OPTIONS_PREV_TR',
     '_BK_LM_OPTIONS_PREV_INIT_MENU',
-    '_BK_LM_OPTIONS_PREV_RETRANSLATE',
     '_bk_lm_options_init',
     '_bk_lm_options_init_menu',
     '_bk_lm_options_retranslate',

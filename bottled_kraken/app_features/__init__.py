@@ -63,8 +63,6 @@ from bottled_kraken.app_features import lm_options_settings_helpers as _lm_optio
 __all__.extend(_absorb(_lm_options_settings_helpers))
 from bottled_kraken.app_features import lm_options_token_and_context_dialogs as _lm_options_token_and_context_dialogs
 __all__.extend(_absorb(_lm_options_token_and_context_dialogs))
-from bottled_kraken.app_features import lm_options_prompt_dialog as _lm_options_prompt_dialog
-__all__.extend(_absorb(_lm_options_prompt_dialog))
 from bottled_kraken.app_features import lm_options_menu_hooks as _lm_options_menu_hooks
 __all__.extend(_absorb(_lm_options_menu_hooks))
 from bottled_kraken.app_features import gedcom_initial_worker as _gedcom_initial_worker
@@ -151,8 +149,6 @@ from bottled_kraken.app_features import spatial_row_grouping as _spatial_row_gro
 __all__.extend(_absorb(_spatial_row_grouping))
 from bottled_kraken.app_features import odt_txt_column_layout_export as _odt_txt_column_layout_export
 __all__.extend(_absorb(_odt_txt_column_layout_export))
-from bottled_kraken.app_features import office_export_layout_unified as _office_export_layout_unified
-__all__.extend(_absorb(_office_export_layout_unified))
 from bottled_kraken.app_features import office_export_order_final as _office_export_order_final
 __all__.extend(_absorb(_office_export_order_final))
 from bottled_kraken.app_features import csv_logical_column_layout_export as _csv_logical_column_layout_export
@@ -181,7 +177,19 @@ from bottled_kraken.app_features import lm_manual_overlay_single_line_final_fix 
 __all__.extend(_absorb(_lm_manual_overlay_single_line_final_fix))
 from bottled_kraken.app_features import lm_manual_overlay_apply_fix as _lm_manual_overlay_apply_fix
 __all__.extend(_absorb(_lm_manual_overlay_apply_fix))
+from bottled_kraken.app_features import lm_transcription_request_guard as _lm_transcription_request_guard
+__all__.extend(_absorb(_lm_transcription_request_guard))
+from bottled_kraken.app_features import lm_structured_export as _lm_structured_export
+__all__.extend(_absorb(_lm_structured_export))
+from bottled_kraken.app_features import autocorrect_dictionary_store as _autocorrect_dictionary_store
+__all__.extend(_absorb(_autocorrect_dictionary_store))
 from bottled_kraken.app_features import autocorrect_offline_dictionary as _autocorrect_offline_dictionary
 __all__.extend(_absorb(_autocorrect_offline_dictionary))
 __all__ = sorted(set(__all__))
 synchronize("bk")
+
+# BK-OPT: The former runtime patch-chain consolidation (heuristic unwrapping of
+# MainWindow._render_file wrappers via introspection) has been fully replaced
+# by explicit, deterministic registration: every render handler now calls
+# register_render_handler() from bottled_kraken.common.chain_consolidation at
+# import time, and app.py installs one flat dispatcher after all imports.

@@ -38,24 +38,20 @@ class translation:
         return normalize_language_code(lang, cls.DEFAULT_LANGUAGE)
     @classmethod
     def build_translations(cls) -> Dict[str, Dict[str, str]]:
-        data = copy.deepcopy(load_all_language_translations())
-        fallback_chain = [code for code in cls.FALLBACK_LANGUAGES if code in data]
-        for lang, values in list(data.items()):
-            for fallback_lang in fallback_chain:
-                if fallback_lang == lang:
-                    continue
-                for key, value in data.get(fallback_lang, {}).items():
-                    values.setdefault(key, value)
-        return data
+        # Load each language independently; lookup applies the English fallback.
+        return copy.deepcopy(load_all_language_translations())
     @classmethod
     def translate(cls, lang: str, key: str, *args):
+        """Translate a key, falling back to English before exposing the key."""
         lang = cls.normalize_language_code(lang)
-        txt = cls.TRANSLATIONS.get(lang, {}).get(key)
-        if txt is None:
-            for fallback_lang in cls.FALLBACK_LANGUAGES:
-                txt = cls.TRANSLATIONS.get(fallback_lang, {}).get(key)
-                if txt is not None:
-                    break
+        candidates = (lang, *cls.FALLBACK_LANGUAGES, cls.DEFAULT_LANGUAGE)
+        txt = None
+        for candidate in dict.fromkeys(candidates):
+            if not candidate:
+                continue
+            txt = cls.TRANSLATIONS.get(candidate, {}).get(key)
+            if txt is not None:
+                break
         if txt is None:
             txt = key
         return txt.format(*args) if args else txt
@@ -70,6 +66,10 @@ class translation:
         label = cls.TRANSLATIONS.get(code, {}).get(key)
         if label and label != key:
             return label
+        for fallback in cls.FALLBACK_LANGUAGES:
+            label = cls.TRANSLATIONS.get(fallback, {}).get(key)
+            if label and label != key:
+                return label
         return language_info(code).get("native_name", code)
     @classmethod
     def make_tr(cls, lang: str):

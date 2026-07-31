@@ -9,14 +9,9 @@ from bottled_kraken.common import (
     re,
 )
 from bottled_kraken.main_window import MainWindow
-def _bk_fix36_tr(window, key: str, fallback: str = "") -> str:
-    try:
-        value = window._tr(key)
-        if value and value != key:
-            return str(value)
-    except Exception:
-        pass
-    return fallback or key
+def _bk_fix36_tr(window, key: str, *args) -> str:
+    lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
+    return translation.translate(lang, key, *args)
 def _bk_fix36_clean_text(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 def _bk_fix36_is_ditto(value: str) -> bool:
@@ -133,7 +128,7 @@ def _bk_export_origami_table_txt(self):
     text, kr_records, im, recs = task.results
     out_text = _bk_fix36_table_text_from_recs(recs)
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "ocr")))[0] + "_origami_table.txt"
-    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_txt_origami_table", "Text – Origami table layout (.txt)"), default_name, _bk_fix36_tr(self, "filter_text_files", "Text Files (*.txt)"))
+    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_txt_origami_table"), default_name, _bk_fix36_tr(self, "filter_text_files"))
     if not path:
         return
     if not path.lower().endswith(".txt"):
@@ -141,7 +136,7 @@ def _bk_export_origami_table_txt(self):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(out_text)
     try:
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done", "Table-layout export finished."), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done"), 5000)
     except Exception:
         pass
 def _bk_export_origami_table_docx(self):
@@ -152,7 +147,7 @@ def _bk_export_origami_table_docx(self):
     text, kr_records, im, recs = task.results
     out_text = _bk_fix36_table_text_from_recs(recs)
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "ocr")))[0] + "_origami_table.docx"
-    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_docx_origami_table", "Word – Origami table layout (.docx)"), default_name, _bk_fix36_tr(self, "filter_word_files", "Word Files (*.docx)"))
+    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_docx_origami_table"), default_name, _bk_fix36_tr(self, "filter_word_files"))
     if not path:
         return
     if not path.lower().endswith(".docx"):
@@ -173,7 +168,7 @@ def _bk_export_origami_table_docx(self):
         QMessageBox.information(self, _bk_fix36_tr(self, "info_title"), _bk_fix36_tr(self, "msg_docx_missing_txt_saved", alt))
         return
     try:
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done", "Table-layout export finished."), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done"), 5000)
     except Exception:
         pass
 MainWindow.bk_export_origami_table_txt = _bk_export_origami_table_txt
@@ -213,9 +208,9 @@ def _bk_fix36_export_format_items(self):
             items = []
     existing = {fmt for _name, fmt in items}
     if "txt_origami_table" not in existing:
-        items.append((_bk_fix36_tr(self, "export_format_txt_origami_table", "Text – Origami table layout (.txt)"), "txt_origami_table"))
+        items.append((_bk_fix36_tr(self, "export_format_txt_origami_table"), "txt_origami_table"))
     if "docx_origami_table" not in existing:
-        items.append((_bk_fix36_tr(self, "export_format_docx_origami_table", "Word – Origami table layout (.docx)"), "docx_origami_table"))
+        items.append((_bk_fix36_tr(self, "export_format_docx_origami_table"), "docx_origami_table"))
     return items
 try:
     if callable(_BK_FIX36_PREV_EXPORT_FORMAT_ITEMS):

@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_render_handler, RENDER_NOT_HANDLED
 seed_globals('bk', globals())
 from bottled_kraken.common import _load_image_color
 from PySide6.QtWidgets import QComboBox, QDoubleSpinBox
@@ -91,19 +92,13 @@ def _bk_fix51_install_b_shortcut(self):
             print(f'FIX8.51 install B shortcut failed: {exc}')
         except Exception:
             pass
-try:
-    _BK_FIX51_PREV_MAINWINDOW_INIT = MainWindow.__init__
-except Exception:
-    _BK_FIX51_PREV_MAINWINDOW_INIT = None
-if callable(_BK_FIX51_PREV_MAINWINDOW_INIT) and not getattr(MainWindow.__init__, '_bk_fix51_init_wrapped', False):
-    def _bk_fix51_mainwindow_init(self, *args, **kwargs):
-        _BK_FIX51_PREV_MAINWINDOW_INIT(self, *args, **kwargs)
-        try:
-            QTimer.singleShot(0, lambda w=self: _bk_fix51_install_b_shortcut(w))
-        except Exception:
-            _bk_fix51_install_b_shortcut(self)
-    _bk_fix51_mainwindow_init._bk_fix51_init_wrapped = True
-    MainWindow.__init__ = _bk_fix51_mainwindow_init
+def _bk_fix51_mainwindow_init(self, *args, **kwargs):
+    try:
+        QTimer.singleShot(0, lambda w=self: _bk_fix51_install_b_shortcut(w))
+    except Exception:
+        _bk_fix51_install_b_shortcut(self)
+from bottled_kraken.common.chain_consolidation import register_init_delta
+register_init_delta(_bk_fix51_mainwindow_init)
 try:
     MainWindow.bk_draw_box_for_current_line_shortcut = _bk_fix51_begin_draw_box_for_current_line
 except Exception:
@@ -362,10 +357,6 @@ def _bk_fix51_write_docx(path: str, item: TaskItem, export_image: Image.Image, r
         if bounds:
             previous_bottom = bounds[3]
     doc.save(path)
-try:
-    _BK_FIX51_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX51_PREV_RENDER_FILE = None
 def _bk_fix51_render_file(self, path: str, fmt: str, item: TaskItem):
     if not item or not getattr(item, 'results', None):
         return
@@ -378,13 +369,8 @@ def _bk_fix51_render_file(self, path: str, fmt: str, item: TaskItem):
         return _bk_fix51_write_docx(path, item, export_image, record_views)
     if fmt_l == 'txt_boxes':
         return _bk_fix40_write_structured_txt_export(path, record_views, export_image.size)
-    if callable(_BK_FIX51_PREV_RENDER_FILE):
-        return _BK_FIX51_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix51_render_file
-except Exception:
-    pass
+    return RENDER_NOT_HANDLED
+register_render_handler(_bk_fix51_render_file)
 __all__ = [
     '_bk_fix51_begin_draw_box_for_current_line',
     '_bk_fix51_clean_docx_cell_text',

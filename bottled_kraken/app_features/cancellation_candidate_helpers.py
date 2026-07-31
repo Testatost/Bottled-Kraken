@@ -46,7 +46,7 @@ def _bk_fix43_reset_mainwindow_after_cancel(self):
                 except Exception:
                     pass
         try:
-            self.status_bar.showMessage(_bk_fix36_tr(self, "msg_ocr_cancelled", "OCR abgebrochen."), 5000)
+            self.status_bar.showMessage(_bk_fix36_tr(self, "msg_ocr_cancelled"), 5000)
         except Exception:
             pass
         try:

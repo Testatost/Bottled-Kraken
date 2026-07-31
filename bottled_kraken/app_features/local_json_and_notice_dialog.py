@@ -168,27 +168,6 @@ def _bk_lm_generate_local_json_v18(self, schema_kind: str):
     self._bk_local_json_worker.failed_json.connect(lambda path, kind, msg: _bk_lm_on_local_json_failed(self, path, kind, msg))
     self._bk_local_json_worker.start()
 _bk_lm_generate_local_json = _bk_lm_generate_local_json_v18
-class BKLocalJsonNoticeDialog(QDialog):
-    cancel_requested = Signal()
-    def __init__(self, title: str, message: str, tr_func, parent=None):
-        super().__init__(parent)
-        self._tr = tr_func
-        self.setWindowTitle(title)
-        self.setModal(False)
-        self.setMinimumWidth(380)
-        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
-        self.lbl_status = QLabel(message)
-        self.lbl_status.setWordWrap(True)
-        root.addWidget(self.lbl_status)
-        self.btn_cancel = QPushButton(self._tr("btn_cancel"))
-        self.btn_cancel.clicked.connect(self.cancel_requested)
-        root.addWidget(self.btn_cancel)
-    def set_status(self, text: str):
-        if text:
-            self.lbl_status.setText(str(text))
 def _bk_cluster_columns_original_v19(records: List[RecordView], x_threshold: int = 45):
     cols = []
     for r in records:
@@ -208,123 +187,12 @@ def _bk_cluster_columns_original_v19(records: List[RecordView], x_threshold: int
     cols.sort(key=lambda c: c["x"])
     return [c["items"] for c in cols]
 cluster_columns = _bk_cluster_columns_original_v19
-def _bk_sort_records_strict_v19(records, image_width: int = 0, image_height: int = 0,
-                                reading_mode: int = READING_MODES["TB_LR"], *, deskew: bool = True):
-    rev_y = reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"])
-    rev_x = reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"])
-    raw = []
-    for r in records:
-        bb = record_bbox(r)
-        if bb:
-            raw.append((r, bb))
-    if not raw:
-        return list(records)
-    angles = []
-    if deskew:
-        for r, _ in raw:
-            bl = getattr(r, "baseline", None)
-            pts = _coerce_points(bl)
-            if len(pts) >= 2:
-                x1, y1 = pts[0]
-                x2, y2 = pts[-1]
-                dx = x2 - x1
-                dy = y2 - y1
-                if abs(dx) > 1.0:
-                    a = math.atan2(dy, dx)
-                    if abs(a) < math.radians(18):
-                        angles.append(a)
-    skew = statistics.median(angles) if angles else 0.0
-    cs = math.cos(-skew)
-    sn = math.sin(-skew)
-    wc = max(1.0, float(image_width or max(bb[2] for _, bb in raw))) / 2.0
-    hc = max(1.0, float(image_height or max(bb[3] for _, bb in raw))) / 2.0
-    def rot(x, y):
-        x -= wc
-        y -= hc
-        xr = x * cs - y * sn
-        yr = x * sn + y * cs
-        return xr + wc, yr + hc
-    def norm_bb(bb):
-        if not deskew or abs(skew) < 1e-6:
-            return tuple(float(v) for v in bb)
-        x0, y0, x1, y1 = bb
-        pts = [rot(x0, y0), rot(x1, y0), rot(x1, y1), rot(x0, y1)]
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        return (min(xs), min(ys), max(xs), max(ys))
-    items = []
-    heights = []
-    for r, bb in raw:
-        dbb = norm_bb(bb)
-        top = float(dbb[1])
-        bottom = float(dbb[3])
-        left = float(dbb[0])
-        right = float(dbb[2])
-        cy = (top + bottom) / 2.0
-        h = max(1.0, bottom - top)
-        heights.append(h)
-        items.append({
-            'record': r,
-            'bbox': bb,
-            'dbb': dbb,
-            'top': top,
-            'bottom': bottom,
-            'left': left,
-            'right': right,
-            'cy': cy,
-            'h': h,
-        })
-    med_h = statistics.median(heights) if heights else 20.0
-    top_tol = max(4.0, med_h * 0.34)
-    cy_tol = max(6.0, med_h * 0.42)
-    items.sort(key=lambda item: (item['top'], item['left'], item['cy']), reverse=rev_y)
-    rows = []
-    for item in items:
-        chosen = None
-        chosen_score = None
-        for row in rows:
-            overlap = min(item['bottom'], row['bottom']) - max(item['top'], row['top'])
-            min_h = max(1.0, min(item['h'], row['med_h']))
-            overlap_ratio = overlap / min_h
-            close_top = abs(item['top'] - row['top_anchor']) <= top_tol
-            close_cy = abs(item['cy'] - row['cy']) <= cy_tol
-            if not (close_top or (close_cy and overlap_ratio >= -0.10)):
-                continue
-            score = abs(item['top'] - row['top_anchor']) + (abs(item['cy'] - row['cy']) * 0.35)
-            if chosen is None or score < chosen_score:
-                chosen = row
-                chosen_score = score
-        if chosen is None:
-            rows.append({
-                'top_anchor': item['top'],
-                'top': item['top'],
-                'bottom': item['bottom'],
-                'cy': item['cy'],
-                'med_h': item['h'],
-                'items': [item],
-            })
-        else:
-            chosen['items'].append(item)
-            n = len(chosen['items'])
-            chosen['top_anchor'] = ((chosen['top_anchor'] * (n - 1)) + item['top']) / n
-            chosen['top'] = min(chosen['top'], item['top'])
-            chosen['bottom'] = max(chosen['bottom'], item['bottom'])
-            chosen['cy'] = ((chosen['cy'] * (n - 1)) + item['cy']) / n
-            chosen['med_h'] = ((chosen['med_h'] * (n - 1)) + item['h']) / n
-    rows.sort(key=lambda row: (row['top_anchor'], row['top']), reverse=rev_y)
-    ordered = []
-    for row in rows:
-        row['items'].sort(key=lambda item: (item['left'], item['top'], item['cy']), reverse=rev_x)
-        ordered.extend(item['record'] for item in row['items'])
-    return ordered
 __all__ = [
-    'BKLocalJsonNoticeDialog',
     '_bk_cluster_columns_original_v19',
     '_bk_lm_generate_local_json',
     '_bk_lm_generate_local_json_v18',
     '_bk_local_json_build_neo4j_v18',
     '_bk_local_json_build_postgres_v18',
-    '_bk_sort_records_strict_v19',
     '_ptr_ai_build_postgres_json_local',
     'cluster_columns',
 ]

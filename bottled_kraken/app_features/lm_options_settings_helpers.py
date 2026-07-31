@@ -49,6 +49,14 @@ _BK_LM_PROMPT_KEYS = (
     ("ai_prompt_neo4j_user", "lm_prompt_neo4j_user"),
     ("ai_prompt_sqlite_system", "lm_prompt_sqlite_system"),
     ("ai_prompt_sqlite_user", "lm_prompt_sqlite_user"),
+    ("ai_prompt_lmx_docx_system", "lm_prompt_lmx_docx_system"),
+    ("ai_prompt_lmx_docx_user", "lm_prompt_lmx_docx_user"),
+    ("ai_prompt_lmx_xlsx_system", "lm_prompt_lmx_xlsx_system"),
+    ("ai_prompt_lmx_xlsx_user", "lm_prompt_lmx_xlsx_user"),
+    ("ai_prompt_lmx_odt_system", "lm_prompt_lmx_odt_system"),
+    ("ai_prompt_lmx_odt_user", "lm_prompt_lmx_odt_user"),
+    ("ai_prompt_lmx_ods_system", "lm_prompt_lmx_ods_system"),
+    ("ai_prompt_lmx_ods_user", "lm_prompt_lmx_ods_user"),
     ("ai_prompt_export_zones_system", "lm_prompt_export_zones_system"),
     ("ai_prompt_export_zones_user", "lm_prompt_export_zones_user"),
 )
@@ -56,12 +64,7 @@ from bottled_kraken.translations.translation_loader import load_named_language_m
 _BK_LM_OPTIONS_TEXTS = _load_translation_mapping("lm_options_texts", "BK_LM_OPTIONS_TRANSLATIONS")
 def _bk_lm_opt_text(self, key: str, *args) -> str:
     lang = getattr(self, "current_lang", translation.DEFAULT_LANGUAGE)
-    data = _BK_LM_OPTIONS_TEXTS.get(lang) or _BK_LM_OPTIONS_TEXTS["de"]
-    txt = data.get(key, _BK_LM_OPTIONS_TEXTS["de"].get(key, key))
-    try:
-        return txt.format(*args) if args else txt
-    except Exception:
-        return txt
+    return translation.translate(lang, key, *args)
 def _bk_lm_token_settings_key(kind: str) -> str:
     return f"lm_tokens/{kind}"
 def _bk_lm_prompt_settings_key(lang: str, key: str) -> str:

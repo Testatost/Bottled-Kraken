@@ -38,38 +38,15 @@ from PySide6.QtWidgets import (
 class BKCanonicalGraphDialogUiTablesMixin:
         def _show_graph_help(self):
             dlg = QDialog(self)
-            dlg.setWindowTitle(self._tr2("dlg_canonical_graph_help_title", "Graph-Erklärung"))
+            dlg.setWindowTitle(self._tr2("dlg_canonical_graph_help_title"))
             dlg.resize(720, 520)
             layout = QVBoxLayout(dlg)
-            title = QLabel(f"<h2>{self._tr2('dlg_canonical_graph_help_title', 'Graph-Erklärung')}</h2>")
+            title = QLabel(f"<h2>{self._tr2('dlg_canonical_graph_help_title')}</h2>")
             title.setTextFormat(Qt.RichText)
             layout.addWidget(title)
             text = QTextBrowser()
             text.setOpenExternalLinks(True)
-            html = self._tr2("dlg_canonical_graph_help_html", "")
-            if not html or html == "dlg_canonical_graph_help_html":
-                html = (
-                    "<div style='font-size:10pt;'>"
-                    "<h3>Was zeigt der Graph?</h3>"
-                    "<p>Jeder Kreis ist ein erkannter Node, zum Beispiel Person, Ort, Jahr oder Alter. "
-                    "Linien sind Beziehungen zwischen diesen Nodes.</p>"
-                    "<h3>Wie entsteht die Kantenstärke?</h3>"
-                    "<ul>"
-                    "<li><b>0.80</b>: direkt belegte Beziehung, etwa Person–Ort.</li>"
-                    "<li><b>0.75</b>: Zeit-/Jahr-Beziehung.</li>"
-                    "<li><b>0.72</b>: Altersangabe.</li>"
-                    "<li><b>0.35</b>: schwächere Dokument-/Teil-von-Beziehung.</li>"
-                    "</ul>"
-                    "<h3>Was machen die Regler?</h3>"
-                    "<p>Node-Größe, Kantenstärke, Kantenabstand, Zentrierung, Abstoßung, "
-                    "Kantenkraft und Cluster-Bubbles ändern nur die Darstellung. Die Daten werden dadurch nicht verändert.</p>"
-                    "<h3>Interaktion</h3>"
-                    "<p>Beim Klick auf einen Node werden der Node, direkt verbundene Nodes und verbundene Kanten hervorgehoben. "
-                    "Die Tabellen rechts springen zur passenden Auswahl.</p>"
-                    "<p>Cluster-Bubbles können über ihre Überschrift, zum Beispiel einen Nachnamen, "
-                    "gezogen werden. Dabei werden alle Nodes dieser Bubble gemeinsam verschoben.</p>"
-                    "</div>"
-                )
+            html = self._tr2("dlg_canonical_graph_help_html")
             text.setHtml(html)
             layout.addWidget(text, 1)
             buttons = QDialogButtonBox(QDialogButtonBox.Ok)
@@ -113,7 +90,7 @@ class BKCanonicalGraphDialogUiTablesMixin:
             top.addWidget(self.graph_legend_label)
             self.btn_graph_help = QPushButton("?")
             self.btn_graph_help.setFixedWidth(32)
-            self.btn_graph_help.setToolTip(self._tr2("dlg_canonical_graph_help_title", "Graph-Erklärung"))
+            self.btn_graph_help.setToolTip(self._tr2("dlg_canonical_graph_help_title"))
             self.btn_graph_help.clicked.connect(self._show_graph_help)
             top.addWidget(self.btn_graph_help)
             top.addStretch(1)

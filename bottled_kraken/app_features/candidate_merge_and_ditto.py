@@ -247,19 +247,13 @@ def _bk_fix43_connect_stop_buttons(self):
                 pass
     except Exception:
         pass
-try:
-    _BK_FIX43_PREV_MAINWINDOW_INIT = MainWindow.__init__
-except Exception:
-    _BK_FIX43_PREV_MAINWINDOW_INIT = None
-if callable(_BK_FIX43_PREV_MAINWINDOW_INIT) and not getattr(MainWindow.__init__, "_bk_fix43_stop_init_wrapped", False):
-    def _bk_fix43_mainwindow_init(self, *args, **kwargs):
-        _BK_FIX43_PREV_MAINWINDOW_INIT(self, *args, **kwargs)
-        try:
-            QTimer.singleShot(0, lambda: _bk_fix43_connect_stop_buttons(self))
-        except Exception:
-            _bk_fix43_connect_stop_buttons(self)
-    _bk_fix43_mainwindow_init._bk_fix43_stop_init_wrapped = True
-    MainWindow.__init__ = _bk_fix43_mainwindow_init
+def _bk_fix43_mainwindow_init(self, *args, **kwargs):
+    try:
+        QTimer.singleShot(0, lambda: _bk_fix43_connect_stop_buttons(self))
+    except Exception:
+        _bk_fix43_connect_stop_buttons(self)
+from bottled_kraken.common.chain_consolidation import register_init_delta
+register_init_delta(_bk_fix43_mainwindow_init)
 __all__ = [
     '_bk_fix36_resolve_ditto_marks_in_lines',
     '_bk_fix36_resolve_ditto_marks_in_recs',

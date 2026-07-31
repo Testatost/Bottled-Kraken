@@ -377,7 +377,6 @@ class MainWindowAiServerUrlsAndModelSelectionMixin:
             "settings": {
                 "language": self.current_lang,
                 "reading_direction": self.reading_direction,
-                "device": self.device_str,
                 "show_overlay": self.show_overlay,
                 "theme": self.current_theme,
                 "custom_theme_colors": self._load_custom_theme_colors() if hasattr(self, "_load_custom_theme_colors") else {},

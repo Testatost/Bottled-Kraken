@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('bk', globals())
 """GEDCOM-Erzeugung über lokales LM.
 Ergänzt im LM-Überarbeitungsmenü den Eintrag "GEDCOM erzeugen" unterhalb
@@ -25,16 +26,8 @@ def _bk_gedcom_save_fix_install_translations():
         except Exception:
             pass
 def _bk_gedcom_text_for(window, key: str, *args) -> str:
-    try:
-        return window._tr(key, *args)
-    except Exception:
-        lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
-        mapping = _BK_GEDCOM_SAVE_FIX_TEXTS.get(lang) or _BK_GEDCOM_SAVE_FIX_TEXTS["de"]
-        text = mapping.get(key, _BK_GEDCOM_SAVE_FIX_TEXTS["de"].get(key, key))
-        try:
-            return text.format(*args) if args else text
-        except Exception:
-            return text
+    lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
+    return translation.translate(lang, key, *args)
 def _bk_gedcom_clean_relaxed(self, raw: str) -> str:
     text = str(raw or "").strip()
     text = re.sub(r"^```(?:gedcom|ged)?\s*", "", text, flags=re.IGNORECASE).strip()
@@ -79,8 +72,6 @@ def _bk_gedcom_clean_relaxed(self, raw: str) -> str:
     if not re.search(r"(?m)^0\s+TRLR\b", text, flags=re.IGNORECASE):
         text = text.rstrip() + "\n0 TRLR"
     return text.strip() + "\n"
-def _bk_gedcom_has_indi_records(gedcom_text: str) -> bool:
-    return bool(re.search(r"(?m)^0\s+@[^@\s]+@\s+INDI\b", str(gedcom_text or ""), flags=re.IGNORECASE))
 def _bk_lm_on_gedcom_done_gui(self, path: str, gedcom_text: str):
     worker = getattr(self, "_bk_gedcom_worker", None)
     if worker is not None:
@@ -284,16 +275,12 @@ def _bk_gedcom_rewire_menu_action(self):
         _bk_lm_update_dropdown_state(self)
     except Exception:
         pass
-_BK_GEDCOM_SAVE_FIX_PREV_INIT = MainWindow.__init__
 def _bk_gedcom_save_fix_init(self, *args, **kwargs):
-    _BK_GEDCOM_SAVE_FIX_PREV_INIT(self, *args, **kwargs)
     try:
         _bk_gedcom_rewire_menu_action(self)
     except Exception:
         pass
-_BK_GEDCOM_SAVE_FIX_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_gedcom_save_fix_retranslate(self, *args, **kwargs):
-    _BK_GEDCOM_SAVE_FIX_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_gedcom_rewire_menu_action(self)
     except Exception:
@@ -303,8 +290,8 @@ try:
     BKLocalGedcomWorker._clean_gedcom = _bk_gedcom_clean_relaxed
 except Exception:
     pass
-MainWindow.__init__ = _bk_gedcom_save_fix_init
-MainWindow.retranslate_ui = _bk_gedcom_save_fix_retranslate
+register_init_delta(_bk_gedcom_save_fix_init)
+register_retranslate_delta(_bk_gedcom_save_fix_retranslate)
 MainWindow._bk_lm_generate_gedcom = _bk_lm_generate_gedcom_gui_safe
 MainWindow._bk_lm_on_gedcom_done_gui = _bk_lm_on_gedcom_done_gui
 MainWindow._bk_lm_on_gedcom_failed_gui = _bk_lm_on_gedcom_failed_gui
@@ -312,14 +299,11 @@ __all__ = [
     '_BK_GEDCOM_PROMPT_DEFAULTS',
     '_BK_GEDCOM_REVIEW_TEXTS',
     '_BK_GEDCOM_ROBUST_TEXTS',
-    '_BK_GEDCOM_SAVE_FIX_PREV_INIT',
-    '_BK_GEDCOM_SAVE_FIX_PREV_RETRANSLATE',
     '_BK_GEDCOM_SAVE_FIX_TEXTS',
     '_BK_GEDCOM_STRUCTURED_TEXTS',
     '_BK_GEDCOM_VISION_TEXTS',
     '_BK_PROMPT_UX_EXTRA_TEXTS',
     '_bk_gedcom_clean_relaxed',
-    '_bk_gedcom_has_indi_records',
     '_bk_gedcom_rewire_menu_action',
     '_bk_gedcom_save_fix_init',
     '_bk_gedcom_save_fix_install_translations',

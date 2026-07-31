@@ -6,6 +6,9 @@ from bottled_kraken.common import (
     List,
     Optional,
     QApplication,
+    _bk_refresh_widget_button_icons,
+    _bk_show_standard_text_context_menu,
+    _bk_handle_text_redo_shortcut,
     QCoreApplication,
     QEvent,
     QKeySequence,
@@ -283,7 +286,7 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
     def on_ai_selected_lines_revision_failed(self, path: str, msg: str):
         self._ai_multi_line_context = None
         self.act_ai_revise.setEnabled(True)
-        if "abgebrochen" in str(msg).lower():
+        if self._ai_revision_was_cancelled(msg):
             self.status_bar.showMessage(self._tr("msg_ai_multi_cancelled"))
             self._log(self._tr_log("log_ai_multi_cancelled", os.path.basename(path)))
         else:
@@ -304,6 +307,10 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
             return False
         try:
             et = event.type()
+            if et == QEvent.ContextMenu and _bk_show_standard_text_context_menu(obj, event):
+                return True
+            if _bk_handle_text_redo_shortcut(obj, event):
+                return True
             if et in (QEvent.ShortcutOverride, QEvent.KeyPress):
                 if event.matches(QKeySequence.Paste):
                     if QApplication.activeWindow() is not self:
@@ -314,6 +321,9 @@ class MainWindowVoiceInputSelectionAndAiSelectedLinesMixin:
                     self.paste_files_from_clipboard()
                     event.accept()
                     return True
+            if et in (QEvent.Show, QEvent.Polish, QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+                if str(getattr(self, "current_theme", "bright") or "bright").strip().lower() == "bright":
+                    _bk_refresh_widget_button_icons(obj, include_actions=False)
         except Exception:
             pass
         return super().eventFilter(obj, event)

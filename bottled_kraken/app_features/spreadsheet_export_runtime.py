@@ -4,10 +4,6 @@ from bottled_kraken.common import _load_image_color
 from bottled_kraken.main_window import MainWindow
 from bottled_kraken.export_layout import write_positioned_ods, write_positioned_xlsx
 try:
-    _BK_SPREADSHEET_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_SPREADSHEET_PREV_RENDER_FILE = None
-try:
     _BK_SPREADSHEET_PREV_EXPORT_ITEMS = MainWindow._export_format_items
 except Exception:
     _BK_SPREADSHEET_PREV_EXPORT_ITEMS = None
@@ -90,38 +86,19 @@ def _bk_spreadsheet_export_label(self, fmt: str) -> str:
         return _BK_SPREADSHEET_PREV_EXPORT_LABEL(self, fmt)
     return str(fmt).upper()
 
-def _bk_spreadsheet_render_file(self, path, fmt, item):
-    fmt_l = str(fmt or '').lower().lstrip('.')
-    if fmt_l in {'xlsx', 'excel', 'ods', 'calc'}:
-        if not item or not getattr(item, 'results', None):
-            return None
-        _text, _kraken_records, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-        except Exception:
-            export_image = pil_image
-        if fmt_l in {'xlsx', 'excel'}:
-            return write_positioned_xlsx(path, item, export_image, record_views)
-        return write_positioned_ods(path, item, export_image, record_views)
-    if callable(_BK_SPREADSHEET_PREV_RENDER_FILE):
-        return _BK_SPREADSHEET_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 MainWindow._export_format_items = _bk_spreadsheet_export_items
 MainWindow._export_ext = _bk_spreadsheet_export_ext
 MainWindow._export_filter = _bk_spreadsheet_export_filter
 MainWindow._export_display_label = _bk_spreadsheet_export_label
-MainWindow._render_file = _bk_spreadsheet_render_file
 __all__ = [
     '_BK_SPREADSHEET_PREV_EXPORT_EXT',
     '_BK_SPREADSHEET_PREV_EXPORT_FILTER',
     '_BK_SPREADSHEET_PREV_EXPORT_ITEMS',
     '_BK_SPREADSHEET_PREV_EXPORT_LABEL',
-    '_BK_SPREADSHEET_PREV_RENDER_FILE',
     '_bk_spreadsheet_export_ext',
     '_bk_spreadsheet_export_filter',
     '_bk_spreadsheet_export_items',
     '_bk_spreadsheet_export_label',
     '_bk_spreadsheet_label',
-    '_bk_spreadsheet_render_file',
 ]
 register_globals('bk', globals(), __all__)

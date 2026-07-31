@@ -1,10 +1,9 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('ptr', globals())
 def _ptr_mainwindow_init_wrapper_v2(self, *args, **kwargs):
-    _ptr_prev_mainwindow_init(self, *args, **kwargs)
     _ptr_rebuild_secondary_button_rows(self)
 def _ptr_mainwindow_retranslate_ui_wrapper_v2(self, *args, **kwargs):
-    _ptr_prev_retranslate(self, *args, **kwargs)
     try:
         _ptr_update_feature_texts_v2(self)
     except Exception:
@@ -499,8 +498,6 @@ def _ptr_ai_dialog_save_result_v2(self):
             path += ".txt"
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(str(data))
-_ptr_prev_mainwindow_init = MainWindow.__init__
-_ptr_prev_retranslate = MainWindow.retranslate_ui
 _ptr_prev_close_event = MainWindow.closeEvent
 PtrMultiOCRFollowupDialog.__init__ = _ptr_followup_init_v2
 PtrAIToolsDialog._build_ui = _ptr_ai_dialog_build_ui_v2
@@ -518,10 +515,9 @@ _ptr_ai_build_postgres_json = _ptr_ai_build_postgres_json_v2
 _ptr_remote_chat_completion = _ptr_remote_chat_completion_v2
 _ptr_feature_config_from_window = _ptr_feature_config_from_window_v2
 _ptr_save_feature_config_to_window = _ptr_save_feature_config_to_window_v2
-MainWindow._ptr_install_feature_actions = _ptr_install_feature_actions_v2
 MainWindow.ptr_update_feature_texts = _ptr_update_feature_texts_v2
-MainWindow.__init__ = _ptr_mainwindow_init_wrapper_v2
-MainWindow.retranslate_ui = _ptr_mainwindow_retranslate_ui_wrapper_v2
+register_init_delta(_ptr_mainwindow_init_wrapper_v2)
+register_retranslate_delta(_ptr_mainwindow_retranslate_ui_wrapper_v2)
 MainWindow.closeEvent = _ptr_mainwindow_close_wrapper_v2
 def _ptr_unique_keep_order(items: List[str]) -> List[str]:
     seen = set()
@@ -595,8 +591,6 @@ __all__ = [
     '_ptr_mainwindow_init_wrapper_v2',
     '_ptr_mainwindow_retranslate_ui_wrapper_v2',
     '_ptr_prev_close_event',
-    '_ptr_prev_mainwindow_init',
-    '_ptr_prev_retranslate',
     '_ptr_remote_chat_completion',
     '_ptr_save_feature_config_to_window',
     '_ptr_source_lines_for_postgres',

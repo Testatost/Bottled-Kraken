@@ -124,8 +124,12 @@ class MainWindowVoiceLineFillMixin:
             self._set_progress_idle(100)
             self.status_bar.showMessage(self._tr("msg_voice_done"))
             self._log(
-                f"Sprachimport abgeschlossen: {os.path.basename(path)} | "
-                f"Zeile {line_index + 1} -> {new_text}"
+                self._tr_log(
+                    "log_voice_import_done",
+                    os.path.basename(path),
+                    line_index + 1,
+                    new_text,
+                )
             )
         def on_voice_line_fill_failed(self, path: str, msg: str):
             if self.voice_worker is None:
@@ -140,5 +144,5 @@ class MainWindowVoiceLineFillMixin:
                 self.voice_record_dialog = None
             self._set_progress_idle(0)
             self.status_bar.showMessage(self._tr("msg_voice_cancelled"))
-            self._log(f"Sprachimport Fehler: {os.path.basename(path)} -> {msg}")
+            self._log(self._tr_log("log_voice_import_error", os.path.basename(path), msg))
             QMessageBox.warning(self, self._tr("warn_title"), msg)

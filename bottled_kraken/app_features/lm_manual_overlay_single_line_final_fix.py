@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.common import _crop_overlay_box_to_data_url_strict
 
 from bottled_kraken.common import (
     _clean_ocr_text,
@@ -33,11 +34,10 @@ def _bk_fix51_is_short_valid_visual_text(text: str) -> bool:
     if not t or "\n" in t or _bk_fix51_is_json_debris(t):
         return False
     return bool(
-        re.fullmatch(r"\d{1,6}\.?", t)
-        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,10}|\d{1,3})\s*\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[IVXLCDM]{1,10}\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß]\. ?", t)
-        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß]\.?", t)
+        re.fullmatch(r"\d{1,6}[.,;:)]?", t)
+        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,10}|\d{1,3})\s*[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[IVXLCDM]{1,10}[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß][.,;:)]?", t)
         or re.fullmatch(r"[-–—=•·*]{1,8}", t)
     )
 
@@ -378,7 +378,13 @@ def _bk_fix51_request_visual_overlay_ocr(worker, rv, local_pos: int = 0) -> str:
     # nicht in die Antwort geraten.
     pad_x = 3
     pad_y = 3
-    line_data_url = _crop_single_line_to_data_url(worker.path, rv, pad_x=pad_x, pad_y=pad_y, extra_context_y=0)
+    line_data_url = _crop_overlay_box_to_data_url_strict(
+        worker.path,
+        rv,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        extra_context_y=0,
+    )
     idx = int(getattr(rv, "idx", local_pos) if getattr(rv, "idx", None) is not None else local_pos)
 
     system_prompt = (
@@ -416,7 +422,12 @@ def _bk_fix51_request_visual_overlay_ocr(worker, rv, local_pos: int = 0) -> str:
         }
         payload = _bk_fix52_payload_with_optional_reasoning_disabled(base_payload, disable_reasoning)
         try:
-            data = worker._post_json(payload)
+            worker._bk_strict_overlay_transcription_active = True
+            worker._bk_active_overlay_crop_data_url = line_data_url
+            try:
+                data = worker._post_json(payload)
+            finally:
+                worker._bk_active_overlay_crop_data_url = None
             visible = _bk_fix52_extract_manual_ocr_response(worker, data)
             if visible:
                 return visible
@@ -509,9 +520,17 @@ def _bk_fix51_ai_revision_run(self):
             visual = _bk_fix51_request_visual_overlay_ocr(self, rv, 0)
             visual = _bk_fix51_candidate_visible_text(self, visual)
             if visual:
+                try:
+                    self.status_changed.emit(self._tr("ai_status_fix46_finalize", os.path.basename(self.path)))
+                except Exception:
+                    pass
                 self.progress_changed.emit(100)
                 self.finished_revision.emit(self.path, [visual])
                 return
+            try:
+                self.status_changed.emit(self._tr("ai_status_fix46_finalize", os.path.basename(self.path)))
+            except Exception:
+                pass
             self.progress_changed.emit(100)
             self.finished_revision.emit(self.path, [_clean_ocr_text(getattr(rv, "text", "") or "")])
             return

@@ -54,6 +54,16 @@ class MainWindowReadingDirectionAndRetranslateMixin:
         def set_reading_direction(self, mode):
             self.reading_direction = mode
         def retranslate_ui(self):
+            # Qts eigene Basisuebersetzungen (Kontextmenues von Textfeldern,
+            # Standard-Dialogknoepfe) der aktiven Sprache nachziehen.
+            try:
+                from PySide6.QtWidgets import QApplication as _QApp
+                from bottled_kraken.app import _bk_install_qt_base_translator
+                app = _QApp.instance()
+                if app is not None:
+                    _bk_install_qt_base_translator(app, getattr(self, "current_lang", None))
+            except Exception:
+                pass
             self.setWindowTitle(self._tr("app_title"))
             self.file_menu.setTitle(self._tr("menu_file"))
             self.edit_menu.setTitle(self._tr("menu_edit"))
@@ -61,7 +71,6 @@ class MainWindowReadingDirectionAndRetranslateMixin:
             self.options_menu.setTitle(self._tr("menu_options"))
             if hasattr(self, "act_appearance"):
                 self.act_appearance.setText(self._tr("menu_appearance"))
-            self.hw_menu.setTitle(self._tr("menu_hw"))
             if hasattr(self, "_menu_text_with_shortcut"):
                 self.export_menu.setTitle(self._menu_text_with_shortcut(self._tr("menu_export"), "E"))
             else:
@@ -77,6 +86,8 @@ class MainWindowReadingDirectionAndRetranslateMixin:
                 self.revision_models_menu.setTitle(self._tr("menu_lm_options"))
             if hasattr(self, "whisper_menu"):
                 self.whisper_menu.setTitle(self._tr("menu_whisper_options"))
+            if hasattr(self, "act_escriptorium"):
+                self.act_escriptorium.setText(self._tr("menu_escriptorium"))
             self.act_export_log.setText(self._tr("menu_export_log"))
             if hasattr(self, "act_lm_help"):
                 self.act_lm_help.setText(self._tr("act_help"))
@@ -195,14 +206,6 @@ class MainWindowReadingDirectionAndRetranslateMixin:
                 self.btn_seg_model.setText(self._tr("btn_seg_model_value", os.path.basename(self.seg_model_path)))
             else:
                 self.btn_seg_model.setText(self._tr("btn_seg_model_empty"))
-            mapping = {"cpu": "hw_cpu", "cuda": "hw_cuda", "rocm": "hw_rocm"}
-            for dev, key in mapping.items():
-                if dev in self.hw_actions:
-                    self.hw_actions[dev].setText(self._tr(key))
-            if hasattr(self, "act_install_cuda_backend"):
-                self.act_install_cuda_backend.setText(self._tr("hw_install_cuda_backend"))
-            if hasattr(self, "act_install_rocm_backend"):
-                self.act_install_rocm_backend.setText(self._tr("hw_install_rocm_backend"))
             read_keys = ["reading_tb_lr", "reading_tb_rl", "reading_bt_lr", "reading_bt_rl"]
             for act, key in zip(self.read_actions, read_keys):
                 act.setText(self._tr(key))

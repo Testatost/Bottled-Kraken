@@ -260,24 +260,22 @@ class AIRevisionRequestsMixin:
             return _force_text(kraken_text).strip()
         return _force_text(page_text).strip()
     def _effective_revision_max_tokens(self, request_kind: str = "generic", item_count: int = 1) -> int:
+        """Return a strict upper bound derived from the user's configured limit.
+
+        Older code silently raised low user limits for block/page requests (for
+        example 1200 -> at least 2400 tokens for a page). That made the LM
+        settings misleading and could dramatically increase reasoning time.
+        The configured value is now always the hard upper bound; task-specific
+        caps only lower it, never raise it.
+        """
         requested = max(1, int(self.max_tokens or 0))
-        item_count = max(1, int(item_count or 1))
-        if request_kind == "single":
-            cap = 220
-            return min(requested, cap)
-        if request_kind == "decision":
-            cap = 220
-            return min(requested, cap)
+        if request_kind in {"single", "decision"}:
+            return min(requested, 220)
         if request_kind == "block":
-            hard_cap = 3200
-            recommended = min(hard_cap, max(700, 240 * item_count + 120))
-            return min(max(requested, recommended), hard_cap)
+            return min(requested, 3200)
         if request_kind == "page":
-            hard_cap = 12000
-            recommended = min(hard_cap, max(2400, 180 * item_count + 600))
-            return min(max(requested, recommended), hard_cap)
-        cap = 1200
-        return min(requested, cap)
+            return min(requested, 12000)
+        return min(requested, 1200)
     def _build_sampling_payload(self, response_format: Optional[dict] = None, override_max_tokens: Optional[int] = None) -> dict:
         payload = {
             "temperature": self.temperature,
@@ -294,6 +292,19 @@ class AIRevisionRequestsMixin:
             payload["min_p"] = self.min_p
         if self.repetition_penalty != 1.0:
             payload["repetition_penalty"] = self.repetition_penalty
+        if not getattr(self, "enable_thinking", False):
+            # Modell-agnostisch: OpenAI-kompatible lokale Backends (LM Studio,
+            # llama.cpp, Ollama, vLLM, ...) benennen den "Denken-aus"-Schalter
+            # jeweils anders. Unbekannte Felder werden ignoriert, der passende
+            # greift. Dadurch entfaellt der langsame reasoning_content (z. B. das
+            # sichtbare chinesische Vor-sich-hin-Denken von Qwen) bei jeder
+            # OCR-/Overlay-Box-Anfrage - schneller und ohne Fremdsprachen-Drift.
+            payload["reasoning"] = {"effort": "none"}
+            payload["reasoning_effort"] = "none"
+            payload["thinking"] = False
+            payload["think"] = False
+            payload["enable_thinking"] = False
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         return payload
     def _response_format_lines(self) -> dict:
         return {
@@ -361,10 +372,17 @@ class AIRevisionRequestsMixin:
             raise RuntimeError(self._tr("ai_err_invalid_endpoint"))
         conn = None
         try:
+            import time as _time
+            import select as _select
+            # Verbindungs-/Sende-Timeout grosszuegig. Auf die Modell-Antwort wird
+            # danach per select() gewartet und dabei alle 0,4 s der Abbruch
+            # geprueft. So greift "Abbrechen" sofort - unabhaengig davon, ob das
+            # Schliessen des Sockets aus dem GUI-Thread den blockierenden read()
+            # weckt (unter Windows oft nicht).
             if parsed.scheme == "https":
-                conn = http.client.HTTPSConnection(host, port or 443, timeout=600)
+                conn = http.client.HTTPSConnection(host, port or 443, timeout=30)
             else:
-                conn = http.client.HTTPConnection(host, port or 80, timeout=600)
+                conn = http.client.HTTPConnection(host, port or 80, timeout=30)
             self._active_conn = conn
             conn.request(
                 "POST",
@@ -377,7 +395,27 @@ class AIRevisionRequestsMixin:
             )
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError(self._tr("msg_ai_cancelled"))
+            # Waehrend das Modell generiert, kommt noch nichts ueber den Socket.
+            # select() wartet blockfrei in kurzen Intervallen; zwischen den
+            # Intervallen wird der Abbruch geprueft. Bei nicht-gestreamter Antwort
+            # (stream=False) wird der Socket erst lesbar, wenn die komplette
+            # Antwort vorliegt - dann kann normal (schnell) gelesen werden.
+            overall_deadline = _time.monotonic() + 600
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                while True:
+                    if self._cancelled or self.isInterruptionRequested():
+                        raise RuntimeError(self._tr("msg_ai_cancelled"))
+                    if _time.monotonic() > overall_deadline:
+                        raise RuntimeError(self._tr("ai_err_timeout"))
+                    try:
+                        readable, _, _ = _select.select([sock], [], [], 0.4)
+                    except Exception:
+                        break
+                    if readable:
+                        break
             resp = conn.getresponse()
+            self._active_response = resp
             raw = resp.read().decode("utf-8", errors="replace")
             if self._cancelled or self.isInterruptionRequested():
                 raise RuntimeError(self._tr("msg_ai_cancelled"))
@@ -400,5 +438,11 @@ class AIRevisionRequestsMixin:
                     conn.close()
             except Exception:
                 pass
+            if getattr(self, "_active_response", None) is not None:
+                try:
+                    self._active_response.close()
+                except Exception:
+                    pass
+                self._active_response = None
             if self._active_conn is conn:
                 self._active_conn = None

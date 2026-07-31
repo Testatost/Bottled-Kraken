@@ -1,4 +1,12 @@
-from bottled_kraken.user_storage import bottled_kraken_runtime_path
+from __future__ import annotations
+
+import hashlib
+import os
+import signal
+import subprocess
+import tempfile
+import time
+from pathlib import Path
 
 from bottled_kraken.common import (
     Optional,
@@ -8,32 +16,41 @@ from bottled_kraken.common import (
     VOICE_CHANNELS,
     VOICE_SAMPLE_RATE,
     np,
-    os,
     re,
     sd,
-    sys,
-    time,
-    torch,
     translation,
     wave,
 )
+from bottled_kraken.runtime_cli import hidden_process_kwargs
+from bottled_kraken.runtime_logging import get_logger
+from bottled_kraken.whisper_runtime import (
+    parse_whisper_subprocess_output,
+    utf8_child_environment,
+    whisper_transcription_command,
+)
+
+
+_LOGGER = get_logger("voice")
+
+
 class VoiceLineFillWorker(QThread):
     finished_line = Signal(str, int, str)
     failed_line = Signal(str, str)
     progress_changed = Signal(int)
     status_changed = Signal(str)
+
     def __init__(
-            self,
-            path: str,
-            line_index: int,
-            model_dir: str,
-            device: str = "cpu",
-            compute_type: str = "int8",
-            language: Optional[str] = None,
-            input_device=None,
-            input_samplerate: Optional[int] = None,
-            tr_func=None,
-            parent=None
+        self,
+        path: str,
+        line_index: int,
+        model_dir: str,
+        device: str = "cpu",
+        compute_type: str = "int8",
+        language: Optional[str] = None,
+        input_device=None,
+        input_samplerate: Optional[int] = None,
+        tr_func=None,
+        parent=None,
     ):
         super().__init__(parent)
         self._tr = tr_func or translation.make_tr(translation.DEFAULT_LANGUAGE)
@@ -49,12 +66,45 @@ class VoiceLineFillWorker(QThread):
         self._cancel_requested = False
         self._audio_chunks = []
         self._stream = None
+        self._transcribe_process: subprocess.Popen | None = None
+
     def stop(self):
         self._finish_requested = True
+
     def cancel(self):
         self._cancel_requested = True
         self.requestInterruption()
         self._finish_requested = False
+        self._terminate_transcription_process()
+
+    def _terminate_transcription_process(self) -> None:
+        process = self._transcribe_process
+        if process is None or process.poll() is not None:
+            return
+        try:
+            if os.name == "nt":
+                process.terminate()
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
+        except Exception:
+            try:
+                process.terminate()
+            except Exception:
+                return
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                if os.name == "nt":
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
             try:
@@ -65,9 +115,14 @@ class VoiceLineFillWorker(QThread):
             self._audio_chunks.append(indata.copy())
         if self._cancel_requested or self._finish_requested:
             raise sd.CallbackStop()
+
     def _record_until_stop(self):
         self.status_changed.emit(
-            self._tr("voice_status_input_device_detail", self.input_device, self.input_samplerate or self._tr("voice_status_input_samplerate_auto"))
+            self._tr(
+                "voice_status_input_device_detail",
+                self.input_device,
+                self.input_samplerate or self._tr("voice_status_input_samplerate_auto"),
+            )
         )
         self.status_changed.emit(self._tr("voice_status_microphone_active"))
         self.progress_changed.emit(5)
@@ -97,7 +152,7 @@ class VoiceLineFillWorker(QThread):
                 channels=VOICE_CHANNELS,
                 dtype="float32",
                 blocksize=VOICE_BLOCKSIZE,
-                callback=self._audio_callback
+                callback=self._audio_callback,
             )
             self._stream = stream
             stream.start()
@@ -128,11 +183,50 @@ class VoiceLineFillWorker(QThread):
                         pass
             finally:
                 self._stream = None
+
     def _safe_ascii_temp_root(self) -> str:
-        # Keep generated WAV files under the user's BottledKraken folder, not in OS temp.
-        base = str(bottled_kraken_runtime_path("voice"))
-        os.makedirs(base, exist_ok=True)
-        return base
+        if os.name != "nt":
+            try:
+                uid = os.getuid()
+            except AttributeError:
+                uid = 0
+            base = Path("/tmp") / f"bk-voice-{uid}"
+        else:
+            base = Path(tempfile.gettempdir()) / "bk-voice"
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            base.chmod(0o700)
+        except OSError:
+            pass
+        return str(base)
+
+    def _safe_model_alias(self) -> str:
+        source = Path(self.model_dir).expanduser().resolve()
+        if os.name == "nt":
+            return str(source)
+        try:
+            uid = os.getuid()
+        except AttributeError:
+            uid = 0
+        digest = hashlib.sha256(os.fsencode(str(source))).hexdigest()[:16]
+        alias_root = Path("/tmp") / f"bk-whisper-{uid}" / "models"
+        alias_root.mkdir(parents=True, exist_ok=True)
+        try:
+            alias_root.parent.chmod(0o700)
+            alias_root.chmod(0o700)
+        except OSError:
+            pass
+        alias = alias_root / digest
+        try:
+            if alias.is_symlink() and alias.resolve() == source:
+                return str(alias)
+            if alias.exists() or alias.is_symlink():
+                alias.unlink()
+            alias.symlink_to(source, target_is_directory=True)
+            return str(alias)
+        except OSError:
+            return str(source)
+
     def _write_temp_wav(self) -> str:
         if not self._audio_chunks:
             raise RuntimeError(self._tr("warn_voice_no_audio_data"))
@@ -142,11 +236,7 @@ class VoiceLineFillWorker(QThread):
             raise RuntimeError(self._tr("voice_error_recording_too_short"))
         audio = np.clip(audio, -1.0, 1.0)
         tmp_dir = self._safe_ascii_temp_root()
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_path = os.path.join(
-            tmp_dir,
-            f"voice_{int(time.time() * 1000)}.wav"
-        )
+        tmp_path = os.path.join(tmp_dir, f"voice_{int(time.time() * 1000)}.wav")
         pcm16 = (audio * 32767.0).astype(np.int16)
         samplerate = int(getattr(self, "_record_samplerate", VOICE_SAMPLE_RATE))
         with wave.open(tmp_path, "wb") as wf:
@@ -155,6 +245,7 @@ class VoiceLineFillWorker(QThread):
             wf.setframerate(samplerate)
             wf.writeframes(pcm16.tobytes())
         return tmp_path
+
     def _replace_spoken_punctuation_with_placeholders(self, text: str) -> str:
         txt = (text or "").strip()
         replacements = [
@@ -224,6 +315,60 @@ class VoiceLineFillWorker(QThread):
         txt = re.sub(r"[.!?]+$", "", txt).strip()
         txt = self._restore_punctuation_placeholders(txt)
         return re.sub(r"\s+", " ", txt).strip()
+    def _transcribe_in_utf8_subprocess(self, wav_path: str) -> dict:
+        model_dir = self._safe_model_alias()
+        command = whisper_transcription_command(
+            model_dir=model_dir,
+            wav_path=wav_path,
+            device=self.device,
+            compute_type=self.compute_type,
+            language=self.language,
+        )
+        output_path = Path(self._safe_ascii_temp_root()) / f"whisper_{int(time.time() * 1000)}.log"
+        kwargs = hidden_process_kwargs()
+        if os.name != "nt":
+            kwargs["start_new_session"] = True
+        self.status_changed.emit(self._tr("voice_status_transcribe_line", self.device, self.compute_type))
+        self.progress_changed.emit(60)
+        returncode = -1
+        try:
+            with output_path.open("wb") as output:
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    env=utf8_child_environment(),
+                    **kwargs,
+                )
+                self._transcribe_process = process
+                progress = 60
+                while process.poll() is None:
+                    if self._cancel_requested or self.isInterruptionRequested():
+                        self._terminate_transcription_process()
+                        raise RuntimeError(self._tr("warn_voice_cancelled"))
+                    progress = min(92, progress + 1)
+                    self.progress_changed.emit(progress)
+                    self.msleep(250)
+                returncode = int(process.wait())
+            if self._cancel_requested or self.isInterruptionRequested():
+                raise RuntimeError(self._tr("warn_voice_cancelled"))
+            raw = output_path.read_bytes()
+        finally:
+            self._transcribe_process = None
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+        payload = parse_whisper_subprocess_output(raw)
+        if returncode != 0 or not payload.get("ok"):
+            detail = str(payload.get("traceback") or payload.get("error") or "")
+            if detail:
+                _LOGGER.error("Whisper subprocess failed:\n%s", detail)
+            message = str(payload.get("error") or self._tr("voice_error_transcription_failed"))
+            raise RuntimeError(message)
+        return payload
+
     def run(self):
         tmp_wav = None
         try:
@@ -243,64 +388,29 @@ class VoiceLineFillWorker(QThread):
             tmp_wav = self._write_temp_wav()
             self.status_changed.emit(self._tr("voice_status_load_whisper"))
             self.progress_changed.emit(35)
-            from faster_whisper import WhisperModel
-            safe_model_dir = os.path.abspath(self.model_dir)
-            safe_wav_path = os.path.abspath(tmp_wav)
-            kwargs = {
-                "beam_size": 5,
-                "vad_filter": False,
-                "condition_on_previous_text": False,
-                "task": "transcribe",
-                "language": None,
-            }
-            active_device = self.device
-            active_compute = self.compute_type
-            try:
-                model = WhisperModel(
-                    safe_model_dir,
-                    device=active_device,
-                    compute_type=active_compute
-                )
-                self.status_changed.emit(
-                    self._tr("voice_status_transcribe_line", active_device, active_compute)
-                )
-                self.progress_changed.emit(60)
-                segments, info = model.transcribe(safe_wav_path, **kwargs)
-            except Exception as e:
-                msg = str(e).lower()
-                if active_device == "cuda" and ("out of memory" in msg or "cuda failed" in msg):
-                    try:
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                    except Exception:
-                        pass
-                    self.status_changed.emit(self._tr("voice_status_cuda_fallback"))
-                    model = WhisperModel(
-                        safe_model_dir,
-                        device="cpu",
-                        compute_type="int8"
-                    )
-                    self.status_changed.emit(self._tr("voice_status_cpu_transcribe"))
-                    self.progress_changed.emit(60)
-                    segments, info = model.transcribe(safe_wav_path, **kwargs)
-                else:
-                    raise
-            try:
-                detected_lang = getattr(info, "language", None)
-                if detected_lang:
-                    self.status_changed.emit(self._tr("voice_status_detected_language", detected_lang))
-            except Exception:
-                pass
-            segments = list(segments)
-            full_text = " ".join((seg.text or "").strip() for seg in segments).strip()
-            full_text = self._postprocess_transcript(full_text)
+            payload = self._transcribe_in_utf8_subprocess(tmp_wav)
+            active_device = str(payload.get("device") or self.device)
+            active_compute = str(payload.get("compute_type") or self.compute_type)
+            if self.device == "cuda" and active_device == "cpu":
+                self.status_changed.emit(self._tr("voice_status_cuda_fallback"))
+                self.status_changed.emit(self._tr("voice_status_cpu_transcribe"))
+            detected_lang = str(payload.get("language") or "")
+            if detected_lang:
+                self.status_changed.emit(self._tr("voice_status_detected_language", detected_lang))
+            full_text = self._postprocess_transcript(str(payload.get("text") or ""))
             if not full_text:
                 raise RuntimeError(self._tr("voice_error_no_understandable_text"))
             self.progress_changed.emit(100)
             self.finished_line.emit(self.path, self.line_index, full_text)
-        except Exception as e:
-            self.failed_line.emit(self.path, str(e))
+        except Exception as exc:
+            _LOGGER.exception(
+                "Whisper line dictation failed for %s line %s",
+                self.path,
+                self.line_index + 1,
+            )
+            self.failed_line.emit(self.path, str(exc))
         finally:
+            self._transcribe_process = None
             if tmp_wav and os.path.exists(tmp_wav):
                 try:
                     os.remove(tmp_wav)

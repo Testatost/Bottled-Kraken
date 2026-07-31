@@ -50,29 +50,66 @@ class BKFullPageLMOCRWorker(AIRevisionWorker):
     def _request_full_page_ocr(self, page_data_url: str) -> List[str]:
         system_prompt = self._tr("ai_prompt_fullpage_lm_ocr_system")
         user_prompt = self._tr("ai_prompt_fullpage_lm_ocr_user")
-        payload = {
-            "model": self.lm_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": page_data_url}},
-                    ],
-                },
-            ],
-            **self._build_sampling_payload(
-                response_format=self._response_format_full_page_lines(),
-                override_max_tokens=max(1, int(getattr(self, "max_tokens", 4500) or 4500)),
-            ),
-        }
-        data = self._post_json(payload)
-        content = self._extract_message_content(data)
-        lines = self._extract_full_page_lines(content)
-        if not lines:
-            raise ValueError(self._tr("ai_err_page_no_usable_lines", 0, 0))
-        return lines
+        # Prompt-level fallback for reasoning models/backends that ignore
+        # OpenAI-compatible thinking flags. This is intentionally applied only
+        # when the user has disabled thinking.
+        if not bool(getattr(self, "enable_thinking", False)):
+            system_prompt = "/no_think\n" + str(system_prompt)
+            user_prompt = "/no_think\n" + str(user_prompt)
+        # Denk-Modelle verbrauchen einen grossen Teil des Budgets fuer Reasoning,
+        # BEVOR die eigentliche JSON-Zeilenliste kommt. Wird die Antwort dadurch
+        # abgeschnitten (finish_reason=length -> Parse-Fehler -> "keine
+        # verwertbaren Zeilen"), war bisher der gesamte Seiten-Kontext verloren.
+        # Darum: bei Abschneiden EINMAL mit deutlich groesserem Budget nachlegen.
+        base_tokens = max(1, int(getattr(self, "max_tokens", 4500) or 4500))
+        attempts = [base_tokens]
+        bigger = min(12000, max(base_tokens * 2, 9000))
+        if bigger > base_tokens:
+            attempts.append(bigger)
+        last_exc = None
+        for attempt_no, max_tok in enumerate(attempts, start=1):
+            if self._cancelled or self.isInterruptionRequested():
+                raise RuntimeError(self._tr("msg_ai_ocr_cancelled"))
+            payload = {
+                "model": self.lm_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {"type": "image_url", "image_url": {"url": page_data_url}},
+                        ],
+                    },
+                ],
+                **self._build_sampling_payload(
+                    response_format=self._response_format_full_page_lines(),
+                    override_max_tokens=max_tok,
+                ),
+            }
+            try:
+                data = self._post_json(payload)
+                content = self._extract_message_content(data)
+                lines = self._extract_full_page_lines(content)
+                if not lines:
+                    raise ValueError(self._tr("ai_err_page_no_usable_lines", 0, 0))
+                return lines
+            except Exception as exc:
+                if self._cancelled or self.isInterruptionRequested():
+                    raise
+                last_exc = exc
+                msg = str(exc)
+                truncated = (
+                    "finish_reason=length" in msg
+                    or "reasoning" in msg.lower()
+                    or isinstance(exc, ValueError)
+                )
+                if attempt_no < len(attempts) and truncated:
+                    continue
+                raise
+        if last_exc is not None:
+            raise last_exc
+        return []
     def run(self):
         if self._cancelled or self.isInterruptionRequested():
             self.failed_revision.emit(self.path, self._tr("msg_ai_ocr_cancelled"))

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import threading
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -32,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from bottled_kraken.user_storage import bottled_kraken_user_path
+from bottled_kraken.translation import translation
 
 from bottled_kraken.common import (
     _bk_autocorrect_best_term,
@@ -48,20 +52,24 @@ try:
 except Exception:  # pragma: no cover
     MainWindow = None
 
+try:
+    from bottled_kraken.app_features.autocorrect_dictionary_store import (
+        get_dictionary_store as _bk_ac_get_store,
+        engine_suggestions as _bk_ac_engine_suggestions_impl,
+        make_weights_view as _bk_ac_make_weights_view,
+    )
+except Exception:  # pragma: no cover - z. B. Alt-Test-Loader
+    _bk_ac_get_store = None
+    _bk_ac_engine_suggestions_impl = None
+    _bk_ac_make_weights_view = None
+
 BK_AUTOCORRECT_ERRORS_ROLE = Qt.UserRole + 831
 BK_AUTOCORRECT_TEXT_ROLE = Qt.UserRole + 832
-try:
-    from bottled_kraken.translation import translation as _bk_translation
-except Exception:  # pragma: no cover
-    _bk_translation = None
-
-
 def _bk_ac_available_langs() -> List[str]:
     try:
-        if _bk_translation is not None:
-            langs = list(_bk_translation.available_languages())
-            if langs:
-                return langs
+        langs = list(translation.available_languages())
+        if langs:
+            return langs
     except Exception:
         pass
     langs: List[str] = []
@@ -74,14 +82,13 @@ def _bk_ac_available_langs() -> List[str]:
                 langs.append(name)
     except Exception:
         pass
-    return langs or ["de"]
+    return langs or ([translation.DEFAULT_LANGUAGE] if translation.DEFAULT_LANGUAGE else [])
 
 
 def _bk_ac_display_language_name(code: str, ui_lang: str = "") -> str:
     code = str(code or "").strip()
     try:
-        if _bk_translation is not None:
-            return str(_bk_translation.language_display_name(code, ui_lang or code))
+        return str(translation.language_display_name(code, ui_lang or code))
     except Exception:
         pass
     return code
@@ -182,8 +189,8 @@ def _bk_ac_packaged_dictionary_dir() -> str:
 
 
 def _bk_ac_runtime_dictionary_root() -> str:
-    # No OS temp directory: mirrored and user dictionaries stay under ~/BottledKraken
-    # on Windows and Linux, unless BOTTLED_KRAKEN_USER_DIR is set explicitly.
+    # Mirrored and user dictionaries stay in the platform-specific application
+    # data directory unless BOTTLED_KRAKEN_USER_DIR is set explicitly.
     path = str(bottled_kraken_user_path("dictionaries"))
     try:
         os.makedirs(path, exist_ok=True)
@@ -192,32 +199,190 @@ def _bk_ac_runtime_dictionary_root() -> str:
     return path
 
 
+_BK_AC_SYNC_LOCK = threading.Lock()
+_BK_AC_PACKAGED_MANIFEST = "dictionary_manifest.json"
+_BK_AC_LOCAL_MANIFEST = ".packaged_dictionary_manifest.json"
+
+
+def _bk_ac_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _bk_ac_read_manifest(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict) and isinstance(data.get("files"), dict):
+            return data
+    except Exception:
+        pass
+    return {"schema": 1, "files": {}}
+
+
+def _bk_ac_write_manifest(path: str, data: Dict[str, Any]) -> None:
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temp_path, path)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+def _bk_ac_atomic_copy(source: str, destination: str) -> None:
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    temp_path = f"{destination}.tmp-{os.getpid()}-{threading.get_ident()}"
+    try:
+        shutil.copy2(source, temp_path)
+        os.replace(temp_path, destination)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+def _bk_ac_manifest_entry(path: str) -> Dict[str, Any]:
+    return {"size": int(os.path.getsize(path)), "sha256": _bk_ac_sha256(path)}
+
+
+def _bk_ac_dictionary_file_is_current(
+    source: str,
+    destination: str,
+    packaged_entry: Optional[Dict[str, Any]],
+    local_entry: Optional[Dict[str, Any]],
+) -> bool:
+    if not os.path.isfile(destination):
+        return False
+    try:
+        source_size = int(os.path.getsize(source))
+        destination_size = int(os.path.getsize(destination))
+    except OSError:
+        return False
+    if source_size != destination_size:
+        return False
+
+    # Onefile-Dateien werden bei jedem Start neu nach _MEIPASS entpackt und
+    # erhalten dabei wechselnde Zeitstempel. Der Build-Manifestvergleich ist
+    # deshalb die schnelle, stabile Quelle der Wahrheit.
+    if isinstance(packaged_entry, dict) and packaged_entry.get("sha256"):
+        expected = {
+            "size": int(packaged_entry.get("size", source_size)),
+            "sha256": str(packaged_entry.get("sha256")),
+        }
+        if isinstance(local_entry, dict):
+            known = {
+                "size": int(local_entry.get("size", -1)),
+                "sha256": str(local_entry.get("sha256", "")),
+            }
+            if known == expected and destination_size == expected["size"]:
+                return True
+        try:
+            return _bk_ac_sha256(destination) == expected["sha256"]
+        except Exception:
+            return False
+
+    # Rückwärtskompatibilität für Builds ohne Manifest. Bei identischen
+    # Zeitstempeln genügt der Größenvergleich; andernfalls wird einmalig der
+    # Inhalt verglichen, statt die 35-MB-Dateien bei jedem Start neu zu kopieren.
+    try:
+        if int(os.path.getmtime(source)) <= int(os.path.getmtime(destination)):
+            return True
+    except OSError:
+        pass
+    try:
+        return _bk_ac_sha256(source) == _bk_ac_sha256(destination)
+    except Exception:
+        return False
+
+
 def _bk_ac_sync_runtime_dictionaries() -> str:
+    # Serialisiert Hintergrund-Sync beim Start und spaetere On-Demand-Aufrufe,
+    # damit nicht zwei Threads gleichzeitig dieselben ~35-MB-Dateien kopieren.
+    with _BK_AC_SYNC_LOCK:
+        return _bk_ac_sync_runtime_dictionaries_locked()
+
+
+def _bk_ac_sync_runtime_dictionaries_locked() -> str:
     root = _bk_ac_runtime_dictionary_root()
     embedded = os.path.join(root, "embedded")
     try:
         os.makedirs(embedded, exist_ok=True)
     except Exception:
         pass
+
     src = _bk_ac_packaged_dictionary_dir()
+    packaged_manifest = _bk_ac_read_manifest(os.path.join(src, _BK_AC_PACKAGED_MANIFEST))
+    packaged_files = packaged_manifest.get("files", {}) if isinstance(packaged_manifest, dict) else {}
+    local_manifest_path = os.path.join(embedded, _BK_AC_LOCAL_MANIFEST)
+    local_manifest = _bk_ac_read_manifest(local_manifest_path)
+    local_files = local_manifest.get("files", {}) if isinstance(local_manifest, dict) else {}
+    next_local_files: Dict[str, Any] = {}
+
     try:
         if os.path.isdir(src):
-            for name in os.listdir(src):
-                if not name.lower().endswith(".json"):
+            for name in sorted(os.listdir(src)):
+                if not name.lower().endswith(".json") or name == _BK_AC_PACKAGED_MANIFEST:
                     continue
                 sp = os.path.join(src, name)
+                if not os.path.isfile(sp):
+                    continue
                 dp = os.path.join(embedded, name)
+                packaged_entry = packaged_files.get(name) if isinstance(packaged_files, dict) else None
+                local_entry = local_files.get(name) if isinstance(local_files, dict) else None
                 try:
-                    if not os.path.exists(dp) or os.path.getmtime(sp) > os.path.getmtime(dp):
-                        shutil.copy2(sp, dp)
+                    current = _bk_ac_dictionary_file_is_current(
+                        sp, dp, packaged_entry, local_entry
+                    )
+                    if not current:
+                        _bk_ac_atomic_copy(sp, dp)
+                    if isinstance(packaged_entry, dict) and packaged_entry.get("sha256"):
+                        next_local_files[name] = {
+                            "size": int(packaged_entry.get("size", os.path.getsize(dp))),
+                            "sha256": str(packaged_entry.get("sha256")),
+                        }
+                    else:
+                        next_local_files[name] = _bk_ac_manifest_entry(dp)
                 except Exception:
-                    if not os.path.exists(dp):
+                    # Eine bereits vollständige ältere Spiegeldatei bleibt nutzbar;
+                    # unvollständige Kopien werden wegen des atomaren Austauschs nie
+                    # als fertige Zieldatei sichtbar.
+                    if os.path.isfile(dp):
                         try:
-                            shutil.copyfile(sp, dp)
+                            next_local_files[name] = _bk_ac_manifest_entry(dp)
                         except Exception:
                             pass
     except Exception:
         pass
+
+    if next_local_files:
+        try:
+            _bk_ac_write_manifest(
+                local_manifest_path,
+                {"schema": 1, "files": next_local_files},
+            )
+        except Exception:
+            pass
+
     for code in _bk_ac_available_langs():
         path = os.path.join(embedded, f"{_bk_ac_norm_lang(code)}.json")
         if not os.path.exists(path):
@@ -258,8 +423,7 @@ def _bk_ac_norm_lang(lang: str) -> str:
     if short in available:
         return short
     try:
-        if _bk_translation is not None:
-            return str(_bk_translation.normalize_language_code(raw))
+        return str(translation.normalize_language_code(raw))
     except Exception:
         pass
     return fallback
@@ -327,6 +491,62 @@ def _bk_ac_write_user_terms(lang: str, terms: Iterable[Any]) -> bool:
         with open(_bk_ac_user_path(lang), "w", encoding="utf-8") as handle:
             json.dump({"language": _bk_ac_norm_lang(lang), "terms": clean}, handle, ensure_ascii=False, indent=2)
         return True
+    except Exception:
+        return False
+
+
+def _bk_ac_open_directory(path: str) -> bool:
+    directory = os.path.abspath(os.path.expanduser(str(path or "")))
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except Exception:
+        return False
+
+    # Externe Desktop-Programme dürfen im PyInstaller-Onefile-Build nicht die
+    # gebündelten Qt-/GTK-Bibliothekspfade erben. Genau das verhindert unter
+    # Linux häufig, dass xdg-open bzw. Dolphin überhaupt startet.
+    try:
+        from bottled_kraken.subprocess_env import bk_clean_child_env
+        child_env = bk_clean_child_env()
+    except Exception:
+        child_env = dict(os.environ)
+
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(directory)  # type: ignore[attr-defined]
+            return True
+        commands: List[List[str]] = []
+        if sys.platform == "darwin":
+            commands.append(["open", directory])
+        else:
+            commands.extend([
+                ["xdg-open", directory],
+                ["gio", "open", directory],
+                ["kioclient6", "exec", QUrl.fromLocalFile(directory).toString()],
+                ["kioclient5", "exec", QUrl.fromLocalFile(directory).toString()],
+                ["kioclient", "exec", QUrl.fromLocalFile(directory).toString()],
+            ])
+        for command in commands:
+            if not shutil.which(command[0]):
+                continue
+            try:
+                subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                    start_new_session=True,
+                    env=child_env,
+                )
+                return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(directory)))
     except Exception:
         return False
 
@@ -563,16 +783,185 @@ def _bk_ac_all_terms(self) -> List[Dict[str, Any]]:
     return _bk_ac_reference_terms_with_weights(terms)
 
 
+# ---------------------------------------------------------------------------
+# Zweistufige Wörterbuch-Engine (RAM-Kleinwörterbuch + SQLite-Store für die
+# grossen <lang>_erweitert.json-Listen). Siehe autocorrect_dictionary_store.py.
+# ---------------------------------------------------------------------------
+
+_BK_AC_ENGINE_CACHE: Dict[Tuple[str, float, bool], Dict[str, Any]] = {}
+
+
+def _bk_ac_store_for(lang: str):
+    if _bk_ac_get_store is None:
+        return None
+    lang = _bk_ac_norm_lang(lang)
+    root = _bk_ac_runtime_dictionary_root()
+    source = os.path.join(root, "embedded", f"{lang}_erweitert.json")
+    try:
+        return _bk_ac_get_store(lang, os.path.join(root, "index"), [source], _bk_autocorrect_norm)
+    except Exception:
+        return None
+
+
+def _bk_ac_ensure_store_ready(self, store):
+    """Liefert den Store nur, wenn seine Datenbank aktuell ist; stösst sonst
+    einen einmaligen Hintergrund-Aufbau an (UI bleibt derweil im RAM-Modus)."""
+    if store is None:
+        return None
+    try:
+        if store.is_ready():
+            return store
+        if not store.existing_sources():
+            return None
+    except Exception:
+        return None
+    if getattr(store, "_bk_build_thread", None) is None:
+        if int(getattr(store, "_bk_build_attempts", 0)) >= 2:
+            return None  # zweimal gescheitert - nicht endlos erneut versuchen
+        store._bk_build_attempts = int(getattr(store, "_bk_build_attempts", 0)) + 1
+        try:
+            self.status_bar.showMessage(_bk_ac_text(
+                self, "autocorrect_index_building"), 8000)
+        except Exception:
+            pass
+        import threading as _threading
+
+        def _run():
+            ok = store.build()
+            store._bk_build_done = bool(ok)
+            store._bk_build_finished = True
+
+        thread = _threading.Thread(target=_run, name=f"bk-dict-index-{store.lang}", daemon=True)
+        store._bk_build_thread = thread
+        store._bk_build_finished = False
+        thread.start()
+
+        # GUI-seitiger Poller: sobald der Build fertig ist, Engine-Cache
+        # verwerfen und die Zeilenmarkierungen automatisch neu berechnen.
+        # (Ohne diesen Schritt blieben nach einem Projekt-Laden waehrend des
+        # ersten Index-Aufbaus dauerhaft nur die RAM-Markierungen sichtbar.)
+        try:
+            from PySide6.QtCore import QTimer
+
+            timer = QTimer(self)
+            timer.setInterval(500)
+
+            def _poll():
+                if not getattr(store, "_bk_build_finished", False):
+                    return
+                timer.stop()
+                timer.deleteLater()
+                store._bk_build_thread = None
+                _BK_AC_ENGINE_CACHE.clear()
+                if getattr(store, "_bk_build_done", False):
+                    try:
+                        self._bk_autocorrect_refresh_line_marks()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.status_bar.showMessage(_bk_ac_text(
+                            self, "autocorrect_index_failed").format(
+                                getattr(store, "build_error", "?")), 9000)
+                    except Exception:
+                        pass
+
+            timer.timeout.connect(_poll)
+            timer.start()
+        except Exception:
+            pass
+    return None
+
+
+def _bk_ac_engine_helpers() -> Dict[str, Any]:
+    g = globals()
+    return {
+        "norm": _bk_autocorrect_norm,
+        "distance": g.get("_bk_autocorrect_distance"),
+        "max_distance": g.get("_bk_autocorrect_max_distance"),
+        "similarity_rank": g.get("_bk_autocorrect_similarity_rank"),
+        "restore_case": _bk_autocorrect_restore_case,
+        "is_strong": _bk_ac_suggestion_is_strong,
+        "is_common_norm": _bk_ac_is_common_norm,
+        "skip_norms": BK_AUTOCORRECT_SKIP_NORMS,
+        "fused_initial": _bk_ac_fused_initial_suggestion,
+    }
+
+
+def _bk_ac_engine(self) -> Dict[str, Any]:
+    lang = _bk_ac_current_lang(self)
+    user_mtime = 0.0
+    try:
+        user_mtime = os.path.getmtime(_bk_ac_user_path(lang))
+    except OSError:
+        pass
+    store = _bk_ac_store_for(lang)
+    ready = _bk_ac_ensure_store_ready(self, store)
+    key = (lang, user_mtime, ready is not None)
+    engine = _BK_AC_ENGINE_CACHE.get(key)
+    if engine is None:
+        buckets, exact, weights = _bk_ac_build_index(_bk_ac_dictionary_terms(self))
+        engine = {"lang": lang, "buckets": buckets, "exact": exact,
+                  "weights": weights, "store": ready, "sugcache": {}}
+        _BK_AC_ENGINE_CACHE.clear()
+        _BK_AC_ENGINE_CACHE[key] = engine
+        if ready is not None and getattr(store, "_bk_build_done", False):
+            store._bk_build_done = False
+            try:
+                self.status_bar.showMessage(_bk_ac_text(
+                    self, "autocorrect_index_ready").format(ready.term_count()), 5000)
+            except Exception:
+                pass
+    return engine
+
+
+def _bk_ac_engine_contains(engine: Dict[str, Any], norm: str) -> bool:
+    if norm in engine["exact"]:
+        return True
+    store = engine.get("store")
+    return store is not None and store.contains(norm)
+
+
+def _bk_ac_find_errors_engine(self, text: str) -> List[Dict[str, Any]]:
+    """Wie _bk_ac_find_errors, aber über die zweistufige Engine: exakte
+    Prüfung als Index-Lookup, Vorschläge per Distanz-1-Generierung mit
+    Distanz-2-Fallback. Ohne Store-Modul identisches Legacy-Verhalten."""
+    engine = _bk_ac_engine(self)
+    if not engine["exact"] and engine.get("store") is None:
+        return []
+    helpers = _bk_ac_engine_helpers()
+    weights_view = engine["weights"]
+    if engine.get("store") is not None and _bk_ac_make_weights_view is not None:
+        weights_view = _bk_ac_make_weights_view(engine["weights"], engine["store"])
+    errors: List[Dict[str, Any]] = []
+    for match in BK_AUTOCORRECT_WORD_RE.finditer(str(text or "")):
+        token = match.group(0)
+        norm = _bk_autocorrect_norm(token)
+        if (len(norm) < 3 or norm in BK_AUTOCORRECT_SKIP_NORMS
+                or _bk_ac_is_common_norm(norm) or _bk_ac_engine_contains(engine, norm)):
+            continue
+        if _bk_ac_engine_suggestions_impl is not None:
+            suggestions = _bk_ac_engine_suggestions_impl(
+                token, engine["buckets"], engine["exact"], engine["weights"],
+                engine.get("store"), helpers, limit=5, cache=engine["sugcache"])
+        else:
+            suggestions = _bk_ac_suggestion_list(
+                token, engine["buckets"], engine["exact"], engine["weights"], limit=5)
+        if suggestions and _bk_ac_should_mark_suggestion(token, suggestions, weights_view):
+            errors.append({
+                "start": int(match.start()),
+                "end": int(match.end()),
+                "token": token,
+                "suggestions": suggestions,
+            })
+    return errors
+
+
 def _bk_ac_refresh_line_marks(self):
     try:
         self._bk_autocorrect_install_delegate()
     except Exception:
         pass
-    terms = []
-    try:
-        terms = self._kraken_autocorrect_reference_terms()
-    except Exception:
-        terms = []
     tree = getattr(self, "list_lines", None)
     if tree is None:
         return
@@ -583,11 +972,11 @@ def _bk_ac_refresh_line_marks(self):
             if item is None:
                 continue
             text = item.text(1) or ""
-            errors = _bk_ac_find_errors(text, terms) if terms else []
+            errors = _bk_ac_find_errors_engine(self, text)
             item.setData(1, BK_AUTOCORRECT_ERRORS_ROLE, errors)
             item.setData(1, BK_AUTOCORRECT_TEXT_ROLE, text)
             if errors:
-                item.setToolTip(1, "Autokorrektur: " + ", ".join(f"{e.get('token')} → {', '.join(e.get('suggestions', [])[:3])}" for e in errors[:4]))
+                item.setToolTip(1, _bk_ac_text(self, "autocorrect_tooltip_errors").format(", ".join(f"{e.get('token')} → {', '.join(e.get('suggestions', [])[:3])}" for e in errors[:4])))
             else:
                 item.setToolTip(1, "")
     finally:
@@ -807,8 +1196,8 @@ def _bk_ac_add_word_to_dictionary(self, word: str, lang: Optional[str] = None):
     if norm in norms:
         result = QMessageBox.question(
             self,
-            "Doppelung erkannt",
-            f"'{word}' ist im Wörterbuch bereits als '{norms[norm]}' vorhanden. Überschreiben?",
+            self._tr("autocorrect_duplicate_title"),
+            self._tr("autocorrect_duplicate_question", word, norms[norm]),
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
             QMessageBox.No,
         )
@@ -820,7 +1209,7 @@ def _bk_ac_add_word_to_dictionary(self, word: str, lang: Optional[str] = None):
     existing.append(word)
     if _bk_ac_write_user_terms(lang, existing):
         try:
-            self.status_bar.showMessage(f"Wort hinzugefügt: {word}", 4000)
+            self.status_bar.showMessage(_bk_ac_text(self, "autocorrect_word_added").format(word), 4000)
         except Exception:
             pass
         self._bk_autocorrect_refresh_line_marks()
@@ -840,13 +1229,13 @@ def _bk_ac_lines_context_menu(self, pos):
             token = str(err.get("token") or "")
             suggestions = err.get("suggestions") or []
             for suggestion in suggestions[:3]:
-                act = menu.addAction(f"Autokorrektur: {token} → {suggestion}")
+                act = menu.addAction(_bk_ac_text(self, "autocorrect_suggestion_entry").format(token, suggestion))
                 suggestion_actions[act] = (err, suggestion)
-            add_act = menu.addAction(f"Zum Wörterbuch hinzufügen: {token}")
+            add_act = menu.addAction(_bk_ac_text(self, "autocorrect_add_word_to_dictionary").format(token))
             add_word_actions[add_act] = token
         menu.addSeparator()
-        act_apply_line = menu.addAction("Alle Vorschläge in dieser Zeile anwenden")
-        act_apply_all = menu.addAction("Autokorrektur auf alle Zeilen anwenden")
+        act_apply_line = menu.addAction(_bk_ac_text(self, "autocorrect_apply_line_suggestions"))
+        act_apply_all = menu.addAction(_bk_ac_text(self, "autocorrect_apply_all_lines"))
         menu.addSeparator()
     else:
         act_apply_line = None
@@ -906,13 +1295,13 @@ def _bk_ac_duplicates_dialog(parent, duplicates: Dict[str, List[str]]) -> str:
     sample = []
     for values in list(duplicates.values())[:12]:
         sample.append(" / ".join(values[:4]))
-    msg = "Doppelungen wurden erkannt:\n\n" + "\n".join(sample) + "\n\nÜberschreiben = bereinigte Liste speichern; Ignorieren = ohne Speichern zurück; Abbrechen = Vorgang abbrechen."
+    msg = _bk_ac_text(parent, "autocorrect_duplicates_msg").format("\n".join(sample))
     box = QMessageBox(parent)
-    box.setWindowTitle("Doppelungen erkannt")
+    box.setWindowTitle(_bk_ac_text(parent, "autocorrect_duplicates_title"))
     box.setText(msg)
-    overwrite = box.addButton("Überschreiben", QMessageBox.AcceptRole)
-    ignore = box.addButton("Ignorieren", QMessageBox.DestructiveRole)
-    cancel = box.addButton("Abbrechen", QMessageBox.RejectRole)
+    overwrite = box.addButton(_bk_ac_text(parent, "autocorrect_btn_overwrite"), QMessageBox.AcceptRole)
+    ignore = box.addButton(_bk_ac_text(parent, "autocorrect_btn_ignore"), QMessageBox.DestructiveRole)
+    cancel = box.addButton(_bk_ac_text(parent, "btn_cancel"), QMessageBox.RejectRole)
     box.exec()
     clicked = box.clickedButton()
     if clicked == overwrite:
@@ -923,14 +1312,9 @@ def _bk_ac_duplicates_dialog(parent, duplicates: Dict[str, List[str]]) -> str:
 
 
 
-def _bk_ac_text(owner, key: str, default: str) -> str:
-    try:
-        value = owner._tr(key)
-        if value and value != key:
-            return str(value)
-    except Exception:
-        pass
-    return default
+def _bk_ac_text(owner, key: str, *args) -> str:
+    lang = getattr(owner, "current_lang", translation.DEFAULT_LANGUAGE)
+    return translation.translate(lang, key, *args)
 
 def _bk_ac_open_revision_settings(self):
     dialog = QDialog(self)
@@ -942,7 +1326,7 @@ def _bk_ac_open_revision_settings(self):
 
     revision_tab = QWidget(dialog)
     revision_layout = QVBoxLayout(revision_tab)
-    info = QLabel(_bk_ac_text(self, "autocorrect_revision_intro", "Automatische Überarbeitung ersetzt Zeichen und aktiviert die Offline-Autokorrektur nach OCR."), revision_tab)
+    info = QLabel(_bk_ac_text(self, "autocorrect_revision_intro"), revision_tab)
     info.setWordWrap(True)
     revision_layout.addWidget(info)
     editor = QPlainTextEdit(revision_tab)
@@ -953,7 +1337,7 @@ def _bk_ac_open_revision_settings(self):
     check = QCheckBox(self._tr("kraken_revision_enable_checkbox"), revision_tab)
     check.setChecked(bool(getattr(self, "kraken_auto_revision_enabled", False)))
     revision_layout.addWidget(check)
-    autocorrect_check = QCheckBox(_bk_ac_text(self, "autocorrect_enable_offline_dictionary", "Offline-Autokorrektur und Wörterbücher aktivieren"), revision_tab)
+    autocorrect_check = QCheckBox(_bk_ac_text(self, "autocorrect_enable_offline_dictionary"), revision_tab)
     autocorrect_check.setChecked(bool(getattr(self, "kraken_autocorrect_enabled", False)))
     revision_layout.addWidget(autocorrect_check)
 
@@ -1009,11 +1393,11 @@ def _bk_ac_open_revision_settings(self):
     ref_hint = QLabel(self._tr("kraken_autocorrect_reference_dir_hint"), revision_tab)
     ref_hint.setWordWrap(True)
     revision_layout.addWidget(ref_hint)
-    tabs.addTab(revision_tab, _bk_ac_text(self, "btn_autocorrect_settings", "Autokorrektur"))
+    tabs.addTab(revision_tab, _bk_ac_text(self, "btn_autocorrect_settings"))
 
     dict_tab = QWidget(dialog)
     dict_layout = QVBoxLayout(dict_tab)
-    dict_intro = QLabel(_bk_ac_text(self, "autocorrect_dictionary_intro", "Wörterbuch pro Sprache. Das obere Feld ist das bearbeitbare Benutzer-Wörterbuch. Eingebettete Wörter bleiben im Programmcode; Benutzerwörter werden offline im BottledKraken-Ordner deines Benutzerverzeichnisses gespeichert."), dict_tab)
+    dict_intro = QLabel(_bk_ac_text(self, "autocorrect_dictionary_intro"), dict_tab)
     dict_intro.setWordWrap(True)
     dict_layout.addWidget(dict_intro)
     lang_row = QHBoxLayout()
@@ -1032,19 +1416,15 @@ def _bk_ac_open_revision_settings(self):
             lang_combo.setCurrentIndex(idx)
             break
     user_editor = QPlainTextEdit(dict_tab)
-    user_editor.setPlaceholderText(_bk_ac_text(self, "autocorrect_user_dictionary_placeholder", "Ein Wort oder Name pro Zeile. Komma, Semikolon, Unterstrich und Leerzeichen werden beim Speichern als Trennung erkannt; Bindestriche bleiben für Doppelnamen erhalten."))
+    user_editor.setPlaceholderText(_bk_ac_text(self, "autocorrect_user_dictionary_placeholder"))
     builtin_view = QPlainTextEdit(dict_tab)
     builtin_view.setReadOnly(True)
     builtin_view.setMinimumHeight(140)
     path_label = QLabel("", dict_tab)
     path_label.setWordWrap(True)
-    open_dictionary_folder_btn = QPushButton(_bk_ac_text(self, "autocorrect_open_dictionary_folder", "Wörterbuch-Ordner öffnen"), dict_tab)
+    open_dictionary_folder_btn = QPushButton(_bk_ac_text(self, "autocorrect_open_dictionary_folder"), dict_tab)
     def open_dictionary_folder():
-        try:
-            os.makedirs(_bk_ac_user_dir(), exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(_bk_ac_user_dir()))
-        except Exception:
-            pass
+        _bk_ac_open_directory(_bk_ac_user_dir())
     open_dictionary_folder_btn.clicked.connect(open_dictionary_folder)
     staged_user_terms: Dict[str, str] = {}
     active_lang = {"value": _bk_ac_norm_lang(lang_combo.currentData())}
@@ -1074,8 +1454,14 @@ def _bk_ac_open_revision_settings(self):
         if lang not in staged_user_terms:
             staged_user_terms[lang] = "\n".join(_bk_ac_load_user_terms(lang))
         user_editor.setPlainText(staged_user_terms.get(lang, ""))
-        builtin_view.setPlainText("\n".join(_bk_ac_load_builtin_terms(lang)))
-        path_label.setText(_bk_ac_text(self, "autocorrect_user_dictionary_file", "Benutzer-Wörterbuch-Datei:") + " " + _bk_ac_user_path(lang))
+        builtin_terms = _bk_ac_load_builtin_terms(lang)
+        store = _bk_ac_store_for(lang)
+        ready_store = _bk_ac_ensure_store_ready(self, store)
+        extended = ready_store.term_count() if ready_store is not None else 0
+        preview = builtin_terms[:5000]
+        stats = _bk_ac_text(self, "autocorrect_dictionary_stats").format(len(builtin_terms), extended)
+        builtin_view.setPlainText(stats + "\n" + ("-" * 60) + "\n" + "\n".join(preview))
+        path_label.setText(_bk_ac_text(self, "autocorrect_user_dictionary_file") + " " + _bk_ac_user_path(lang))
 
     def on_lang_changed(_idx: int):
         old_lang = _bk_ac_norm_lang(active_lang.get("value"))
@@ -1097,31 +1483,73 @@ def _bk_ac_open_revision_settings(self):
         load_lang_fields()
 
     lang_combo.currentIndexChanged.connect(on_lang_changed)
-    lang_row.addWidget(QLabel(_bk_ac_text(self, "label_language", "Sprache:")+"", dict_tab))
+    lang_row.addWidget(QLabel(_bk_ac_text(self, "label_language")+"", dict_tab))
     lang_row.addWidget(lang_combo)
     lang_row.addStretch(1)
     dict_layout.addLayout(lang_row)
-    dict_layout.addWidget(QLabel(_bk_ac_text(self, "autocorrect_user_dictionary_label", "Benutzer-Wörterbuch:"), dict_tab))
+    dict_layout.addWidget(QLabel(_bk_ac_text(self, "autocorrect_user_dictionary_label"), dict_tab))
     dict_layout.addWidget(user_editor, 2)
     path_row = QHBoxLayout()
     path_row.addWidget(path_label, 1)
     path_row.addWidget(open_dictionary_folder_btn, 0)
     dict_layout.addLayout(path_row)
-    dict_layout.addWidget(QLabel(_bk_ac_text(self, "autocorrect_embedded_dictionary_label", "Eingebettetes Wörterbuch im Programmcode:"), dict_tab))
+    dict_layout.addWidget(QLabel(_bk_ac_text(self, "autocorrect_embedded_dictionary_label"), dict_tab))
     dict_layout.addWidget(builtin_view, 1)
     load_lang_fields()
-    tabs.addTab(dict_tab, _bk_ac_text(self, "autocorrect_dictionary_tab", "Wörterbuch"))
+
+    # Während des einmaligen SQLite-Aufbaus bleibt der Dialog bedienbar. Sobald
+    # der Index fertig ist, wird die angezeigte Zahl automatisch von 0 auf den
+    # tatsächlichen Bestand aktualisiert, ohne dass der Dialog neu geöffnet
+    # werden muss.
+    try:
+        from PySide6.QtCore import QTimer
+
+        stats_state = {"lang": "", "count": -1}
+        dictionary_stats_timer = QTimer(dialog)
+        dictionary_stats_timer.setInterval(500)
+
+        def _poll_dictionary_stats():
+            lang = _bk_ac_norm_lang(lang_combo.currentData())
+            store = _bk_ac_store_for(lang)
+            if store is None:
+                return
+            ready_store = _bk_ac_ensure_store_ready(self, store)
+            if ready_store is None:
+                return
+            count = ready_store.term_count()
+            if stats_state.get("lang") == lang and stats_state.get("count") == count:
+                return
+            stats_state["lang"] = lang
+            stats_state["count"] = count
+            lines = builtin_view.toPlainText().splitlines()
+            builtin_count = len(_bk_ac_load_builtin_terms(lang))
+            stats = _bk_ac_text(self, "autocorrect_dictionary_stats").format(
+                builtin_count, count
+            )
+            if lines:
+                lines[0] = stats
+                builtin_view.setPlainText("\n".join(lines))
+            else:
+                builtin_view.setPlainText(stats)
+
+        dictionary_stats_timer.timeout.connect(_poll_dictionary_stats)
+        dictionary_stats_timer.start()
+        dialog._bk_dictionary_stats_timer = dictionary_stats_timer
+    except Exception:
+        pass
+
+    tabs.addTab(dict_tab, _bk_ac_text(self, "autocorrect_dictionary_tab"))
 
     buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog)
     try:
         save_btn = buttons.button(QDialogButtonBox.Save)
         cancel_btn = buttons.button(QDialogButtonBox.Cancel)
         if save_btn is not None:
-            save_btn.setText(_bk_ac_text(self, "btn_save", "Speichern"))
+            save_btn.setText(_bk_ac_text(self, "btn_save"))
             if hasattr(self, "_tinted_theme_or_standard_icon"):
                 save_btn.setIcon(self._tinted_theme_or_standard_icon("document-save", QStyle.SP_DialogSaveButton))
         if cancel_btn is not None:
-            cancel_btn.setText(_bk_ac_text(self, "btn_cancel", "Abbrechen"))
+            cancel_btn.setText(_bk_ac_text(self, "btn_cancel"))
             if hasattr(self, "_tinted_theme_or_standard_icon"):
                 cancel_btn.setIcon(self._tinted_theme_or_standard_icon("dialog-cancel", QStyle.SP_DialogCancelButton))
     except Exception:
@@ -1197,19 +1625,62 @@ def _install_autocorrect_feature():
     MainWindow._open_kraken_auto_revision_settings = _bk_ac_open_revision_settings
     MainWindow.lines_context_menu = _bk_ac_lines_context_menu
 
-    original_init = MainWindow.__init__
     def patched_init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
+        # Die Woerterbuch-Spiegelung (bis ~105 MB beim Erststart) laeuft im
+        # Hintergrund-Thread statt auf dem GUI-Thread - der Programmstart
+        # blockiert dadurch nicht mehr sichtbar. Spaetere On-Demand-Zugriffe
+        # rufen den Sync ohnehin erneut auf (manifest-geprüft, dann billig)
+        # und werden ueber _BK_AC_SYNC_LOCK sauber serialisiert.
+        sync_state = {"finished": False}
+
+        def _sync_worker():
+            try:
+                _bk_ac_sync_runtime_dictionaries()
+            finally:
+                sync_state["finished"] = True
+
         try:
-            _bk_ac_sync_runtime_dictionaries()
+            sync_thread = threading.Thread(
+                target=_sync_worker, name="bk-dict-sync", daemon=True
+            )
+            self._bk_autocorrect_dictionary_sync_thread = sync_thread
+            sync_thread.start()
         except Exception:
-            pass
+            sync_state["finished"] = True
+
         try:
             self._bk_autocorrect_install_delegate()
-            self._bk_autocorrect_refresh_line_marks()
         except Exception:
             pass
-    MainWindow.__init__ = patched_init
+
+        # Nach dem erstmaligen Spiegeln der Onefile-Ressourcen muss die Engine
+        # erneut angestoßen werden. Früher blieb sie bis zu einer anderen UI-
+        # Aktion im 476-Wörter-RAM-Modus, weil beim ersten Refresh die große
+        # JSON-Datei noch nicht im persistenten Benutzerordner lag.
+        try:
+            from PySide6.QtCore import QTimer
+
+            sync_timer = QTimer(self)
+            sync_timer.setInterval(400)
+
+            def _poll_dictionary_sync():
+                if not sync_state.get("finished", False):
+                    return
+                sync_timer.stop()
+                sync_timer.deleteLater()
+                _BK_AC_ENGINE_CACHE.clear()
+                try:
+                    self._bk_autocorrect_refresh_line_marks()
+                except Exception:
+                    pass
+
+            sync_timer.timeout.connect(_poll_dictionary_sync)
+            sync_timer.start()
+            self._bk_autocorrect_dictionary_sync_timer = sync_timer
+        except Exception:
+            pass
+    from bottled_kraken.common.chain_consolidation import register_init_delta
+    register_init_delta(patched_init)
 
 
     original_on_file_done = getattr(MainWindow, "on_file_done", None)

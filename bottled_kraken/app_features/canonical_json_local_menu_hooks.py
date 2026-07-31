@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('bk', globals())
 from bottled_kraken.common import (
     Any,
@@ -313,9 +314,7 @@ def _bk_lm_retranslate_dropdown(self):
         self.act_ai_menu_canonical_graph.setText(self._tr("lm_menu_show_canonical_graph"))
     if hasattr(self, "act_ai_menu_canonical_load"):
         self.act_ai_menu_canonical_load.setText(self._tr("lm_menu_load_canonical_graph"))
-_BK_CANONICAL_PREV_INIT = MainWindow.__init__
 def _bk_canonical_init(self, *args, **kwargs):
-    _BK_CANONICAL_PREV_INIT(self, *args, **kwargs)
     self._bk_canonical_by_path = getattr(self, "_bk_canonical_by_path", {}) or {}
     self._bk_last_canonical_json = getattr(self, "_bk_last_canonical_json", None)
     self._bk_last_canonical_path = getattr(self, "_bk_last_canonical_path", "")
@@ -324,24 +323,20 @@ def _bk_canonical_init(self, *args, **kwargs):
         _bk_lm_install_dropdown_menu(self)
     except Exception:
         pass
-_BK_CANONICAL_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_canonical_retranslate(self, *args, **kwargs):
-    _BK_CANONICAL_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_lm_retranslate_dropdown(self)
     except Exception:
         pass
-MainWindow.__init__ = _bk_canonical_init
-MainWindow.retranslate_ui = _bk_canonical_retranslate
+register_init_delta(_bk_canonical_init)
+register_retranslate_delta(_bk_canonical_retranslate)
 MainWindow._bk_lm_generate_canonical_json = _bk_lm_generate_canonical_json
 MainWindow._bk_lm_show_current_canonical_graph = _bk_lm_show_current_canonical_graph
 MainWindow._bk_lm_load_canonical_graph_json = _bk_lm_load_canonical_graph_json
 MainWindow._bk_lm_show_canonical_graph_dialog = _bk_lm_show_canonical_graph_dialog
 __all__ = [
     '_BK_CANONICAL_PREV_DONE',
-    '_BK_CANONICAL_PREV_INIT',
     '_BK_CANONICAL_PREV_INSTALL_DROPDOWN',
-    '_BK_CANONICAL_PREV_RETRANSLATE',
     '_BK_CANONICAL_PREV_RETRANSLATE_DROPDOWN',
     '_BK_CANONICAL_PREV_SCHEMA_LABEL',
     '_BK_CANONICAL_PREV_UPDATE_DROPDOWN_STATE',

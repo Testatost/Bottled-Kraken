@@ -15,8 +15,11 @@ class MainWindowToolbarIconsAndLocalServerModelsMixin:
                 self._tinted_theme_or_standard_icon("audio-input-microphone", QStyle.SP_MediaVolume)
             )
         if hasattr(self, "btn_ai_revise_bottom"):
+            # Luminanz-bewusste Auto-Toenung: korrigiert weisse Desktop-Icons
+            # im Hellmodus, ohne bei deckenden Kacheln schwarze Quadrate zu
+            # erzeugen (dafuer wurde frueher bewusst ungetoent gelassen).
             self.btn_ai_revise_bottom.setIcon(
-                self._tinted_theme_or_standard_icon("preferences-system", QStyle.SP_ComputerIcon)
+                self._auto_tinted_theme_or_standard_icon("preferences-system", QStyle.SP_ComputerIcon)
             )
         if hasattr(self, "btn_autocorrect_settings"):
             self.btn_autocorrect_settings.setIcon(

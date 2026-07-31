@@ -3,18 +3,7 @@ seed_globals('bk', globals())
 from bottled_kraken.common import _load_image_color
 from bottled_kraken.common import Any, Dict, Image, List, RecordView, TaskItem
 from bottled_kraken.main_window import MainWindow
-import zipfile as _bk_fix62_zipfile
 from xml.sax.saxutils import escape as _bk_fix62_xml_escape
-def _bk_fix62_xml_text(value) -> str:
-    text = str(value or "")
-    safe = []
-    for ch in text:
-        code = ord(ch)
-        if ch in "\t\n\r" or 0x20 <= code <= 0xD7FF or 0xE000 <= code <= 0xFFFD:
-            safe.append(ch)
-        else:
-            safe.append(" ")
-    return _bk_fix62_xml_escape("".join(safe), {'"': '&quot;', "'": '&apos;'})
 def _bk_fix62_box(rv):
     try:
         bb = getattr(rv, "bbox", None)
@@ -192,13 +181,6 @@ def _bk_fix62_median_height(recs) -> float:
         return 12.0
     vals.sort()
     return vals[len(vals) // 2]
-def _bk_fix62_blocks_sorted_visual(blocks):
-    def key(block):
-        bb = block.get("bbox") if isinstance(block, dict) else None
-        if bb and len(bb) >= 4:
-            return (float(bb[1]), float(bb[0]))
-        return (float(block.get("y0", 10**9)) if isinstance(block, dict) else 10**9, float(block.get("x0", 0)) if isinstance(block, dict) else 0)
-    return sorted([b for b in (blocks or []) if b], key=key)
 def _bk_fix62_build_column_blocks(record_views, image_size=None):
     recs = _bk_fix62_records(record_views)
     recs.sort(key=lambda r: (_bk_fix62_record_idx(r), _bk_fix62_record_y0(r), _bk_fix62_record_x0(r)))
@@ -285,174 +267,8 @@ def _bk_fix62_export_blocks(record_views, image_size=None):
     if blocks:
         return _bk_fix62_postprocess_blocks(blocks)
     return _bk_fix62_postprocess_blocks(_bk_fix62_fallback_blocks(record_views, image_size))
-def _bk_fix62_txt_from_blocks(blocks) -> str:
-    lines = []
-    for block in blocks or []:
-        if block.get("type") == "columns":
-            cols = [list(c or []) for c in block.get("columns") or []]
-            widths = [min(78, max(12, max((len(x) for x in col), default=0) + 4)) for col in cols]
-            count = max((len(c) for c in cols), default=0)
-            for i in range(count):
-                parts = []
-                for ci, col in enumerate(cols):
-                    val = col[i] if i < len(col) else ""
-                    parts.append(val.ljust(widths[ci]) if ci < len(cols) - 1 else val)
-                line = "  ".join(parts).rstrip()
-                if line.strip():
-                    lines.append(line)
-            lines.append("")
-        elif block.get("type") == "table":
-            grid = block.get("rows") or []
-            if not grid:
-                continue
-            cols = max((len(r) for r in grid), default=0)
-            widths = []
-            for c in range(cols):
-                widths.append(min(42, max(4, max((len(str(row[c])) if c < len(row) else 0 for row in grid), default=0) + 2)))
-            for row in grid:
-                parts = []
-                for c in range(cols):
-                    val = _bk_fix62_clean(row[c] if c < len(row) else "")
-                    parts.append(val.ljust(widths[c]) if c < cols - 1 else val)
-                if any(p.strip() for p in parts):
-                    lines.append(" ".join(parts).rstrip())
-            lines.append("")
-        else:
-            text = _bk_fix62_clean(block.get("text", ""))
-            if text:
-                lines.append(text)
-    return "\n".join(lines).rstrip() + "\n"
-def _bk_fix62_odt_content_xml(blocks) -> str:
-    body = []
-    table_index = 1
-    for block in blocks or []:
-        typ = block.get("type")
-        if typ == "columns":
-            cols = [list(c or []) for c in block.get("columns") or []]
-            if not cols:
-                continue
-            body.append('<table:table table:name="OCR_Columns_%d" table:style-name="ColumnTable">' % table_index)
-            table_index += 1
-            for _ in cols:
-                body.append('<table:table-column table:style-name="ColumnCol"/>')
-            body.append('<table:table-row>')
-            for col in cols:
-                body.append('<table:table-cell table:style-name="ColumnCell" office:value-type="string">')
-                for line in col:
-                    if _bk_fix62_clean(line):
-                        body.append('<text:p text:style-name="ColumnP">%s</text:p>' % _bk_fix62_xml_text(line))
-                body.append('</table:table-cell>')
-            body.append('</table:table-row></table:table><text:p text:style-name="P1"/>')
-        elif typ == "table":
-            grid = block.get("rows") or []
-            cols = max((len(r) for r in grid), default=0)
-            if cols < 2:
-                continue
-            body.append('<table:table table:name="OCR_Table_%d" table:style-name="Table1">' % table_index)
-            table_index += 1
-            for _ in range(cols):
-                body.append('<table:table-column table:style-name="TableCol"/>')
-            for row in grid:
-                body.append('<table:table-row>')
-                for c in range(cols):
-                    txt = row[c] if c < len(row) else ""
-                    body.append('<table:table-cell table:style-name="TableCell" office:value-type="string"><text:p text:style-name="TableP">%s</text:p></table:table-cell>' % _bk_fix62_xml_text(txt))
-                body.append('</table:table-row>')
-            body.append('</table:table><text:p text:style-name="P1"/>')
-        else:
-            txt = _bk_fix62_clean(block.get("text", ""))
-            if txt:
-                body.append('<text:p text:style-name="P1">%s</text:p>' % _bk_fix62_xml_text(txt))
-    return ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<office:document-content ',
-        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ',
-        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" ',
-        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" ',
-        'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" ',
-        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" ',
-        'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" ',
-        'office:version="1.2"><office:scripts/><office:font-face-decls>',
-        '<style:font-face style:name="Arial" svg:font-family="Arial"/>',
-        '<style:font-face style:name="Courier New" svg:font-family="Courier New"/>',
-        '</office:font-face-decls><office:automatic-styles>',
-        '<style:style style:name="P1" style:family="paragraph"><style:paragraph-properties fo:margin-bottom="0.04cm"/><style:text-properties fo:font-size="8.5pt" style:font-name="Arial"/></style:style>',
-        '<style:style style:name="ColumnP" style:family="paragraph"><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0.02cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
-        '<style:style style:name="TableP" style:family="paragraph"><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/><style:text-properties fo:font-size="6.3pt" style:font-name="Arial"/></style:style>',
-        '<style:style style:name="ColumnTable" style:family="table"><style:table-properties table:align="left"/></style:style>',
-        '<style:style style:name="ColumnCol" style:family="table-column"><style:table-column-properties style:rel-column-width="32767*"/></style:style>',
-        '<style:style style:name="ColumnCell" style:family="table-cell"><style:table-cell-properties fo:border="none" fo:padding="0.10cm"/></style:style>',
-        '<style:style style:name="Table1" style:family="table"><style:table-properties table:align="left"/></style:style>',
-        '<style:style style:name="TableCol" style:family="table-column"><style:table-column-properties style:column-width="1.15cm"/></style:style>',
-        '<style:style style:name="TableCell" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #808080" fo:padding="0.02cm"/></style:style>',
-        '</office:automatic-styles><office:body><office:text>', ''.join(body), '</office:text></office:body></office:document-content>'
-    ])
-def _bk_fix62_odt_styles_xml() -> str:
-    return ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">',
-        '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/><style:font-face style:name="Courier New" svg:font-family="Courier New"/></office:font-face-decls>',
-        '<office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8.5pt" style:font-name="Arial"/></style:default-style></office:styles>',
-        '<office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="0.8cm" fo:margin-bottom="0.8cm" fo:margin-left="0.8cm" fo:margin-right="0.8cm"/></style:page-layout></office:automatic-styles>',
-        '<office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>'
-    ])
-def _bk_fix62_write_odt(path: str, item: TaskItem, export_image: Image.Image, record_views: List[RecordView]):
-    image_size = getattr(export_image, "size", None) or (0, 0)
-    blocks = _bk_fix62_export_blocks(record_views, image_size)
-    content = _bk_fix62_odt_content_xml(blocks)
-    styles = _bk_fix62_odt_styles_xml()
-    meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
-    settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
-    manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>'
-    with _bk_fix62_zipfile.ZipFile(path, "w") as z:
-        info = _bk_fix62_zipfile.ZipInfo("mimetype")
-        info.date_time = (2020, 1, 1, 0, 0, 0)
-        info.compress_type = _bk_fix62_zipfile.ZIP_STORED
-        z.writestr(info, "application/vnd.oasis.opendocument.text")
-        for name, data in [("content.xml", content), ("styles.xml", styles), ("meta.xml", meta), ("settings.xml", settings), ("META-INF/manifest.xml", manifest)]:
-            zi = _bk_fix62_zipfile.ZipInfo(name)
-            zi.date_time = (2020, 1, 1, 0, 0, 0)
-            zi.compress_type = _bk_fix62_zipfile.ZIP_DEFLATED
-            z.writestr(zi, data.encode("utf-8"))
-def _bk_fix62_write_txt(path: str, record_views: List[RecordView], image_size=None):
-    blocks = _bk_fix62_export_blocks(record_views, image_size)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_bk_fix62_txt_from_blocks(blocks))
-try:
-    _BK_FIX62_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX62_PREV_RENDER_FILE = None
-def _bk_fix62_render_file(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower()
-    if fmt_l in {"txt", "text", "txt_plain", ".txt"}:
-        if not item or not getattr(item, "results", None):
-            return
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-            image_size = export_image.size
-        except Exception:
-            image_size = getattr(pil_image, "size", None)
-        return _bk_fix62_write_txt(path, record_views, image_size)
-    if fmt_l in {"odt", ".odt"}:
-        if not item or not getattr(item, "results", None):
-            return
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-        except Exception:
-            export_image = pil_image
-        return _bk_fix62_write_odt(path, item, export_image, record_views)
-    if callable(_BK_FIX62_PREV_RENDER_FILE):
-        return _BK_FIX62_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix62_render_file
-except Exception:
-    pass
 __all__ = [
     '_bk_fix62_assign_columns',
-    '_bk_fix62_blocks_sorted_visual',
     '_bk_fix62_box',
     '_bk_fix62_build_column_blocks',
     '_bk_fix62_clean',
@@ -463,8 +279,6 @@ __all__ = [
     '_bk_fix62_is_dense_numeric_table',
     '_bk_fix62_median_height',
     '_bk_fix62_numeric_density',
-    '_bk_fix62_odt_content_xml',
-    '_bk_fix62_odt_styles_xml',
     '_bk_fix62_page_size',
     '_bk_fix62_postprocess_blocks',
     '_bk_fix62_record_idx',
@@ -472,12 +286,10 @@ __all__ = [
     '_bk_fix62_record_y0',
     '_bk_fix62_record_y1',
     '_bk_fix62_records',
-    '_bk_fix62_render_file',
     '_bk_fix62_row_numeric_ratio',
     '_bk_fix62_should_lift_table_header',
-    '_bk_fix62_txt_from_blocks',
-    '_bk_fix62_write_odt',
-    '_bk_fix62_write_txt',
-    '_bk_fix62_xml_text',
 ]
 register_globals('bk', globals(), __all__)
+
+
+

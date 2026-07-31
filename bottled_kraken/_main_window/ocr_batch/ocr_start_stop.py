@@ -8,12 +8,9 @@ from bottled_kraken.common import (
     STATUS_PROCESSING,
     STATUS_WAITING,
     os,
+    translation,
 )
-from bottled_kraken.workers import (
-    ExternalBackendOCRWorker,
-    OCRWorker,
-    get_external_ocr_backend,
-)
+from bottled_kraken.workers import OCRWorker
 class MainWindowOcrStartStopMixin:
         def _bk_reset_ocr_cancel_state(self, *, reset_processing: bool = True, message: str = None):
             try:
@@ -100,7 +97,7 @@ class MainWindowOcrStartStopMixin:
                 self,
                 self._tr("dlg_import_lines_all"),
                 "",
-                "Text/JSON (*.txt *.json)"
+                self._tr("filter_text_json_files")
             )
             if not files:
                 return
@@ -155,13 +152,6 @@ class MainWindowOcrStartStopMixin:
             if not tasks:
                 QMessageBox.information(self, self._tr("info_title"), self._tr("warn_queue_empty"))
                 return
-            caps = self._gpu_capabilities()
-            ok, _ = caps.get(self.device_str, (False, ""))
-            if not ok:
-                QMessageBox.warning(self, self._tr("warn_title"), self._tr("msg_hw_not_available"))
-                self.device_str = "cpu"
-                if "cpu" in self.hw_actions:
-                    self.hw_actions["cpu"].setChecked(True)
             self.act_play.setEnabled(False)
             self.act_stop.setEnabled(True)
             self._set_progress_busy()
@@ -170,45 +160,26 @@ class MainWindowOcrStartStopMixin:
                 input_paths=paths,
                 recognition_model_path=self.model_path,
                 segmentation_model_path=self.seg_model_path,
-                device=self.device_str,
                 reading_direction=self.reading_direction,
                 export_format="pdf",
                 export_dir=self.current_export_dir,
                 preset_bboxes_by_path={},
                 auto_revision_enabled=bool(getattr(self, "kraken_auto_revision_enabled", False)) or bool(getattr(self, "kraken_autocorrect_enabled", False)),
                 auto_revision_replacements=(self._kraken_auto_revision_runtime_replacements() if hasattr(self, "_kraken_auto_revision_runtime_replacements") else str(getattr(self, "kraken_auto_revision_replacements", "") or "")),
+                ui_language=getattr(self, "current_lang", translation.DEFAULT_LANGUAGE),
             )
-            external_backend = None
-            if self.device_str == "cuda":
-                external_backend = get_external_ocr_backend("nvidia-cuda", refresh=True)
-            elif self.device_str == "rocm":
-                external_backend = get_external_ocr_backend("amd-rocm", refresh=True)
-            if external_backend and external_backend.ok:
-                self.worker = ExternalBackendOCRWorker(job, external_backend)
-                self._log(self._tr_log("log_ocr_started", len(paths), f"{self.device_str} ({external_backend.detail})", self.reading_direction))
-            else:
-                if self.device_str in ("cuda", "rocm"):
-                    self._log(self._tr_log("log_external_backend_fallback_cpu", self.device_str))
-                    self.device_str = "cpu"
-                    job.device = "cpu"
-                    if "cpu" in self.hw_actions:
-                        self.hw_actions["cpu"].setChecked(True)
-                self.worker = OCRWorker(job)
+            self.worker = OCRWorker(job)
+            self._log(self._tr_log("log_ocr_started", len(paths), self.reading_direction))
             self.worker.file_started.connect(self.on_file_started)
             self.worker.file_done.connect(self.on_file_done)
             self.worker.file_error.connect(self.on_file_error)
             self.worker.progress.connect(self.on_progress_update)
             self.worker.finished_batch.connect(self.on_batch_finished)
             self.worker.failed.connect(self.on_failed)
-            self.worker.device_resolved.connect(self.on_device_resolved)
-            self.worker.gpu_info.connect(self.on_gpu_info)
-            if not isinstance(self.worker, ExternalBackendOCRWorker):
-                self._log(self._tr_log("log_ocr_started", len(paths), self.device_str, self.reading_direction))
+            self.worker.status_info.connect(self.on_ocr_status_info)
             self.worker.start()
-        def on_device_resolved(self, dev_str: str):
-            self.status_bar.showMessage(self._tr("msg_using_device", dev_str))
-        def on_gpu_info(self, info: str):
-            self.status_bar.showMessage(self._tr("msg_detected_gpu", info))
+        def on_ocr_status_info(self, message: str):
+            self.status_bar.showMessage(str(message))
         def stop_ocr(self):
             worker = getattr(self, "worker", None)
             if worker and worker.isRunning():

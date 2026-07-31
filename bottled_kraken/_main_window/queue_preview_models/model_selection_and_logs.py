@@ -1,3 +1,7 @@
+from bottled_kraken.runtime_logging import get_logger
+
+_APP_LOGGER = get_logger("ui")
+
 from bottled_kraken.common import (
     KRAKEN_MODELS_DIR,
     QDateTime,
@@ -66,10 +70,11 @@ class MainWindowModelSelectionAndLogsMixin:
         def _log(self, msg: str):
             ts = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
             line = f"[{ts}] {msg}"
+            _APP_LOGGER.info("%s", msg)
             try:
                 self.log_edit.appendPlainText(line)
             except Exception:
-                pass
+                _APP_LOGGER.debug("GUI log widget is not available", exc_info=True)
         def toggle_log_area(self, checked: bool):
             self.log_visible = bool(checked)
             self.log_edit.setVisible(self.log_visible)

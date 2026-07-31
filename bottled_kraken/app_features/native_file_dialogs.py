@@ -17,6 +17,10 @@ def _bk_native_desktop() -> str:
         or ""
     ).lower()
 def _bk_native_tool() -> str:
+    # zenity/kdialog sind reine Linux-Helfer. Unter Windows und macOS werden
+    # immer die Qt-eigenen (nativen) Dialoge verwendet.
+    if not sys.platform.startswith("linux"):
+        return ""
     desk = _bk_native_desktop()
     if "kde" in desk or "plasma" in desk:
         if shutil.which("kdialog"):
@@ -26,50 +30,134 @@ def _bk_native_tool() -> str:
     if shutil.which("kdialog"):
         return "kdialog"
     return ""
+
+
+_BK_ZENITY_MAJOR = None
+
+
+def _bk_zenity_major_version() -> int:
+    """Hauptversion von zenity ermitteln (einmalig, mit Timeout).
+
+    zenity 4.x (GTK4-Rewrite, u. a. Linux Mint 22 / Ubuntu 24.04) hat
+    einzelne Optionen wie --confirm-overwrite entfernt. Damit der
+    Speichern-Dialog auf allen Mint-Versionen funktioniert, wird die Option
+    nur bei zenity 3.x uebergeben.
+    """
+    global _BK_ZENITY_MAJOR
+    if _BK_ZENITY_MAJOR is not None:
+        return _BK_ZENITY_MAJOR
+    major = 0
+    try:
+        proc = subprocess.run(
+            ["zenity", "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=3.0,
+            check=False,
+            env=_bk_native_subprocess_env(),
+        )
+        text = (proc.stdout or "").strip()
+        if text:
+            major = int(text.split(".", 1)[0])
+    except Exception:
+        major = 0
+    _BK_ZENITY_MAJOR = major
+    return major
+
+
+def _bk_zenity_save_args() -> list:
+    args = ["zenity", "--file-selection", "--save"]
+    if _bk_zenity_major_version() < 4:
+        args.append("--confirm-overwrite")
+    return args
 def _bk_native_start_path(path: str) -> str:
     path = str(path or "").strip()
     if not path:
         return os.getcwd()
     return os.path.expanduser(path)
 def _bk_native_subprocess_env() -> dict:
-    env = dict(os.environ)
-    original_ld = env.get("LD_LIBRARY_PATH_ORIG")
-    if original_ld is not None:
-        env["LD_LIBRARY_PATH"] = original_ld
-    else:
-        env.pop("LD_LIBRARY_PATH", None)
-    for key in (
-        "LD_LIBRARY_PATH_ORIG",
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "QT_PLUGIN_PATH",
-        "QT_QPA_PLATFORM_PLUGIN_PATH",
-        "QML2_IMPORT_PATH",
-        "PYSIDE_DESIGNER_PLUGINS",
-    ):
-        env.pop(key, None)
-    for key, value in list(env.items()):
-        if isinstance(value, str) and "_MEI" in value and ("QT" in key or "PYTHON" in key):
+    # Gemeinsame, gruendlich bereinigte Umgebung (inkl. GTK-Variablen) aus
+    # bottled_kraken.subprocess_env. zenity ist eine GTK-Anwendung; zeigen
+    # GTK-/GIO-Variablen in das PyInstaller-Bundle, kann zenity ohne Fenster
+    # haengen bleiben.
+    try:
+        from bottled_kraken.subprocess_env import bk_clean_child_env
+        return bk_clean_child_env()
+    except Exception:
+        env = dict(os.environ)
+        original_ld = env.get("LD_LIBRARY_PATH_ORIG")
+        if original_ld is not None:
+            env["LD_LIBRARY_PATH"] = original_ld
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+        for key in (
+            "LD_LIBRARY_PATH_ORIG",
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "QT_PLUGIN_PATH",
+            "QT_QPA_PLATFORM_PLUGIN_PATH",
+            "QML2_IMPORT_PATH",
+            "PYSIDE_DESIGNER_PLUGINS",
+        ):
             env.pop(key, None)
-    return env
+        for key, value in list(env.items()):
+            if isinstance(value, str) and "_MEI" in value and ("QT" in key or "PYTHON" in key):
+                env.pop(key, None)
+        return env
 def _bk_native_run(cmd) -> str | None:
+    """Externen Dialog (zenity/kdialog) starten, ohne die Qt-Event-Loop
+    einzufrieren.
+
+    Frueher blockierte hier subprocess.run auf dem Qt-Hauptthread. Solange
+    der Dialog offen war (oder zenity haengen blieb), stand die komplette
+    Oberflaeche still - unter Linux Mint Cinnamon meldete der Desktop das
+    Hauptfenster als "reagiert nicht" und die App wirkte aufgehaengt.
+    Jetzt laeuft der Dialog ueber Popen, waehrenddessen werden Qt-Events
+    weiter verarbeitet.
+    """
     try:
         started = time.monotonic()
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             text=True,
-            check=False,
             env=_bk_native_subprocess_env(),
         )
+    except Exception:
+        return None
+    app = None
+    try:
+        from PySide6.QtWidgets import QApplication as _BKApp
+        app = _BKApp.instance()
+    except Exception:
+        app = None
+    try:
+        while proc.poll() is None:
+            if app is not None:
+                try:
+                    app.processEvents()
+                except Exception:
+                    pass
+            time.sleep(0.02)
+        out, _err = proc.communicate()
         elapsed = time.monotonic() - started
         if proc.returncode == 0:
-            return (proc.stdout or "").strip()
+            return (out or "").strip()
+        # Schneller Fehlschlag (< 1 s): Werkzeug defekt/nicht nutzbar ->
+        # None fuehrt zum Qt-Fallbackdialog. Spaeterer Nicht-Null-Exit ist
+        # in aller Regel "Abbrechen" durch den Nutzer.
         if elapsed < 1.0:
             return None
         return ""
     except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
         return None
 def _bk_native_qt_options(options):
     try:
@@ -127,7 +215,7 @@ def _bk_native_get_save_file_name(parent=None, caption="", dir="", filter="", se
         if raw is not None:
             return _bk_native_first_line(raw), selectedFilter or filter
     elif tool == "zenity":
-        raw = _bk_native_run(["zenity", "--file-selection", "--save", "--confirm-overwrite", "--title", str(caption or ""), "--filename", start])
+        raw = _bk_native_run(_bk_zenity_save_args() + ["--title", str(caption or ""), "--filename", start])
         if raw is not None:
             return _bk_native_first_line(raw), selectedFilter or filter
     return _BK_NATIVE_QFILEDIALOG_GET_SAVE_FILE_NAME(parent, caption, dir, filter, selectedFilter, _bk_native_qt_options(options))
@@ -164,5 +252,7 @@ __all__ = [
     '_bk_native_start_path',
     '_bk_native_subprocess_env',
     '_bk_native_tool',
+    '_bk_zenity_major_version',
+    '_bk_zenity_save_args',
 ]
 register_globals('bk', globals(), __all__)

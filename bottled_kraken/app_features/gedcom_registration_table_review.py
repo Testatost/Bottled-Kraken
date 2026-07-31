@@ -41,75 +41,6 @@ def _bk_gedcom_reg_name_from_registration(reg: dict) -> str:
     if given or surname:
         return f"{surname} {given}".strip()
     return ""
-def _bk_gedcom_reg_extract_from_source_line(line: str) -> dict:
-    raw = _bk_gedcom_reg_clean(line)
-    if not raw:
-        return {}
-    if re.fullmatch(r"(seite|page)\s*[-–]?\s*\d+", raw, flags=re.IGNORECASE):
-        return {}
-    if len(raw) < 4:
-        return {}
-    age = ""
-    m_age = re.search(r"\b(\d{1,3}\s*(?:Jahre?|Jahr|J\.|Monate?|Mon\.?|Tage?|Wochen?|Years?|Months?|Days?))\b", raw, flags=re.IGNORECASE)
-    if m_age:
-        age = m_age.group(1).strip()
-    date = ""
-    m_date = re.search(r"\b(\d{1,2}\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\.?\s*(?:1[5-9]\d{2}|20\d{2})?|1[5-9]\d{2}|20\d{2})\b", raw, flags=re.IGNORECASE)
-    if m_date:
-        date = m_date.group(1).strip(" .,")
-    cut = len(raw)
-    for m in (m_age, m_date):
-        if m:
-            cut = min(cut, m.start())
-    name_part = raw[:cut].strip(" ,.;:-")
-    name_part = re.sub(r"^\d+\s*", "", name_part)
-    name_part = name_part[:90].strip(" ,.;")
-    if not re.search(r"[A-Za-zÄÖÜäöüß]", name_part):
-        return {}
-    given, surname = _bk_gedcom_reg_split_name(name_part)
-    rest_start = max((m.end() for m in (m_age, m_date) if m), default=0)
-    rest = raw[rest_start:].strip(" ,.;:-")
-    place = ""
-    place_candidates = re.findall(r"\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]{2,}(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]{2,})?)\b", rest)
-    if place_candidates:
-        place = place_candidates[-1].strip(" .,")
-    return {
-        "selected": True,
-        "source_line": raw,
-        "name": name_part,
-        "person": {"given_names": given, "surname": surname},
-        "age": age,
-        "event_date": date,
-        "event_place": place,
-        "residence": place,
-        "occupation": "",
-        "notes": raw,
-        "uncertainty": False,
-    }
-def _bk_gedcom_registrations_from_text(text: str) -> list:
-    txt = str(text or "")
-    lines = []
-    for raw in txt.splitlines():
-        line = raw.strip()
-        m = re.match(r"^\d+\s+CONT\s+(.+)$", line, flags=re.IGNORECASE)
-        if m:
-            line = m.group(1).strip()
-        elif re.match(r"^\d+\s+\w+\b", line):
-            continue
-        if line:
-            lines.append(line)
-    regs = []
-    seen = set()
-    for line in lines[:800]:
-        reg = _bk_gedcom_reg_extract_from_source_line(line)
-        if not reg:
-            continue
-        key = (_bk_gedcom_reg_clean(reg.get("name")).lower(), _bk_gedcom_reg_clean(reg.get("event_date")).lower(), _bk_gedcom_reg_clean(reg.get("age")).lower())
-        if not key[0] or key in seen:
-            continue
-        seen.add(key)
-        regs.append(reg)
-    return regs
 def _bk_gedcom_reg_note(level: int, text: str, out: list):
     text = _bk_gedcom_reg_clean(text)
     if not text:
@@ -343,11 +274,9 @@ __all__ = [
     '_bk_gedcom_build_from_registrations',
     '_bk_gedcom_build_from_structured',
     '_bk_gedcom_reg_clean',
-    '_bk_gedcom_reg_extract_from_source_line',
     '_bk_gedcom_reg_name_from_registration',
     '_bk_gedcom_reg_note',
     '_bk_gedcom_reg_split_name',
-    '_bk_gedcom_registrations_from_text',
     '_bk_gedcom_review_dialog_init_registrations',
     '_bk_gedcom_review_export_gedcom_registrations',
     '_bk_gedcom_review_populate_overview_registrations',

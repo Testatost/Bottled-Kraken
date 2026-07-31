@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 from bottled_kraken.user_storage import bottled_kraken_user_path
+from bottled_kraken.runtime_logging import get_logger, install_exception_hooks
 seed_globals('shared', globals())
 def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES["TB_LR"]):
     raw = []
@@ -54,58 +55,43 @@ def _force_text(value):
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
-def _bk_log_dir() -> str:
-    base = os.environ.get("BOTTLED_KRAKEN_LOG_DIR")
-    if not base:
-        base = str(bottled_kraken_user_path("logs"))
-    try:
-        os.makedirs(base, exist_ok=True)
-    except Exception:
-        base = os.getcwd()
-    return base
-def _error_log_path() -> str:
-    return os.path.join(_bk_log_dir(), "bottled_kraken_error.log")
-def _cleanup_old_error_log(max_age_days: int = 20):
-    log_path = _error_log_path()
-    try:
-        if not os.path.exists(log_path):
-            return
-        max_age_seconds = int(max_age_days * 24 * 60 * 60)
-        file_age = time.time() - os.path.getmtime(log_path)
-        if file_age >= max_age_seconds:
-            os.remove(log_path)
-    except Exception:
-        pass
 def _append_error_log_entry(msg: str):
-    log_path = _error_log_path()
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    # Compatibility entry point for older callers. New exceptions are written
+    # through the rotating application logger.
+    get_logger("exceptions").error("Legacy exception report:\n%s", str(msg).rstrip())
+
+def _exception_dialog_context():
+    parent = None
+    lang = translation.DEFAULT_LANGUAGE
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write("\n\n" + "=" * 80 + "\n")
-            f.write(f"[{timestamp}] Unbehandelte Ausnahme\n")
-            f.write("-" * 80 + "\n")
-            f.write(msg.rstrip() + "\n")
+        settings_file = str(bottled_kraken_user_path("settings") / "settings.ini")
+        settings = QSettings(settings_file, QSettings.IniFormat)
+        configured = str(settings.value("ui/language", "") or "").strip()
+        lang = configured or QLocale.system().name()
+        app = QApplication.instance()
+        if app is not None:
+            parent = app.activeWindow()
+        if parent is not None:
+            lang = getattr(parent, "current_lang", lang)
     except Exception:
-        pass
+        get_logger("exceptions").debug("Could not resolve exception-dialog language", exc_info=True)
+    return parent, translation.normalize_language_code(lang)
+
+def _show_unhandled_exception_dialog(exc_type, exc_value, error_id: str, log_path: str):
+    parent, lang = _exception_dialog_context()
+    detail = f"{getattr(exc_type, '__name__', 'Exception')}: {exc_value}".strip()
+    if len(detail) > 600:
+        detail = detail[:597] + "…"
+    message = "\n\n".join((
+        translation.translate(lang, "error_unexpected_summary"),
+        translation.translate(lang, "error_detail", detail),
+        translation.translate(lang, "error_reference", error_id),
+        translation.translate(lang, "error_log_saved_to", log_path),
+    ))
+    QMessageBox.critical(parent, translation.translate(lang, "error_title"), message)
+
 def _install_exception_hook():
-    _cleanup_old_error_log(max_age_days=20)
-    def handle_exception(exc_type, exc_value, exc_tb):
-        try:
-            if exc_type is KeyboardInterrupt or issubclass(exc_type, KeyboardInterrupt):
-                print("KeyboardInterrupt ignored by GUI exception hook.")
-                return
-        except Exception:
-            pass
-        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        _append_error_log_entry(msg)
-        try:
-            QMessageBox.critical(None, translation.translate(translation.DEFAULT_LANGUAGE, "error_title"), msg)
-        except Exception:
-            try:
-                print(msg)
-            except Exception:
-                pass
-    sys.excepthook = handle_exception
+    install_exception_hooks(_show_unhandled_exception_dialog)
 OCR_AUTO_REVISION_DEFAULT_REPLACEMENTS = [("ſ", "s"), ("⸗", "-"), ("±", "+/-")]
 def _serialize_ocr_auto_revision_replacements(replacements=None) -> str:
     pairs = replacements or OCR_AUTO_REVISION_DEFAULT_REPLACEMENTS
@@ -728,15 +714,91 @@ def _crop_single_line_to_data_url(
         extra_context_y: int = 0,
 ) -> str:
     im = _load_image_color(path)
-    if not rv.bbox:
-        return _pil_to_data_url(im, max_side=1600)
-    x0, y0, x1, y1 = rv.bbox
-    x0 = max(0, x0 - pad_x)
-    y0 = max(0, y0 - pad_y - extra_context_y)
-    x1 = min(im.size[0], x1 + pad_x)
-    y1 = min(im.size[1], y1 + pad_y + extra_context_y)
-    crop = im.crop((x0, y0, x1, y1))
-    return _pil_to_data_url(crop, max_side=1600)
+    try:
+        if not rv.bbox:
+            return _pil_to_data_url(im, max_side=1600)
+        x0, y0, x1, y1 = rv.bbox
+        x0 = max(0, int(x0) - int(pad_x))
+        y0 = max(0, int(y0) - int(pad_y) - int(extra_context_y))
+        x1 = min(im.size[0], int(x1) + int(pad_x))
+        y1 = min(im.size[1], int(y1) + int(pad_y) + int(extra_context_y))
+        crop = im.crop((x0, y0, x1, y1))
+        try:
+            return _pil_to_data_url(crop, max_side=1600)
+        finally:
+            try:
+                crop.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            im.close()
+        except Exception:
+            pass
+
+
+def _crop_overlay_box_to_data_url_strict(
+        path: str,
+        rv: "RecordView",
+        pad_x: int = 0,
+        pad_y: int = 0,
+        extra_context_y: int = 0,
+        max_side: int = 1600,
+) -> str:
+    """Return only the requested overlay-box crop; never fall back to a page image.
+
+    This is intentionally stricter than ``_crop_single_line_to_data_url``.  LM
+    line transcription must never silently send a complete page when the box is
+    missing or malformed, because that would make every line request behave like
+    a full-page OCR request.
+    """
+    bbox = getattr(rv, "bbox", None)
+    if not bbox or len(bbox) != 4:
+        raise ValueError("Overlay box is missing or malformed; refusing full-page fallback.")
+
+    im = _load_image_color(path)
+    try:
+        page_w, page_h = int(im.size[0]), int(im.size[1])
+        try:
+            bx0, by0, bx1, by1 = (int(round(float(v))) for v in bbox)
+        except Exception as exc:
+            raise ValueError(f"Invalid overlay box coordinates: {bbox!r}") from exc
+
+        px = max(0, int(pad_x or 0))
+        py = max(0, int(pad_y or 0))
+        ey = max(0, int(extra_context_y or 0))
+        x0 = max(0, min(page_w, bx0 - px))
+        y0 = max(0, min(page_h, by0 - py - ey))
+        x1 = max(0, min(page_w, bx1 + px))
+        y1 = max(0, min(page_h, by1 + py + ey))
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError(
+                f"Overlay box is outside the source image or empty: bbox={bbox!r}, "
+                f"image={page_w}x{page_h}."
+            )
+        crop_w = x1 - x0
+        crop_h = y1 - y0
+        if crop_w >= int(page_w * 0.98) and crop_h >= int(page_h * 0.98):
+            raise ValueError(
+                f"Overlay crop would contain almost the complete page; refusing line request: "
+                f"bbox={bbox!r}, crop={crop_w}x{crop_h}, image={page_w}x{page_h}."
+            )
+
+        crop = im.crop((x0, y0, x1, y1))
+        try:
+            # The payload is built from this crop only.  No page-level fallback is
+            # allowed here, even for very small boxes.
+            return _pil_to_data_url(crop, max_side=max(64, int(max_side or 1600)))
+        finally:
+            try:
+                crop.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            im.close()
+        except Exception:
+            pass
 AI_SCRIPT_PRINT = "print"
 AI_SCRIPT_HANDWRITING = "handwriting"
 AI_SCRIPT_MIXED = "mixed"
@@ -888,14 +950,12 @@ __all__ = [
     '_ai_script_prompt_hint',
     '_append_error_log_entry',
     '_apply_ocr_auto_revision_replacements',
-    '_bk_log_dir',
     '_clean_ocr_raw_text',
     '_clean_ocr_text',
     '_clean_ocr_text_for_kraken_display',
-    '_cleanup_old_error_log',
     '_crop_block_to_data_url_context',
     '_crop_single_line_to_data_url',
-    '_error_log_path',
+    '_crop_overlay_box_to_data_url_strict',
     '_extract_json_payload',
     '_extract_json_string_lines_object',
     '_force_text',

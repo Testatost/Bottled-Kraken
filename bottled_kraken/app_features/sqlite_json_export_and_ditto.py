@@ -141,7 +141,7 @@ def _bk_fix37_export_sqlite(self):
         return
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_persons.sqlite"
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
-    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "lm_menu_generate_sqlite"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_sqlite_all_files", "SQLite (*.sqlite *.db);;All Files (*)"))
+    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "lm_menu_generate_sqlite"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_sqlite_all_files"))
     if not path:
         return
     if not path.lower().endswith((".sqlite", ".db")):
@@ -165,7 +165,7 @@ def _bk_fix37_export_sqlite(self):
         conn.close()
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_sqlite_export_done", "SQLite exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 def _bk_fix37_ensure_sqlite_menu_action(self):
@@ -188,26 +188,21 @@ def _bk_fix37_ensure_sqlite_menu_action(self):
         self.btn_ai_revise_menu.insertAction(insert_before, self.act_ai_menu_sqlite_export)
     else:
         self.btn_ai_revise_menu.addAction(self.act_ai_menu_sqlite_export)
-_BK_FIX37_PREV_INIT = MainWindow.__init__
 def _bk_fix37_mainwindow_init(self, *args, **kwargs):
-    _BK_FIX37_PREV_INIT(self, *args, **kwargs)
     try:
         _bk_fix37_ensure_sqlite_menu_action(self)
     except Exception:
         pass
-_BK_FIX37_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_fix37_retranslate_ui(self, *args, **kwargs):
-    _BK_FIX37_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_fix37_ensure_sqlite_menu_action(self)
     except Exception:
         pass
-MainWindow.__init__ = _bk_fix37_mainwindow_init
-MainWindow.retranslate_ui = _bk_fix37_retranslate_ui
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
+register_init_delta(_bk_fix37_mainwindow_init)
+register_retranslate_delta(_bk_fix37_retranslate_ui)
 MainWindow.bk_export_sqlite_persons = _bk_fix37_export_sqlite
 __all__ = [
-    '_BK_FIX37_PREV_INIT',
-    '_BK_FIX37_PREV_RETRANSLATE',
     '_bk_fix36_resolve_ditto_marks_in_lines',
     '_bk_fix37_ensure_sqlite_menu_action',
     '_bk_fix37_expand_ditto_text',

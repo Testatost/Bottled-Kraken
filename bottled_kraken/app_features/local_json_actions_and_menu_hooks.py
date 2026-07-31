@@ -1,6 +1,8 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('bk', globals())
 from bottled_kraken._main_window.menu_and_queue.menu_behavior import BKStayOpenMenu
+from bottled_kraken.cancellation import operation_was_cancelled
 def _bk_lm_any_job_running(self) -> bool:
     return bool(
         (getattr(self, "ai_worker", None) and self.ai_worker.isRunning())
@@ -15,116 +17,6 @@ def _bk_lm_task_has_revisable_results(task) -> bool:
     except Exception:
         return False
     return bool(recs)
-def _bk_lm_get_current_done_task(self):
-    task = self._current_task()
-    try:
-        if task is not None:
-            self._persist_live_canvas_bboxes(task)
-    except Exception:
-        pass
-    if not _bk_lm_task_has_revisable_results(task):
-        return None
-    return task
-def _bk_lm_run_current_line(self):
-    task = _bk_lm_get_current_done_task(self)
-    if not task:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    row = self.list_lines.currentRow()
-    if row < 0:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_line_first"))
-        return
-    self.run_ai_revision_for_single_line(row)
-def _bk_lm_run_selected_lines(self):
-    task = _bk_lm_get_current_done_task(self)
-    if not task:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    rows = self._selected_line_rows()
-    if not rows:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_select_multiple_lines_first"))
-        return
-    self.run_ai_revision_for_selected_lines()
-def _bk_lm_run_all_lines_current_task(self):
-    target_tasks = []
-    try:
-        if hasattr(self, "_ai_revision_queue_targets"):
-            target_tasks = self._ai_revision_queue_targets()
-        else:
-            checked = self._checked_queue_tasks() if hasattr(self, "_checked_queue_tasks") else []
-            selected = self._selected_queue_tasks() if hasattr(self, "_selected_queue_tasks") else []
-            target_tasks = checked if checked else selected
-    except Exception:
-        target_tasks = []
-    if target_tasks:
-        if _bk_lm_any_job_running(self):
-            return
-        if hasattr(self, "_ai_revision_ready_tasks"):
-            items = self._ai_revision_ready_tasks(target_tasks)
-        else:
-            items = [task for task in target_tasks if _bk_lm_task_has_revisable_results(task)]
-        if not items:
-            QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-            return
-        script_mode = self._choose_ai_script_mode()
-        if not script_mode:
-            return
-        self._run_ai_revision_batch(items, script_mode=script_mode)
-        return
-    task = _bk_lm_get_current_done_task(self)
-    if not task:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    model_id = self._resolve_ai_model_id()
-    if not model_id:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
-        return
-    if _bk_lm_any_job_running(self):
-        return
-    script_mode = self._choose_ai_script_mode()
-    if not script_mode:
-        return
-    recs_for_ai = self._current_recs_for_ai(task)
-    if not recs_for_ai:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    task.lm_locked_bboxes = [tuple(rv.bbox) if rv.bbox else None for rv in recs_for_ai]
-    self.act_ai_revise.setEnabled(False)
-    try:
-        if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
-            self.btn_ai_revise_bottom.setEnabled(False)
-    except Exception:
-        pass
-    self.status_bar.showMessage(self._tr("msg_ai_started"))
-    self._log(self._tr_log("log_ai_started", os.path.basename(task.path)))
-    self.ai_progress_dialog = ProgressStatusDialog(self._tr("dlg_ai_title"), self._tr, self)
-    self.ai_progress_dialog.set_status(self._tr("dlg_ai_connecting"))
-    self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
-    self.ai_progress_dialog.show()
-    self.ai_worker = AIRevisionWorker(
-        path=task.path,
-        recs=recs_for_ai,
-        lm_model=model_id,
-        endpoint=self.ai_endpoint,
-        enable_thinking=self.ai_enable_thinking,
-        source_kind=task.source_kind,
-        script_mode=script_mode,
-        temperature=self.ai_temperature,
-        top_p=self.ai_top_p,
-        top_k=self.ai_top_k,
-        presence_penalty=self.ai_presence_penalty,
-        repetition_penalty=self.ai_repetition_penalty,
-        min_p=self.ai_min_p,
-        max_tokens=self.ai_max_tokens,
-        tr_func=self._tr,
-        parent=self,
-    )
-    self.ai_worker.progress_changed.connect(self.ai_progress_dialog.set_progress)
-    self.ai_worker.status_changed.connect(self.ai_progress_dialog.set_status)
-    self.ai_worker.status_changed.connect(self._log)
-    self.ai_worker.finished_revision.connect(self.on_ai_revision_done)
-    self.ai_worker.failed_revision.connect(self.on_ai_revision_failed)
-    self.ai_worker.start()
 def _bk_lm_collect_current_text(self, task) -> str:
     recs = self._current_recs_for_ai(task)
     return "\n".join((_clean_ocr_text(rv.text) for rv in recs if _clean_ocr_text(rv.text))).strip()
@@ -191,8 +83,11 @@ def _bk_lm_on_local_json_failed(self, path: str, schema_kind: str, msg: str):
         except Exception:
             pass
         self._bk_local_json_dialog = None
-    msg_l = (msg or "").lower()
-    cancelled = any(token in msg_l for token in ("abgebrochen", "cancelled", "canceled", "annul"))
+    cancelled = operation_was_cancelled(
+        worker=worker,
+        message=msg,
+        keys=("msg_local_json_cancelled",),
+    )
     if cancelled:
         self.status_bar.showMessage(self._tr("msg_local_json_cancelled"), 4000)
     else:
@@ -321,10 +216,7 @@ def _bk_lm_retranslate_dropdown(self):
     if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
         self.btn_ai_revise_bottom.setToolTip(self._tr("btn_ai_revise_menu_tip"))
     _bk_lm_update_dropdown_state(self)
-_bk_prev_mainwindow_init_v8 = MainWindow.__init__
-_bk_prev_mainwindow_retranslate_v8 = MainWindow.retranslate_ui
 def _bk_mainwindow_init_wrapper_v8(self, *args, **kwargs):
-    _bk_prev_mainwindow_init_v8(self, *args, **kwargs)
     self._bk_local_json_worker = None
     self._bk_local_json_context = None
     self._bk_local_json_dialog = None
@@ -332,14 +224,12 @@ def _bk_mainwindow_init_wrapper_v8(self, *args, **kwargs):
     if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
         _bk_lm_install_dropdown_menu(self)
 def _bk_mainwindow_retranslate_wrapper_v8(self, *args, **kwargs):
-    _bk_prev_mainwindow_retranslate_v8(self, *args, **kwargs)
     _bk_lm_retranslate_dropdown(self)
-MainWindow.__init__ = _bk_mainwindow_init_wrapper_v8
-MainWindow.retranslate_ui = _bk_mainwindow_retranslate_wrapper_v8
+register_init_delta(_bk_mainwindow_init_wrapper_v8)
+register_retranslate_delta(_bk_mainwindow_retranslate_wrapper_v8)
 MainWindow._bk_lm_install_dropdown_menu = _bk_lm_install_dropdown_menu
 MainWindow._bk_lm_retranslate_dropdown = _bk_lm_retranslate_dropdown
 MainWindow._bk_lm_generate_local_json = _bk_lm_generate_local_json
-MainWindow._bk_lm_run_all_lines_current_task = _bk_lm_run_all_lines_current_task
 _BK_PERSON_ROLE_STOPWORDS = {
     "b", "u", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "v", "w",
     "und", "et", "and", "oder", "or", "ou",
@@ -366,20 +256,14 @@ __all__ = [
     '_bk_lm_cancel_local_json',
     '_bk_lm_collect_current_text',
     '_bk_lm_generate_local_json',
-    '_bk_lm_get_current_done_task',
     '_bk_lm_install_dropdown_menu',
     '_bk_lm_on_local_json_done',
     '_bk_lm_on_local_json_failed',
     '_bk_lm_retranslate_dropdown',
-    '_bk_lm_run_all_lines_current_task',
-    '_bk_lm_run_current_line',
-    '_bk_lm_run_selected_lines',
     '_bk_lm_show_json_preview',
     '_bk_lm_task_has_revisable_results',
     '_bk_lm_update_dropdown_state',
     '_bk_mainwindow_init_wrapper_v8',
     '_bk_mainwindow_retranslate_wrapper_v8',
-    '_bk_prev_mainwindow_init_v8',
-    '_bk_prev_mainwindow_retranslate_v8',
 ]
 register_globals('bk', globals(), __all__)

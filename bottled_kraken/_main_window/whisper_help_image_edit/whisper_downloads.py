@@ -35,9 +35,7 @@ class MainWindowWhisperDownloadsMixin:
                 QMessageBox.information(
                     dialog_parent or self,
                     self._tr("info_title"),
-                    self._tr("msg_whisper_model_already_present") + "\n\n"
-                    f"Pfad:\n{existing_model_dir}\n\n"
-                    "Ein erneuter Download ist nicht nötig."
+                    self._tr("info_whisper_model_already_present", existing_model_dir)
                 )
                 self.status_bar.showMessage(self._tr("msg_whisper_model_already_present", existing_model_dir))
                 return
@@ -45,10 +43,7 @@ class MainWindowWhisperDownloadsMixin:
             QMessageBox.information(
                 dialog_parent or self,
                 self._tr("info_title"),
-                "Optionaler Systemhinweis:\n\n"
-                f"{platform_hint}\n\n"
-                "Der eigentliche Download läuft trotzdem nur über eine eigene "
-                "Python-Umgebung (.venv) und die Python-API von huggingface_hub."
+                self._tr("whisper_system_hint_dialog", platform_hint)
             )
             if self.hf_download_worker and self.hf_download_worker.isRunning():
                 if self.hf_download_dialog is not None:

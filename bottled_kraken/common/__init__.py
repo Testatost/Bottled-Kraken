@@ -16,5 +16,9 @@ from bottled_kraken.common import table_pdf_and_polygon_utils as _table_pdf_and_
 __all__.extend(_absorb(_table_pdf_and_polygon_utils))
 from bottled_kraken.common import theme_and_help_styles as _theme_and_help_styles
 __all__.extend(_absorb(_theme_and_help_styles))
+from bottled_kraken.common import light_mode_button_icons as _light_mode_button_icons
+__all__.extend(_absorb(_light_mode_button_icons))
+from bottled_kraken.common import text_context_menu as _text_context_menu
+__all__.extend(_absorb(_text_context_menu))
 __all__ = sorted(set(__all__))
 synchronize("shared")

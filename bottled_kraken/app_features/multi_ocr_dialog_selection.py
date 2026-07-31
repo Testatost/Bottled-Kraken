@@ -385,25 +385,22 @@ def _bk_final_rewire_lm_dropdown_v17(self):
     except Exception:
         pass
 try:
-    _BK_FINAL_PREV_INIT_V17 = MainWindow.__init__
     def _bk_final_mainwindow_init_v17(self, *args, **kwargs):
-        _BK_FINAL_PREV_INIT_V17(self, *args, **kwargs)
         try:
             _bk_final_rewire_lm_dropdown_v17(self)
         except Exception:
             pass
-    MainWindow.__init__ = _bk_final_mainwindow_init_v17
+    from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
+    register_init_delta(_bk_final_mainwindow_init_v17)
 except Exception:
     pass
 try:
-    _BK_FINAL_PREV_RETRANSLATE_V17 = MainWindow.retranslate_ui
     def _bk_final_retranslate_ui_v17(self, *args, **kwargs):
-        _BK_FINAL_PREV_RETRANSLATE_V17(self, *args, **kwargs)
         try:
             _bk_final_rewire_lm_dropdown_v17(self)
         except Exception:
             pass
-    MainWindow.retranslate_ui = _bk_final_retranslate_ui_v17
+    register_retranslate_delta(_bk_final_retranslate_ui_v17)
 except Exception:
     pass
 try:

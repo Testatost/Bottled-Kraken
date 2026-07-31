@@ -257,11 +257,11 @@ def _bk_lm_run_queue_batch(self, mode: str, row_indices: Optional[List[int]] = N
         dlg = getattr(self, '_bk_lm_queue_batch_dialog', None)
         if dlg:
             if mode == _BK_LM_BATCH_MODE_LM_OCR:
-                dlg.set_status(_bk_fix36_tr(self, 'dlg_ai_ocr_status', 'Es wird gerade ein kompletter Seiten-OCR mit einem lokalen Modell durchgeführt. Bitte warten.'))
+                dlg.set_status(_bk_fix36_tr(self, 'dlg_ai_ocr_status'))
             elif globals().get('_BK_LM_BATCH_MODE_LM_OCR_BOXES') is not None and mode == _BK_LM_BATCH_MODE_LM_OCR_BOXES:
-                dlg.set_status(_bk_fix36_tr(self, 'ai_status_page_boxes_scan', 'LM Seiten OCR + Boxen wird vorbereitet: {}', os.path.basename(getattr((targets or [None])[0], 'path', '') if targets else '')))
+                dlg.set_status(_bk_fix36_tr(self, 'ai_status_page_boxes_scan', os.path.basename(getattr((targets or [None])[0], 'path', '') if targets else '')))
             else:
-                dlg.set_status(_bk_fix36_tr(self, 'lm_busy_revision_status', 'Das lokale Modell überarbeitet die Zeilen. Die Dauer hängt vom Modell und der Seitenkomplexität ab.'))
+                dlg.set_status(_bk_fix36_tr(self, 'lm_busy_revision_status'))
     except Exception:
         pass
     return result
@@ -375,35 +375,6 @@ try:
     AIRevisionWorker.run = _bk_fix41_ai_revision_run
 except Exception:
     pass
-try:
-    _BK_FIX41_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX41_PREV_RENDER_FILE = None
-def _bk_fix41_render_file(self, path: str, fmt: str, item: TaskItem):
-    if not item.results:
-        return
-    text, kr_records, pil_image, record_views = item.results
-    export_image = _load_image_color(item.path)
-    fmt_l = str(fmt or '').lower()
-    if fmt_l == 'txt':
-        _bk_fix41_resolve_ditto_marks_in_recs(record_views)
-        out_text = _bk_fix38_spatial_text_from_recs(record_views)
-        if not _bk_fix36_clean_text(out_text):
-            out_text = '\n'.join(_bk_fix36_clean_text(getattr(rv, 'text', '')) for rv in (record_views or []) if _bk_fix36_clean_text(getattr(rv, 'text', '')))
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(out_text.rstrip() + '\n')
-        return
-    if fmt_l == 'txt_boxes':
-        return _bk_fix40_write_structured_txt_export(path, record_views, export_image.size)
-    if fmt_l == 'docx':
-        return _bk_fix40_write_docx_export(path, item, export_image, record_views)
-    if callable(_BK_FIX41_PREV_RENDER_FILE):
-        return _BK_FIX41_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix41_render_file
-except Exception:
-    pass
 __all__ = [
     '_bk_fix36_resolve_ditto_marks_in_lines',
     '_bk_fix36_resolve_ditto_marks_in_recs',
@@ -423,7 +394,6 @@ __all__ = [
     '_bk_fix41_is_json_debris_text',
     '_bk_fix41_item_to_line',
     '_bk_fix41_normalize_text_value',
-    '_bk_fix41_render_file',
     '_bk_fix41_resolve_ditto_marks_in_lines',
     '_bk_fix41_resolve_ditto_marks_in_recs',
     '_bk_fix41_try_parse_obj',

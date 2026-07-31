@@ -6,22 +6,50 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+.tox/
+.nox/
+
+# Tests / lokale Testkonfiguration
+tests/
+pytest.ini
+
+# Packaging / Python metadata
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+__pypackages__/
 
 # Virtual environments
 .venv/
+.venv-*/
 venv/
 env/
 
-# Build artifacts
+# PyInstaller / build artifacts
 build/
 dist/
+*.toc
+*.pkg
+*.manifest
+
+# Generated release artifacts
+bottled_kraken_*.zip
+bottled_kraken_*.patch
+bottled_kraken_*_report.md
+bottled_kraken_*_SHA256.txt
 
 # Local secrets and settings
 .env
 .env.*
 *.local
 
-# OCR / model artifacts
+# OCR / AI / model artifacts
 *.ckpt
 *.pt
 *.pth
@@ -29,6 +57,8 @@ dist/
 *.safetensors
 whisper_models/
 ocr_models/
+models/
+Kraken-Modelle/
 
 # Generated outputs
 Bottled Kraken edited Bilder/
@@ -36,6 +66,13 @@ exports/
 tmp/
 temp/
 *.log
+
+# Local runtime folders, falls versehentlich im Projekt erzeugt
+runtime/
+logs/
+
+# Lokale/interne Dokumentation
+ESCRIPTORIUM_NATIVE_INSTALLATION.md
 
 # OS / editor
 .DS_Store

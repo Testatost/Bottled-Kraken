@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.cancellation import operation_was_cancelled
 def _ptr_export_ai_postgres_for_current_v24c(self, path: str):
     data = self._ptr_ai_postgres_by_path.get(path)
     default_name = f"{os.path.splitext(os.path.basename(path))[0]}_postgres.json"
@@ -48,16 +49,11 @@ MainWindow._ptr_export_ai_postgres_for_current = _ptr_export_ai_postgres_for_cur
 MainWindow._ptr_export_ai_neo4j_for_current = _ptr_export_ai_neo4j_for_current_v24c
 MainWindow._ptr_open_multi_followup_for_path = _ptr_open_multi_followup_for_path_v24c
 MainWindow._ptr_reopen_multi_followup = _ptr_reopen_multi_followup_v24c
-def _bk_is_cancel_message_v10(msg: Any) -> bool:
-    txt = str(msg or "").lower()
-    return (
-        "abgebrochen" in txt
-        or "cancelled" in txt
-        or "canceled" in txt
-        or "annulé" in txt
-        or "annule" in txt
-        or "annulée" in txt
-        or "annulee" in txt
+def _bk_is_cancel_message_v10(msg: Any, worker: Any = None) -> bool:
+    return operation_was_cancelled(
+        worker=worker,
+        message=msg,
+        keys=("msg_ai_ocr_cancelled", "msg_ai_cancelled"),
     )
 class BKOverlayLMOCRWorker(AIRevisionWorker):
     def _request_page_ocr_with_fixed_linecount(self, page_data_url: str, recs: List[RecordView]) -> List[str]:
@@ -194,70 +190,6 @@ class BKOverlayLMOCRWorker(AIRevisionWorker):
         except Exception as e:
             msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
             self.failed_revision.emit(self.path, msg)
-def _bk_lm_run_overlay_lm_ocr_current_task(self):
-    task = _bk_lm_get_current_done_task(self)
-    if not task:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    if getattr(self, "ai_worker", None) and self.ai_worker.isRunning():
-        return
-    model_id = self._resolve_ai_model_id()
-    if not model_id:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_ai_model"))
-        return
-    recs_for_ai = self._current_recs_for_ai(task)
-    if not recs_for_ai:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
-        return
-    boxed_pairs = [
-        (i, rv) for i, rv in enumerate(recs_for_ai)
-        if getattr(rv, "bbox", None)
-    ]
-    if not boxed_pairs:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_overlay_boxes_for_lm_ocr"))
-        return
-    target_indices = [i for i, _ in boxed_pairs]
-    boxed_recs = [rv for _, rv in boxed_pairs]
-    task._bk_lm_ocr_target_indices = list(target_indices)
-    blank_recs = [
-        RecordView(i, "", tuple(rv.bbox) if rv.bbox else None)
-        for i, rv in enumerate(boxed_recs)
-    ]
-    self.act_ai_revise.setEnabled(False)
-    try:
-        if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
-            self.btn_ai_revise_bottom.setEnabled(False)
-    except Exception:
-        pass
-    self.status_bar.showMessage(self._tr("msg_ai_ocr_started"))
-    self._log(self._tr("log_ai_ocr_started", os.path.basename(task.path)))
-    self.ai_progress_dialog = BKLocalJsonNoticeDialog(self._tr("dlg_ai_ocr_title"), self._tr("dlg_ai_ocr_status"), self._tr, self)
-    self.ai_progress_dialog.set_status(self._tr("dlg_ai_ocr_status"))
-    self.ai_progress_dialog.cancel_requested.connect(self._cancel_ai_revision)
-    self.ai_progress_dialog.show()
-    self.ai_worker = BKOverlayLMOCRWorker(
-        path=task.path,
-        recs=blank_recs,
-        lm_model=model_id,
-        endpoint=self.ai_endpoint,
-        enable_thinking=self.ai_enable_thinking,
-        source_kind=task.source_kind,
-        temperature=self.ai_temperature,
-        top_p=self.ai_top_p,
-        top_k=self.ai_top_k,
-        presence_penalty=self.ai_presence_penalty,
-        repetition_penalty=self.ai_repetition_penalty,
-        min_p=self.ai_min_p,
-        max_tokens=max(int(getattr(self, "ai_max_tokens", 1200) or 1200), 1400),
-        tr_func=self._tr,
-        parent=self,
-    )
-    self.ai_worker.progress_changed.connect(self.ai_progress_dialog.set_progress)
-    self.ai_worker.status_changed.connect(self.ai_progress_dialog.set_status)
-    self.ai_worker.status_changed.connect(self._log)
-    self.ai_worker.finished_revision.connect(self.on_ai_overlay_lm_ocr_done)
-    self.ai_worker.failed_revision.connect(self.on_ai_overlay_lm_ocr_failed)
-    self.ai_worker.start()
 def _bk_on_ai_overlay_lm_ocr_done(self, path: str, revised_lines: list):
     task = next((i for i in self.queue_items if i.path == path), None)
     if not task or not task.results:
@@ -338,7 +270,7 @@ def _bk_on_ai_overlay_lm_ocr_failed(self, path: str, msg: str):
             self.btn_ai_revise_bottom.setEnabled(True)
     except Exception:
         pass
-    if _bk_is_cancel_message_v10(msg):
+    if _bk_is_cancel_message_v10(msg, getattr(self, "ai_worker", None)):
         self.status_bar.showMessage(self._tr("msg_ai_ocr_cancelled"))
         self._log(self._tr("msg_ai_ocr_cancelled"))
     else:
@@ -397,7 +329,6 @@ __all__ = [
     '_bk_is_cancel_message_v10',
     '_bk_lm_install_dropdown_menu',
     '_bk_lm_retranslate_dropdown',
-    '_bk_lm_run_overlay_lm_ocr_current_task',
     '_bk_lm_update_dropdown_state',
     '_bk_on_ai_overlay_lm_ocr_done',
     '_bk_on_ai_overlay_lm_ocr_failed',

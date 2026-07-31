@@ -320,75 +320,88 @@ class MainWindowExportRenderersMixin:
             try:
                 document.save(path)
             except PermissionError as e:
-                raise PermissionError(
-                    f"DOCX konnte nicht gespeichert werden:\n{path}\n\n"
-                    "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
-                ) from e
+                raise PermissionError(self._tr("export_permission_error", path)) from e
         def _render_file(self, path: str, fmt: str, item: TaskItem):
             if not item.results:
                 return
             text, kr_records, pil_image, record_views = item.results
-            export_image = _load_image_color(item.path)
-            if pil_image is None:
-                pil_image = export_image
+            # BK-OPT: txt/txt_boxes never need the rasterized page image, so we
+            # avoid loading it from disk at all for these two formats (previously
+            # it was loaded unconditionally even for a plain-text export).
             if fmt == "txt":
                 self._write_plain_txt_export(path, record_views)
                 return
             if fmt == "txt_boxes":
                 self._write_structured_txt_export(path, record_views)
                 return
-            grid = table_to_rows(record_views, pil_image.size[0]) if any(rv.bbox for rv in record_views) else [
-                [rv.text] for rv in record_views
-            ]
-            if fmt == "csv":
-                with open(path, "w", newline="", encoding="utf-8") as f:
-                    w = csv.writer(f)
-                    w.writerows(grid)
-                return
-            if fmt == "json":
-                payload = {
-                    "format": "bottled_kraken_lines",
-                    "version": 2,
-                    "image": {
-                        "file": os.path.basename(item.path),
-                        "width": int(pil_image.size[0]),
-                        "height": int(pil_image.size[1]),
-                    },
-                    "lines": [self._line_export_entry(rv, i) for i, rv in enumerate(record_views)],
-                    "rows": grid,
-                }
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
-                return
-            if fmt == "docx":
-                self._write_docx_export(path, item, export_image, record_views)
-                return
-            if fmt == "alto":
-                seg_result = self._build_kraken_segmentation_for_export(
-                    image_path=item.path,
-                    record_views=record_views
-                )
-                if seg_result is None:
-                    raise ValueError(self._tr("err_alto_requires_boxes"))
-                xml = serialization.serialize(
-                    seg_result,
-                    image_size=export_image.size,
-                    template="alto"
-                )
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(xml)
-                return
-            if fmt == "hocr":
-                self._render_hocr_html(path, item, export_image, record_views)
-                return
-            if fmt == "pdf":
-                c = pdf_canvas.Canvas(path, pagesize=(1, 1))
-                self._render_pdf_page_to_canvas(c, item)
+            export_image = _load_image_color(item.path)
+            # BK-OPT: everything below used to leave `export_image` (a PIL Image /
+            # open file handle) to be garbage-collected implicitly. It is now
+            # closed deterministically via try/finally, regardless of which
+            # branch/return is taken or whether an exception is raised. Outputs
+            # are unchanged - only resource cleanup timing is now explicit.
+            try:
+                if pil_image is None:
+                    pil_image = export_image
+                if fmt == "csv":
+                    grid = table_to_rows(record_views, pil_image.size[0]) if any(rv.bbox for rv in record_views) else [
+                        [rv.text] for rv in record_views
+                    ]
+                    with open(path, "w", newline="", encoding="utf-8") as f:
+                        w = csv.writer(f)
+                        w.writerows(grid)
+                    return
+                if fmt == "json":
+                    grid = table_to_rows(record_views, pil_image.size[0]) if any(rv.bbox for rv in record_views) else [
+                        [rv.text] for rv in record_views
+                    ]
+                    payload = {
+                        "format": "bottled_kraken_lines",
+                        "version": 2,
+                        "image": {
+                            "file": os.path.basename(item.path),
+                            "width": int(pil_image.size[0]),
+                            "height": int(pil_image.size[1]),
+                        },
+                        "lines": [self._line_export_entry(rv, i) for i, rv in enumerate(record_views)],
+                        "rows": grid,
+                    }
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(payload, f, indent=2, ensure_ascii=False)
+                    return
+                if fmt == "docx":
+                    self._write_docx_export(path, item, export_image, record_views)
+                    return
+                if fmt == "alto":
+                    seg_result = self._build_kraken_segmentation_for_export(
+                        image_path=item.path,
+                        record_views=record_views
+                    )
+                    if seg_result is None:
+                        raise ValueError(self._tr("err_alto_requires_boxes"))
+                    xml = serialization.serialize(
+                        seg_result,
+                        image_size=export_image.size,
+                        template="alto"
+                    )
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(xml)
+                    return
+                if fmt == "hocr":
+                    self._render_hocr_html(path, item, export_image, record_views)
+                    return
+                if fmt == "pdf":
+                    c = pdf_canvas.Canvas(path, pagesize=(1, 1))
+                    self._render_pdf_page_to_canvas(c, item)
+                    try:
+                        c.save()
+                    except PermissionError as e:
+                        raise PermissionError(
+                            self._tr("err_pdf_save_locked").format(path)
+                        ) from e
+                    return
+            finally:
                 try:
-                    c.save()
-                except PermissionError as e:
-                    raise PermissionError(
-                        f"PDF konnte nicht gespeichert werden:\n{path}\n\n"
-                        "Die Datei ist wahrscheinlich noch geöffnet oder durch ein anderes Programm gesperrt."
-                    ) from e
-                return
+                    export_image.close()
+                except Exception:
+                    pass

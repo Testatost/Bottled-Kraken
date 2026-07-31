@@ -5,7 +5,6 @@ from bottled_kraken.common import (
     QMessageBox,
     QProgressDialog,
     QTableWidgetItem,
-    QThread,
     QUEUE_COL_CHECK,
     QUEUE_COL_FILE,
     QUEUE_COL_NUM,
@@ -13,35 +12,15 @@ from bottled_kraken.common import (
     Qt,
     STATUS_ICONS,
     STATUS_WAITING,
-    Signal,
     TaskItem,
     is_project_file,
     is_supported_input,
     os,
 )
-from bottled_kraken.workers import (
-    PDFRenderWorker,
-    clear_external_ocr_backend_cache,
-)
+from bottled_kraken.workers import PDFRenderWorker
 from bottled_kraken.dialogs import (
     BusyStatusDialog,
 )
-class HardwareSnapshotWorker(QThread):
-    done = Signal(dict)
-    failed = Signal(str)
-    def __init__(self, owner):
-        super().__init__(owner)
-        self.owner = owner
-    def run(self):
-        try:
-            try:
-                clear_external_ocr_backend_cache()
-            except Exception:
-                pass
-            snapshot = self.owner._hardware_snapshot(refresh_backends=True)
-            self.done.emit(snapshot)
-        except Exception as exc:
-            self.failed.emit(repr(exc))
 class MainWindowPdfRenderQueueMixin:
         def _start_pdf_render_async(self, pdf_path: str, dpi: int = 300):
             if self.pdf_worker and self.pdf_worker.isRunning():

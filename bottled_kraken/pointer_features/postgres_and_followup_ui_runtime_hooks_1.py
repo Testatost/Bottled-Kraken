@@ -340,6 +340,29 @@ def _ptr_save_feature_config_to_window_v2(window, config: PtrRemoteAIConfig):
     save_api_key = bool(getattr(config, "save_api_key", False))
     api_key = (config.api_key or "").strip()
     window.ptr_remote_ai_api_key = api_key if save_api_key else ""
+    # Datenschutz-Warnung: Ein externer http://-Endpunkt uebertraegt API-
+    # Schluessel, OCR-Text und Dokumentinhalte UNVERSCHLUESSELT. Lokale
+    # Adressen (127.0.0.1, localhost, ::1) sind davon ausgenommen.
+    try:
+        base = str(_ptr_normalize_remote_base_url(config.base_url, config.provider_name) or "")
+        if base.lower().startswith("http://"):
+            import urllib.parse as _uparse
+            host = (_uparse.urlparse(base).hostname or "").lower()
+            if host not in ("127.0.0.1", "localhost", "::1") and not host.startswith("192.168.") and not host.startswith("10."):
+                from PySide6.QtWidgets import QMessageBox as _QMB
+                _QMB.warning(
+                    window,
+                    translation.translate(
+                        getattr(window, "current_lang", translation.DEFAULT_LANGUAGE),
+                        "warn_title",
+                    ),
+                    translation.translate(
+                        getattr(window, "current_lang", translation.DEFAULT_LANGUAGE),
+                        "warn_remote_http_external",
+                    ),
+                )
+    except Exception:
+        pass
     if hasattr(window, "settings") and window.settings is not None:
         window.settings.setValue("ptr_remote_ai/provider", config.provider_name)
         window.settings.setValue("ptr_remote_ai/base_url", _ptr_normalize_remote_base_url(config.base_url, config.provider_name))
@@ -384,27 +407,6 @@ def _ptr_followup_init_v2(self, parent=None):
     self.ai_neo_btn.clicked.connect(lambda: self._choose(self.CHOICE_AI_NEO4J))
     self.ai_both_btn.clicked.connect(lambda: self._choose(self.CHOICE_AI_BOTH))
     self.cancel_btn.clicked.connect(self.reject)
-def _ptr_install_feature_actions_v2(self):
-    if getattr(self, "_ptr_feature_actions_installed", False):
-        return
-    self._ptr_feature_actions_installed = True
-    self.act_ptr_multi_ocr = QAction(_ptr_ui_tr(self, "ptr_multi_ocr_btn"), self)
-    self.act_ptr_multi_ocr.triggered.connect(self.ptr_start_multi_ocr)
-    self.act_ptr_ai_tools = QAction(_ptr_ui_tr(self, "ptr_ai_tools_title"), self)
-    self.act_ptr_ai_tools.triggered.connect(self.ptr_open_ai_tools_for_current_task)
-    self.act_ptr_multi_reopen = QAction(_ptr_ui_tr(self, "ptr_ai_reopen"), self)
-    self.act_ptr_multi_reopen.triggered.connect(self.ptr_reopen_multi_followup)
-    if hasattr(self, "toolbar") and self.toolbar is not None:
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.act_ptr_multi_ocr)
-        self.toolbar.addAction(self.act_ptr_ai_tools)
-    if hasattr(self, "models_menu") and self.models_menu is not None:
-        self.models_menu.addSeparator()
-        self.models_menu.addAction(self.act_ptr_multi_ocr)
-        self.models_menu.addAction(self.act_ptr_multi_reopen)
-        if hasattr(self, "_place_kraken_auto_revision_action_at_bottom"):
-            self._place_kraken_auto_revision_action_at_bottom()
-    self.ptr_update_feature_texts()
 def _ptr_update_feature_texts_v2(self):
     if hasattr(self, "act_ptr_multi_ocr"):
         self.act_ptr_multi_ocr.setText(_ptr_ui_tr(self, "ptr_multi_ocr_btn"))
@@ -419,6 +421,17 @@ def _ptr_update_feature_texts_v2(self):
         self.btn_ptr_openrouter_ai_bottom.setText(_ptr_ui_tr(self, "ptr_openrouter_btn"))
         self.btn_ptr_openrouter_ai_bottom.setToolTip(_ptr_ui_tr(self, "ptr_openrouter_btn_tip"))
 def _ptr_plain_theme_or_standard_icon(window, theme_name: str, std_icon):
+    # Luminanz-bewusste Auto-Toenung des Hauptfensters nutzen, falls verfuegbar:
+    # weisse Desktop-Icons werden im Hellmodus eingefaerbt, farbige und
+    # vollflaechige Icons bleiben unangetastet.
+    fn = getattr(window, "_auto_tinted_theme_or_standard_icon", None)
+    if callable(fn):
+        try:
+            icon = fn(theme_name, std_icon)
+            if icon is not None and not icon.isNull():
+                return icon
+        except Exception:
+            pass
     icon = QIcon.fromTheme(theme_name)
     if icon.isNull():
         icon = window.style().standardIcon(std_icon)
@@ -441,7 +454,6 @@ __all__ = [
     '_ptr_apply_prompt_template',
     '_ptr_feature_config_from_window_v2',
     '_ptr_followup_init_v2',
-    '_ptr_install_feature_actions_v2',
     '_ptr_is_dark_theme',
     '_ptr_make_slug',
     '_ptr_normalize_postgres_json',

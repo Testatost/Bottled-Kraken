@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.common import _crop_overlay_box_to_data_url_strict
 
 from bottled_kraken.common import (
     _clean_ocr_text,
@@ -79,10 +80,10 @@ def _bk_fix50_is_short_valid_visual_text(text: str) -> bool:
     if not t or '\n' in t or _bk_fix50_is_json_debris(t):
         return False
     return bool(
-        re.fullmatch(r"\d{1,5}\.?", t)
-        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\s*\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[IVXLCDM]{1,8}\.?", t, flags=re.IGNORECASE)
-        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß]\.?", t)
+        re.fullmatch(r"\d{1,5}[.,;:)]?", t)
+        or re.fullmatch(r"\d{1,2}\s*\.\s*(?:[IVXLCDM]{1,8}|\d{1,2})\s*[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[IVXLCDM]{1,8}[.,;:)]?", t, flags=re.IGNORECASE)
+        or re.fullmatch(r"[A-Za-zÀ-ÿÄÖÜäöüß][.,;:)]?", t)
     )
 
 
@@ -205,15 +206,6 @@ except Exception:
     _BK_FIX50_PREV_PLACEHOLDER_SOURCE = None
 
 
-def _bk_lm_behavior_is_placeholder_source_text(text: str) -> bool:
-    if _bk_fix50_is_manual_overlay_placeholder(text):
-        return True
-    if callable(_BK_FIX50_PREV_PLACEHOLDER_SOURCE):
-        try:
-            return bool(_BK_FIX50_PREV_PLACEHOLDER_SOURCE(text))
-        except Exception:
-            pass
-    return False
 
 
 try:
@@ -233,7 +225,9 @@ def _bk_fix50_request_placeholder_visual_ocr(worker, rv, local_pos: int) -> str:
     pad_x = max(8, int(behavior.get('pad_x', 0) or 0))
     pad_y = max(6, int(behavior.get('pad_y', 0) or 0))
     extra_y = max(0, int(behavior.get('extra_context_y', 0) or 0))
-    line_data_url = _crop_single_line_to_data_url(worker.path, rv, pad_x=pad_x, pad_y=pad_y, extra_context_y=extra_y)
+    line_data_url = _crop_overlay_box_to_data_url_strict(
+        worker.path, rv, pad_x=pad_x, pad_y=pad_y, extra_context_y=extra_y
+    )
     system_prompt = (
         'Du bist ein reiner OCR-Leser. Der vorhandene Zeilentext ist künstlicher Platzhalter-/Random-Text. '
         'Ignoriere den vorhandenen Text vollständig. Lies ausschließlich den Bildausschnitt. '
@@ -260,7 +254,12 @@ def _bk_fix50_request_placeholder_visual_ocr(worker, rv, local_pos: int) -> str:
             override_max_tokens=260,
         ),
     }
-    data = worker._post_json(payload)
+    worker._bk_strict_overlay_transcription_active = True
+    worker._bk_active_overlay_crop_data_url = line_data_url
+    try:
+        data = worker._post_json(payload)
+    finally:
+        worker._bk_active_overlay_crop_data_url = None
     content = worker._extract_message_content(data)
     try:
         print('RAW FIX50 MANUAL OVERLAY OCR RESPONSE:')
@@ -335,7 +334,6 @@ __all__ = [
     '_bk_fix50_extract_message_content',
     '_bk_fix50_worker_placeholder',
     '_bk_fix50_worker_usable_image_line_result',
-    '_bk_lm_behavior_is_placeholder_source_text',
     '_bk_fix50_request_placeholder_visual_ocr',
     '_bk_fix46_request_overlay_box_revision',
     '_bk_fix46_sanity_merge_line',

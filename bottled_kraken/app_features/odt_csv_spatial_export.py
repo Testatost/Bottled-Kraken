@@ -122,7 +122,7 @@ def _bk_fix58_odt_styles_xml() -> str:
         '<style:default-style style:family="table-cell"><style:table-cell-properties fo:border="none" fo:padding="0.02cm"/></style:default-style>',
         '</office:styles>',
         '<office:automatic-styles>',
-        '<style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="1cm" fo:margin-bottom="1cm" fo:margin-left="1cm" fo:margin-right="1cm"/></style:page-layout>',
+        '<style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="%.1fcm" fo:page-height="%.1fcm" style:print-orientation="%s" fo:margin-top="1cm" fo:margin-bottom="1cm" fo:margin-left="1cm" fo:margin-right="1cm"/></style:page-layout>' % (_bk_page_size_cm_safe() + (_bk_odf_orientation_safe(),)),
         '</office:automatic-styles>',
         '<office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles>',
         '</office:document-styles>',
@@ -258,38 +258,6 @@ def _bk_fix58_write_csv(path: str, record_views: List[RecordView], image_size=No
                 writer.writerow([])
             else:
                 writer.writerow([_bk_fix36_clean_text(c) for c in row])
-try:
-    _BK_FIX58_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX58_PREV_RENDER_FILE = None
-def _bk_fix58_render_file(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or '').lower()
-    if fmt_l in {'csv', '.csv'}:
-        if not item or not getattr(item, 'results', None):
-            return
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-            image_size = export_image.size
-        except Exception:
-            image_size = getattr(pil_image, 'size', None)
-        return _bk_fix58_write_csv(path, record_views, image_size)
-    if fmt_l in {'odt', '.odt'}:
-        if not item or not getattr(item, 'results', None):
-            return
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-        except Exception:
-            export_image = pil_image
-        return _bk_fix58_write_odt(path, item, export_image, record_views)
-    if callable(_BK_FIX58_PREV_RENDER_FILE):
-        return _BK_FIX58_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix58_render_file
-except Exception:
-    pass
 _bk_fix52_write_odt = _bk_fix58_write_odt
 _bk_fix53_write_csv = _bk_fix58_write_csv
 __all__ = [
@@ -301,7 +269,6 @@ __all__ = [
     '_bk_fix58_odt_content_xml',
     '_bk_fix58_odt_manifest_xml',
     '_bk_fix58_odt_styles_xml',
-    '_bk_fix58_render_file',
     '_bk_fix58_rows_from_spatial_text',
     '_bk_fix58_spatial_lines',
     '_bk_fix58_write_csv',
@@ -309,3 +276,18 @@ __all__ = [
     '_bk_fix58_xml_text',
 ]
 register_globals('bk', globals(), __all__)
+
+def _bk_page_size_cm_safe():
+    try:
+        from bottled_kraken.export_page_setup import bk_page_size_cm
+        return bk_page_size_cm(False, None)
+    except Exception:
+        return (21.0, 29.7)
+
+
+def _bk_odf_orientation_safe():
+    try:
+        from bottled_kraken.export_page_setup import bk_odf_orientation_name
+        return bk_odf_orientation_name(False, None)
+    except Exception:
+        return "portrait"

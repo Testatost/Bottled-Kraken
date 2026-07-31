@@ -75,7 +75,7 @@ def _bk_lm_run_queue_batch(self, mode: str, row_indices: Optional[List[int]] = N
     w.status_changed.connect(self._bk_lm_queue_batch_dialog.set_status)
     w.progress_changed.connect(self._bk_lm_queue_batch_dialog.set_progress)
     w.finished_batch.connect(lambda: _bk_lm_on_queue_batch_finished(self))
-    self._log(f"LM-Batch gestartet: {len(targets)} Datei(en), Modus={mode}")
+    self._log(self._tr("log_lm_batch_started", len(targets), mode))
     w.start()
     return True
 def _bk_lm_run_current_line(self):
@@ -161,7 +161,19 @@ def _bk_lm_run_ai_revision_for_all_patched(self):
         QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_need_done_for_ai"))
         return
     _bk_lm_run_queue_batch(self, _BK_LM_BATCH_MODE_ALL_LINES, targets=targets)
+_BK_LM_BATCH_PREV_UPDATE_DROPDOWN_STATE = (
+    _bk_lm_update_dropdown_state if "_bk_lm_update_dropdown_state" in globals() else None
+)
+_BK_LM_BATCH_PREV_INSTALL_DROPDOWN_MENU = (
+    _bk_lm_install_dropdown_menu if "_bk_lm_install_dropdown_menu" in globals() else None
+)
+_BK_LM_BATCH_PREV_RETRANSLATE_DROPDOWN = (
+    _bk_lm_retranslate_dropdown if "_bk_lm_retranslate_dropdown" in globals() else None
+)
+
 def _bk_lm_update_dropdown_state(self):
+    if callable(_BK_LM_BATCH_PREV_UPDATE_DROPDOWN_STATE):
+        _BK_LM_BATCH_PREV_UPDATE_DROPDOWN_STATE(self)
     if not hasattr(self, "act_ai_menu_current_line"):
         return
     busy = _bk_lm_any_job_running(self)
@@ -191,59 +203,39 @@ def _bk_lm_update_dropdown_state(self):
     if hasattr(self, "act_ai_menu_neo4j"):
         self.act_ai_menu_neo4j.setEnabled(has_current_task and not busy)
 def _bk_lm_install_dropdown_menu(self):
-    if getattr(self, "_bk_lm_dropdown_installed", False):
-        _bk_lm_update_dropdown_state(self)
+    if callable(_BK_LM_BATCH_PREV_INSTALL_DROPDOWN_MENU):
+        _BK_LM_BATCH_PREV_INSTALL_DROPDOWN_MENU(self)
+    if not hasattr(self, "btn_ai_revise_menu") or self.btn_ai_revise_menu is None:
         return
-    self._bk_lm_dropdown_installed = True
-    self.act_ai_menu_current_line = QAction(self._tr("lm_menu_current_line"), self)
-    self.act_ai_menu_selected_lines = QAction(self._tr("lm_menu_selected_lines"), self)
-    self.act_ai_menu_all_lines = QAction(self._tr("lm_menu_all_lines"), self)
-    self.act_ai_menu_lm_ocr = QAction(self._tr("lm_menu_lm_ocr"), self)
-    self.act_ai_menu_lm_ocr_boxes = QAction(self._tr("lm_menu_lm_ocr_boxes"), self)
-    self.act_ai_menu_postgres = QAction(self._tr("lm_menu_generate_postgres"), self)
-    self.act_ai_menu_neo4j = QAction(self._tr("lm_menu_generate_neo4j"), self)
-    self.act_ai_menu_current_line.triggered.connect(lambda: _bk_lm_run_current_line(self))
-    self.act_ai_menu_selected_lines.triggered.connect(lambda: _bk_lm_run_selected_lines(self))
-    self.act_ai_menu_all_lines.triggered.connect(lambda: _bk_lm_run_all_lines_current_task(self))
-    self.act_ai_menu_lm_ocr.triggered.connect(lambda: _bk_lm_run_overlay_lm_ocr_current_task(self))
-    self.act_ai_menu_lm_ocr_boxes.triggered.connect(lambda: _bk_lm_run_overlay_lm_ocr_boxes_current_task(self))
-    self.act_ai_menu_postgres.triggered.connect(lambda: _bk_lm_generate_local_json(self, "postgres"))
-    self.act_ai_menu_neo4j.triggered.connect(lambda: _bk_lm_generate_local_json(self, "neo4j"))
-    self.btn_ai_revise_menu = BKStayOpenMenu(self)
-    self.btn_ai_revise_menu.aboutToShow.connect(lambda: _bk_lm_update_dropdown_state(self))
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_current_line)
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_selected_lines)
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_all_lines)
-    self.btn_ai_revise_menu.addSeparator()
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_lm_ocr)
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_lm_ocr_boxes)
-    self.btn_ai_revise_menu.addSeparator()
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_postgres)
-    self.btn_ai_revise_menu.addAction(self.act_ai_menu_neo4j)
-    try:
-        self.btn_ai_revise_bottom.clicked.disconnect()
-    except Exception:
-        pass
-    self.btn_ai_revise_bottom.setMenu(self.btn_ai_revise_menu)
-    self.btn_ai_revise_bottom.setPopupMode(QToolButton.InstantPopup)
-    self.btn_ai_revise_bottom.setToolTip(self._tr("btn_ai_revise_menu_tip"))
-    _bk_lm_update_dropdown_state(self)
-def _bk_lm_retranslate_dropdown(self):
-    if not getattr(self, "_bk_lm_dropdown_installed", False):
-        return
-    self.act_ai_menu_current_line.setText(self._tr("lm_menu_current_line"))
-    self.act_ai_menu_selected_lines.setText(self._tr("lm_menu_selected_lines"))
-    self.act_ai_menu_all_lines.setText(self._tr("lm_menu_all_lines"))
-    if hasattr(self, "act_ai_menu_lm_ocr"):
-        self.act_ai_menu_lm_ocr.setText(self._tr("lm_menu_lm_ocr"))
-    if hasattr(self, "act_ai_menu_lm_ocr_boxes"):
-        self.act_ai_menu_lm_ocr_boxes.setText(self._tr("lm_menu_lm_ocr_boxes"))
-    self.act_ai_menu_postgres.setText(self._tr("lm_menu_generate_postgres"))
-    self.act_ai_menu_neo4j.setText(self._tr("lm_menu_generate_neo4j"))
+    if not hasattr(self, "act_ai_menu_lm_ocr_boxes"):
+        self.act_ai_menu_lm_ocr_boxes = QAction(self._tr("lm_menu_lm_ocr_boxes"), self)
+        self.act_ai_menu_lm_ocr_boxes.triggered.connect(
+            lambda: _bk_lm_run_overlay_lm_ocr_boxes_current_task(self)
+        )
+    existing = list(self.btn_ai_revise_menu.actions())
+    if self.act_ai_menu_lm_ocr_boxes not in existing:
+        before = getattr(self, "act_ai_menu_postgres", None)
+        if before is not None:
+            self.btn_ai_revise_menu.insertAction(before, self.act_ai_menu_lm_ocr_boxes)
+        else:
+            self.btn_ai_revise_menu.addAction(self.act_ai_menu_lm_ocr_boxes)
     if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
         self.btn_ai_revise_bottom.setToolTip(self._tr("btn_ai_revise_menu_tip"))
     _bk_lm_update_dropdown_state(self)
+
+def _bk_lm_retranslate_dropdown(self):
+    if callable(_BK_LM_BATCH_PREV_RETRANSLATE_DROPDOWN):
+        _BK_LM_BATCH_PREV_RETRANSLATE_DROPDOWN(self)
+    if hasattr(self, "act_ai_menu_lm_ocr_boxes"):
+        self.act_ai_menu_lm_ocr_boxes.setText(self._tr("lm_menu_lm_ocr_boxes"))
+    if hasattr(self, "btn_ai_revise_bottom") and self.btn_ai_revise_bottom is not None:
+        self.btn_ai_revise_bottom.setToolTip(self._tr("btn_ai_revise_menu_tip"))
+    _bk_lm_update_dropdown_state(self)
+
 __all__ = [
+    '_BK_LM_BATCH_PREV_INSTALL_DROPDOWN_MENU',
+    '_BK_LM_BATCH_PREV_RETRANSLATE_DROPDOWN',
+    '_BK_LM_BATCH_PREV_UPDATE_DROPDOWN_STATE',
     '_bk_lm_install_dropdown_menu',
     '_bk_lm_retranslate_dropdown',
     '_bk_lm_run_ai_revision_for_all_patched',

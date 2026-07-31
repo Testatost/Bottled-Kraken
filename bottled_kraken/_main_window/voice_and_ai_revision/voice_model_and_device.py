@@ -20,10 +20,3 @@ class MainWindowVoiceModelAndDeviceMixin:
                 self.status_bar.showMessage(self._tr("msg_ai_model_id_cleared_auto"))
         def _resolve_faster_whisper_device(self) -> Tuple[str, str]:
             return "cpu", "int8"
-        def _auto_select_best_device(self):
-            caps = self._gpu_capabilities()
-            for dev in ("cuda", "rocm", "cpu"):
-                ok, _ = caps.get(dev, (False, ""))
-                if ok:
-                    self.device_str = dev
-                    break

@@ -19,8 +19,9 @@ from bottled_kraken.common import (
     STATUS_WAITING,
     TaskItem,
     os,
-    torch,
 )
+from bottled_kraken.cancellation import operation_was_cancelled
+
 class MainWindowOcrResultsMixin:
         def on_file_started(self, path):
             item = next((i for i in self.queue_items if i.path == path), None)
@@ -83,11 +84,6 @@ class MainWindowOcrResultsMixin:
                         pass
                     self.worker = None
                 self._bk_reset_ocr_cancel_state(reset_processing=True, message=self._tr("msg_ocr_cancelled") if hasattr(self, "_tr") else "OCR abgebrochen.")
-                try:
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except Exception:
-                    pass
                 return
             self.act_play.setEnabled(True)
             self.act_stop.setEnabled(False)
@@ -99,15 +95,11 @@ class MainWindowOcrResultsMixin:
                 except Exception:
                     pass
                 self.worker = None
-            try:
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
         def on_failed(self, msg):
-            msg_text = str(msg or "")
-            cancelled = bool(getattr(self, "_ocr_cancel_requested", False)) or any(
-                token in msg_text.lower() for token in ("abbruch", "abgebrochen", "cancel", "cancelled", "canceled", "annul")
+            cancelled = bool(getattr(self, "_ocr_cancel_requested", False)) or operation_was_cancelled(
+                worker=getattr(self, "worker", None),
+                message=msg,
+                keys=("msg_ocr_cancelled",),
             )
             if not cancelled:
                 QMessageBox.critical(self, self._tr("err_title"), msg)
@@ -123,11 +115,6 @@ class MainWindowOcrResultsMixin:
                 self.act_play.setEnabled(True)
                 self.act_stop.setEnabled(False)
                 self._set_progress_idle(0)
-            try:
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
         def _update_queue_row(self, path):
             for row in range(self.queue_table.rowCount()):
                 item0 = self.queue_table.item(row, QUEUE_COL_FILE)

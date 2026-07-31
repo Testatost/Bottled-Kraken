@@ -97,7 +97,6 @@ class MainWindowProjectFilesMixin:
                 self.current_lang = translation.normalize_language_code(settings.get("language", self.current_lang))
                 self.log_lang = self.current_lang
                 self.reading_direction = int(settings.get("reading_direction", self.reading_direction))
-                self.device_str = settings.get("device", self.device_str)
                 self.show_overlay = bool(settings.get("show_overlay", self.show_overlay))
                 self.current_theme = settings.get("theme", self.current_theme)
                 custom_theme_colors = settings.get("custom_theme_colors", None)
@@ -233,8 +232,30 @@ class MainWindowProjectFilesMixin:
                 return
             try:
                 data = self._project_to_dict()
-                with open(self.project_file_path, "w", encoding="utf-8") as f:
+                # Atomar speichern: erst vollstaendig in eine Temporaerdatei
+                # schreiben (inkl. fsync), dann per os.replace atomar an die
+                # Zielposition tauschen. Vorher wird die bestehende Datei als
+                # .bak gesichert. Damit kann ein Absturz, Stromausfall oder
+                # voller Datentraeger das bestehende Projekt nicht mehr
+                # zerstoeren - vorher wurde direkt in die Zieldatei geschrieben.
+                target = self.project_file_path
+                tmp_path = target + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except Exception:
+                        pass
+                if os.path.exists(target):
+                    try:
+                        backup = target + ".bak"
+                        if os.path.exists(backup):
+                            os.remove(backup)
+                        os.replace(target, backup)
+                    except Exception:
+                        pass
+                os.replace(tmp_path, target)
                 self.status_bar.showMessage(self._tr("msg_project_saved", os.path.basename(self.project_file_path)))
                 QMessageBox.information(
                     self,
@@ -242,6 +263,11 @@ class MainWindowProjectFilesMixin:
                     self._tr("msg_project_saved", os.path.basename(self.project_file_path))
                 )
             except Exception as e:
+                try:
+                    if os.path.exists(self.project_file_path + ".tmp"):
+                        os.remove(self.project_file_path + ".tmp")
+                except Exception:
+                    pass
                 QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_project_save_failed", str(e)))
         def load_project(self):
             path, _ = QFileDialog.getOpenFileName(

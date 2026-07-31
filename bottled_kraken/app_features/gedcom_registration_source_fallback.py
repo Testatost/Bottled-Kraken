@@ -220,7 +220,7 @@ def _bk_gedcom_worker_run_registration_source(self):
                 raise RuntimeError(self._tr("msg_gedcom_cancelled"))
             try:
                 self.progress_changed.emit(10)
-                self.status_changed.emit("GEDCOM: Register-/Tabellenseite erkannt; erzeuge Personendatensätze direkt aus OCR-Zeilen.")
+                self.status_changed.emit(self._tr("msg_gedcom_started"))
             except Exception:
                 pass
             data = {

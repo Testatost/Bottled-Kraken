@@ -161,113 +161,6 @@ def _bk_record_y0_v10(rv: Any) -> float:
     except Exception:
         pass
     return 0.0
-def _bk_sort_records_core_v10(records, image_width: int, image_height: int, reading_mode: int, *, simple: bool = False):
-    raw = []
-    for r in records:
-        bb = record_bbox(r)
-        if bb:
-            raw.append((r, bb))
-    if not raw:
-        return list(records)
-    rev_y = reading_mode in (READING_MODES['BT_LR'], READING_MODES['BT_RL'])
-    rev_x = reading_mode in (READING_MODES['TB_RL'], READING_MODES['BT_RL'])
-    def cx(bb):
-        return (bb[0] + bb[2]) / 2.0
-    def cy(bb):
-        return (bb[1] + bb[3]) / 2.0
-    deskew_items = []
-    if simple:
-        for r, bb in raw:
-            deskew_items.append((r, bb, bb))
-    else:
-        angles = []
-        for r, _ in raw:
-            bl = getattr(r, 'baseline', None)
-            pts = _coerce_points(bl)
-            if len(pts) >= 2:
-                x1, y1 = pts[0]
-                x2, y2 = pts[-1]
-                dx = x2 - x1
-                dy = y2 - y1
-                if abs(dx) > 1.0:
-                    a = math.atan2(dy, dx)
-                    if abs(a) < math.radians(20):
-                        angles.append(a)
-        skew = statistics.median(angles) if angles else 0.0
-        cs = math.cos(-skew)
-        sn = math.sin(-skew)
-        wc = max(1.0, float(image_width)) / 2.0
-        hc = max(1.0, float(image_height)) / 2.0
-        def rot(x, y):
-            x -= wc
-            y -= hc
-            xr = x * cs - y * sn
-            yr = x * sn + y * cs
-            return xr + wc, yr + hc
-        def deskew_bb(bb):
-            x0, y0, x1, y1 = bb
-            pts = [rot(x0, y0), rot(x1, y0), rot(x1, y1), rot(x0, y1)]
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            return (min(xs), min(ys), max(xs), max(ys))
-        for r, bb in raw:
-            deskew_items.append((r, bb, deskew_bb(bb)))
-    heights = [(dbb[3] - dbb[1]) for _, _, dbb in deskew_items if (dbb[3] - dbb[1]) > 0]
-    med_h = statistics.median(heights) if heights else 20.0
-    y_tol = max(12.0, med_h * (0.85 if simple else 0.75))
-    items = []
-    for r, bb, dbb in deskew_items:
-        items.append({
-            'record': r,
-            'bb': bb,
-            'dbb': dbb,
-            'top': float(dbb[1]),
-            'bottom': float(dbb[3]),
-            'left': float(dbb[0]),
-            'right': float(dbb[2]),
-            'cy': cy(dbb),
-            'cx': cx(dbb),
-        })
-    items.sort(key=lambda item: (item['top'], item['left']))
-    rows = []
-    for item in items:
-        placed = False
-        for row in rows:
-            overlap = min(item['bottom'], row['bottom']) - max(item['top'], row['top'])
-            same_visual_row = overlap >= -max(2.0, med_h * 0.12) or abs(item['cy'] - row['cy']) <= y_tol
-            if same_visual_row:
-                row['items'].append(item)
-                row['top'] = min(row['top'], item['top'])
-                row['bottom'] = max(row['bottom'], item['bottom'])
-                row['cy'] = (row['cy'] * (len(row['items']) - 1) + item['cy']) / len(row['items'])
-                placed = True
-                break
-        if not placed:
-            rows.append({
-                'top': item['top'],
-                'bottom': item['bottom'],
-                'cy': item['cy'],
-                'items': [item],
-            })
-    rows.sort(key=lambda row: (row['cy'], row['top']), reverse=rev_y)
-    ordered = []
-    for row in rows:
-        row['items'].sort(key=lambda item: (item['left'], item['cx']), reverse=rev_x)
-        ordered.extend(item['record'] for item in row['items'])
-    return ordered
-def sort_records_handwriting_simple(records, reading_mode: int = READING_MODES['TB_LR']):
-    raw = []
-    for r in records:
-        bb = record_bbox(r)
-        if bb:
-            raw.append((r, bb))
-    if not raw:
-        return list(records)
-    max_x = max(bb[2] for _, bb in raw)
-    max_y = max(bb[3] for _, bb in raw)
-    return _bk_sort_records_core_v10(records, int(max_x) + 1, int(max_y) + 1, reading_mode, simple=True)
-def sort_records_reading_order(records, image_width: int, image_height: int, reading_mode: int = READING_MODES['TB_LR']):
-    return _bk_sort_records_core_v10(records, image_width, image_height, reading_mode, simple=False)
 def cluster_columns(records: List[RecordView], x_threshold: int = 45):
     items = [r for r in records if getattr(r, 'bbox', None)]
     if not items:
@@ -379,10 +272,7 @@ __all__ = [
     '_bk_progress_from_tokens_v10',
     '_bk_record_x0_v10',
     '_bk_record_y0_v10',
-    '_bk_sort_records_core_v10',
     '_bk_source_blocks_for_local_json_v10',
     'cluster_columns',
-    'sort_records_handwriting_simple',
-    'sort_records_reading_order',
 ]
 register_globals('bk', globals(), __all__)

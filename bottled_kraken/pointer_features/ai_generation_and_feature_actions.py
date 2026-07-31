@@ -1,49 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('ptr', globals())
 from typing import Any, Dict, List, Optional, Tuple
-def _ptr_prompt_owner(config):
-    try:
-        owner = getattr(config, "_bk_prompt_owner", None)
-        return owner
-    except Exception:
-        return None
-def _ptr_prompt_text_from_owner(owner, key: str, fallback: str) -> str:
-    if owner is not None:
-        try:
-            if "_bk_lm_prompt_override" in globals():
-                override = _bk_lm_prompt_override(owner, key)
-                if override:
-                    return str(override)
-        except Exception:
-            pass
-        try:
-            if hasattr(owner, "_tr"):
-                value = owner._tr(key)
-                if value and value != key:
-                    return str(value)
-        except Exception:
-            pass
-        try:
-            lang = getattr(owner, "current_lang", translation.DEFAULT_LANGUAGE)
-            value = translation.translate(lang, key)
-            if value and value != key:
-                return str(value)
-        except Exception:
-            pass
-    return str(fallback or "")
-def _ptr_apply_prompt_template(template: str, *, schema_template: str, text: str) -> str:
-    try:
-        return str(template).format(schema_template=schema_template, ocr_text=text, text=text, merged_text=text)
-    except Exception:
-        return str(template) + "\n\nText:\n" + str(text or "")
-def _ptr_prompt_from_config(config, system_key: str, user_key: str,
-                            default_system: str, default_user: str,
-                            schema_template: str, text: str) -> Tuple[str, str]:
-    owner = _ptr_prompt_owner(config)
-    system_prompt = _ptr_prompt_text_from_owner(owner, system_key, default_system)
-    user_template = _ptr_prompt_text_from_owner(owner, user_key, default_user)
-    user_prompt = _ptr_apply_prompt_template(user_template, schema_template=schema_template, text=text)
-    return system_prompt, user_prompt
 def _ptr_ai_merge_ocr_texts(config: PtrRemoteAIConfig, ocr_texts: List[str]) -> str:
     cleaned_sources = [text.strip() for text in ocr_texts if text and text.strip()]
     if not cleaned_sources:
@@ -209,8 +166,6 @@ def _ptr_save_feature_config_to_window(window, config: PtrRemoteAIConfig):
         window.settings.setValue("ptr_remote_ai/temperature", float(config.temperature))
         window.settings.setValue("ptr_remote_ai/app_name", config.app_name)
         window.settings.setValue("ptr_remote_ai/app_url", config.app_url)
-def _ptr_find_task(window, path: str) -> Optional[TaskItem]:
-    return next((t for t in window.queue_items if t.path == path), None)
 def _ptr_current_or_selected_target_tasks(window) -> List[TaskItem]:
     checked = window._checked_queue_tasks() if hasattr(window, "_checked_queue_tasks") else []
     selected = window._selected_queue_tasks() if hasattr(window, "_selected_queue_tasks") else []
@@ -240,13 +195,6 @@ def _ptr_install_feature_actions(self):
     self.act_ptr_multi_reopen = QAction(self._tr("ptr_multi_reopen_followup"), self)
     self.act_ptr_multi_reopen.triggered.connect(self.ptr_reopen_multi_followup)
     self.ptr_update_feature_texts()
-def _ptr_update_feature_texts(self):
-    if hasattr(self, "act_ptr_multi_ocr"):
-        self.act_ptr_multi_ocr.setText(self._tr("ptr_multi_ocr_action"))
-    if hasattr(self, "act_ptr_ai_tools"):
-        self.act_ptr_ai_tools.setText(self._tr("ptr_ai_tools_title"))
-    if hasattr(self, "act_ptr_multi_reopen"):
-        self.act_ptr_multi_reopen.setText(self._tr("ptr_multi_reopen_followup"))
 def _ptr_export_text_interactive(self, text: str, title: str, default_name: str):
     if not (text or "").strip():
         QMessageBox.information(self, self._tr("dlg_export_title"), self._tr("ptr_export_no_text"))
@@ -398,70 +346,11 @@ def _ptr_reopen_multi_followup(self):
         QMessageBox.information(self, self._tr("ptr_multi_followup_title"), self._tr("ptr_msg_no_multi_followup"))
         return
     self._ptr_open_multi_followup_for_path(target)
-def _ptr_start_multi_ocr(self):
-    if not getattr(self, "queue_items", None):
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_queue_empty"))
-        return
-    try:
-        self._scan_kraken_models()
-    except Exception:
-        pass
-    rec_models = _ptr_multi_default_rec_models(self)
-    if not rec_models:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("ptr_warn_no_recognition_models"))
-        return
-    default_selected = [self.model_path] if getattr(self, "model_path", "") else [rec_models[0][1]]
-    dlg = PtrMultiOcrDialog(rec_models=rec_models, default_selected_paths=default_selected, parent=self)
-    if dlg.exec() != QDialog.Accepted:
-        return
-    rec_paths = []
-    seen = set()
-    for p in dlg.selected_recognition_paths():
-        if p and p not in seen:
-            rec_paths.append(p)
-            seen.add(p)
-    if not rec_paths:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("ptr_warn_select_recognition_model"))
-        return
-    seg_path = self.seg_model_path if dlg.use_segmentation() else None
-    if not seg_path or not os.path.exists(seg_path):
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("ptr_warn_select_segmentation_model"))
-        return
-    tasks = _ptr_current_or_selected_target_tasks(self)
-    tasks = [t for t in tasks if t.path and os.path.exists(t.path)]
-    if not tasks:
-        QMessageBox.warning(self, self._tr("warn_title"), self._tr("warn_queue_empty"))
-        return
-    job = PtrMultiOCRJob(
-        input_paths=[t.path for t in tasks],
-        recognition_model_paths=rec_paths,
-        segmentation_model_path=seg_path,
-        device=self.device_str,
-        reading_direction=self.reading_direction,
-        runs=dlg.runs(),
-    )
-    self._ptr_multi_processed_paths = []
-    self._ptr_multi_ocr_worker = PtrMultiOCRWorker(job, parent=self)
-    self._ptr_multi_ocr_worker.file_started.connect(self._ptr_on_multi_file_started)
-    self._ptr_multi_ocr_worker.file_done.connect(self._ptr_on_multi_file_done)
-    self._ptr_multi_ocr_worker.file_error.connect(self._ptr_on_multi_file_error)
-    self._ptr_multi_ocr_worker.progress.connect(self.on_progress_update)
-    self._ptr_multi_ocr_worker.finished_batch.connect(self._ptr_on_multi_batch_finished)
-    self._ptr_multi_ocr_worker.failed.connect(self._ptr_on_multi_failed)
-    self._ptr_multi_ocr_worker.device_resolved.connect(self.on_device_resolved)
-    self._ptr_multi_ocr_worker.gpu_info.connect(self.on_gpu_info)
-    self.act_play.setEnabled(False)
-    self.act_stop.setEnabled(True)
-    if hasattr(self, "act_ptr_multi_ocr"):
-        self.act_ptr_multi_ocr.setEnabled(False)
-    self._set_progress_busy()
-    self._ptr_multi_ocr_worker.start()
 __all__ = [
     '_ptr_ai_build_neo4j_json',
     '_ptr_ai_build_postgres_json',
     '_ptr_ai_merge_ocr_texts',
     '_ptr_apply_local_merge_to_task',
-    '_ptr_apply_prompt_template',
     '_ptr_current_or_selected_target_tasks',
     '_ptr_export_ai_merge_for_current',
     '_ptr_export_ai_neo4j_for_current',
@@ -469,21 +358,15 @@ __all__ = [
     '_ptr_export_json_interactive',
     '_ptr_export_text_interactive',
     '_ptr_feature_config_from_window',
-    '_ptr_find_task',
     '_ptr_install_feature_actions',
     '_ptr_multi_default_rec_models',
     '_ptr_open_ai_tools',
     '_ptr_open_multi_followup_for_path',
-    '_ptr_prompt_from_config',
-    '_ptr_prompt_owner',
-    '_ptr_prompt_text_from_owner',
     '_ptr_reopen_multi_followup',
     '_ptr_save_feature_config_to_window',
-    '_ptr_start_multi_ocr',
     '_ptr_store_ai_merge',
     '_ptr_store_ai_neo4j',
     '_ptr_store_ai_pipeline',
     '_ptr_store_ai_postgres',
-    '_ptr_update_feature_texts',
 ]
 register_globals('ptr', globals(), __all__)

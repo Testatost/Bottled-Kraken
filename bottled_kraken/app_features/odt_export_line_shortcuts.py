@@ -166,7 +166,7 @@ def _bk_fix52_export_format_items(self):
         except Exception:
             items = []
     if not any(str(fmt).lower() == 'odt' for _name, fmt in items):
-        label = _bk_fix36_tr(self, 'export_format_odt', 'LibreOffice Writer (.odt)')
+        label = _bk_fix36_tr(self, 'export_format_odt')
         inserted = False
         out = []
         for name, fmt in items:
@@ -206,24 +206,6 @@ def _bk_fix52_export_filter(self, fmt: str) -> str:
     return 'All (*.*)'
 try:
     MainWindow._export_filter = _bk_fix52_export_filter
-except Exception:
-    pass
-try:
-    _BK_FIX52_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_FIX52_PREV_RENDER_FILE = None
-def _bk_fix52_render_file(self, path: str, fmt: str, item: TaskItem):
-    if str(fmt or '').lower() == 'odt':
-        if not item or not getattr(item, 'results', None):
-            return
-        _text, _kr, _im, record_views = item.results
-        export_image = _load_image_color(item.path)
-        return _bk_fix52_write_odt(path, item, export_image, record_views)
-    if callable(_BK_FIX52_PREV_RENDER_FILE):
-        return _BK_FIX52_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
-try:
-    MainWindow._render_file = _bk_fix52_render_file
 except Exception:
     pass
 def _bk_fix52_focus_is_text_input() -> bool:
@@ -295,19 +277,13 @@ def _bk_fix52_install_line_shortcuts(self):
             print(f'FIX8.52 shortcut install failed: {exc}')
         except Exception:
             pass
-try:
-    _BK_FIX52_PREV_MAIN_INIT = MainWindow.__init__
-except Exception:
-    _BK_FIX52_PREV_MAIN_INIT = None
-if callable(_BK_FIX52_PREV_MAIN_INIT) and not getattr(MainWindow.__init__, '_bk_fix52_wrapped', False):
-    def _bk_fix52_main_init(self, *args, **kwargs):
-        _BK_FIX52_PREV_MAIN_INIT(self, *args, **kwargs)
-        try:
-            _bk_fix52_install_line_shortcuts(self)
-        except Exception:
-            pass
-    _bk_fix52_main_init._bk_fix52_wrapped = True
-    MainWindow.__init__ = _bk_fix52_main_init
+def _bk_fix52_main_init(self, *args, **kwargs):
+    try:
+        _bk_fix52_install_line_shortcuts(self)
+    except Exception:
+        pass
+from bottled_kraken.common.chain_consolidation import register_init_delta
+register_init_delta(_bk_fix52_main_init)
 _SQLITE_PROMPT_EXTRA = (
     ('ai_prompt_sqlite_system', 'lm_prompt_sqlite_system'),
     ('ai_prompt_sqlite_user', 'lm_prompt_sqlite_user'),
@@ -334,7 +310,6 @@ __all__ = [
     '_bk_fix52_install_line_shortcuts',
     '_bk_fix52_line_shortcut',
     '_bk_fix52_odt_content_xml',
-    '_bk_fix52_render_file',
     '_bk_fix52_screen_max_width',
     '_bk_fix52_sync_ui_after_recs_change',
     '_bk_fix52_write_odt',

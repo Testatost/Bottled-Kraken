@@ -1,3 +1,5 @@
+from bottled_kraken.runtime_logging import get_logger
+
 from bottled_kraken.common import (
     _clean_ocr_text_for_kraken_display,
     _is_effectively_empty_ocr_text,
@@ -89,6 +91,9 @@ class OCRWorkerPageRecognitionMixin:
                             if self.isInterruptionRequested():
                                 break
                 except Exception:
+                    get_logger("workers.ocr").exception(
+                        "Kraken recognition failed for %s", img_path
+                    )
                     self.file_error.emit(img_path, traceback.format_exc())
                     return
                 if self.isInterruptionRequested():
@@ -195,6 +200,7 @@ class OCRWorkerPageRecognitionMixin:
                 self._emit_overall_progress(file_idx, total_files, 1.0)
                 self.file_done.emit(img_path, text, [], None, record_views)
             except Exception:
+                get_logger("workers.ocr").exception("OCR failed for %s", img_path)
                 self.file_error.emit(img_path, traceback.format_exc())
             finally:
                 try:
@@ -216,9 +222,9 @@ class OCRWorkerPageRecognitionMixin:
             ok = False
             try:
                 if not os.path.exists(self.job.recognition_model_path):
-                    raise ValueError("Recognition model not found.")
+                    raise ValueError(self._tr("ptr_err_rec_model_missing_generic"))
                 if not os.path.exists(self.job.segmentation_model_path or ""):
-                    raise ValueError("blla segmentation model not found.")
+                    raise ValueError(self._tr("ptr_err_baseline_missing"))
                 self._ensure_models_loaded()
                 total = len(self.job.input_paths)
                 reset_every = self._ocr_reset_every()
@@ -229,7 +235,7 @@ class OCRWorkerPageRecognitionMixin:
                     self._ocr_one(path, i, total)
                     self._soft_page_cleanup()
                     if reset_every > 0 and (i + 1) < total and ((i + 1) % reset_every) == 0:
-                        self.gpu_info.emit(self._tr("ocr_status_memory_reloaded", i + 1))
+                        self.status_info.emit(self._tr("ocr_status_memory_reloaded", i + 1))
                         self._release_torch_resources()
                         if self.isInterruptionRequested():
                             break
@@ -237,6 +243,7 @@ class OCRWorkerPageRecognitionMixin:
                 self.progress.emit(100)
                 ok = True
             except Exception:
+                get_logger("workers.ocr").exception("OCR batch worker failed")
                 err = traceback.format_exc()
             finally:
                 self._release_torch_resources()

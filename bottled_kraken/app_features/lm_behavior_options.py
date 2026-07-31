@@ -181,7 +181,12 @@ def _bk_lm_show_behavior_dialog(self):
         page_ocr = QCheckBox(_bk_lm_opt_text(self, "lm_behavior_page_ocr"))
         page_ocr.setChecked(bool(data["page_ocr"]))
         use_overlay = QCheckBox(_bk_lm_opt_text(self, "lm_behavior_use_overlay"))
-        use_overlay.setChecked(bool(data["use_overlay"]))
+        # Standard transcription scopes always operate on the target overlay
+        # boxes, one independent vision request per box. Keep the control visible
+        # for clarity/backward compatibility, but do not allow disabling the
+        # fundamental line-crop behavior.
+        use_overlay.setChecked(True)
+        use_overlay.setEnabled(False)
         mode_combo = QComboBox()
         for mode, key in ((AI_SCRIPT_PRINT, "btn_ai_script_print"), (AI_SCRIPT_HANDWRITING, "btn_ai_script_handwriting"), (AI_SCRIPT_MIXED, "btn_ai_script_mixed")):
             mode_combo.addItem(self._tr(key), mode)
@@ -229,7 +234,7 @@ def _bk_lm_show_behavior_dialog(self):
             page_ocr, use_overlay, mode_combo, pad_x, pad_y, extra_y, weight, filters = controls
             d = _bk_lm_behavior_defaults_for_scope(scope)
             page_ocr.setChecked(bool(d["page_ocr"]))
-            use_overlay.setChecked(bool(d["use_overlay"]))
+            use_overlay.setChecked(True)
             mode_combo.setCurrentIndex(max(0, mode_combo.findData(d["script_mode"])))
             pad_x.setValue(int(d["pad_x"])); pad_y.setValue(int(d["pad_y"])); extra_y.setValue(int(d["extra_context_y"]))
             weight.setCurrentIndex(max(0, weight.findData(d["weight"])))
@@ -240,7 +245,7 @@ def _bk_lm_show_behavior_dialog(self):
             page_ocr, use_overlay, mode_combo, pad_x, pad_y, extra_y, weight, filters = controls
             values[scope] = {
                 "page_ocr": page_ocr.isChecked(),
-                "use_overlay": use_overlay.isChecked(),
+                "use_overlay": True,
                 "script_mode": mode_combo.currentData() or AI_SCRIPT_PRINT,
                 "pad_x": pad_x.value(),
                 "pad_y": pad_y.value(),
@@ -348,11 +353,10 @@ def _bk_lm_behavior_prompt(self, idx, kraken_text, page_context):
     key = "lm_behavior_revision_prompt" if behavior.get("weight") == "kraken_lm_revision" else "lm_behavior_overlay_prompt"
     return _bk_lm_opt_text(self, key, int(idx), kraken_text, page_context)
 try:
-    _BK_LM_BEHAVIOR_PREV_MW_INIT = MainWindow.__init__
     def _bk_lm_behavior_mw_init(self, *args, **kwargs):
-        _BK_LM_BEHAVIOR_PREV_MW_INIT(self, *args, **kwargs)
         _bk_lm_load_behavior_settings(self)
-    MainWindow.__init__ = _bk_lm_behavior_mw_init
+    from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
+    register_init_delta(_bk_lm_behavior_mw_init)
 except Exception:
     pass
 try:
@@ -364,9 +368,7 @@ try:
 except Exception:
     pass
 try:
-    _BK_LM_BEHAVIOR_PREV_RETRANSLATE = MainWindow.retranslate_ui
     def _bk_lm_behavior_retranslate(self, *args, **kwargs):
-        _BK_LM_BEHAVIOR_PREV_RETRANSLATE(self, *args, **kwargs)
         if hasattr(self, "act_lm_behavior_settings"):
             self.act_lm_behavior_settings.setText(_bk_lm_opt_text(self, "act_lm_behavior_settings"))
         if hasattr(self, "act_lm_token_settings"):
@@ -376,7 +378,7 @@ try:
         if hasattr(self, "act_lm_custom_context"):
             self.act_lm_custom_context.setText(_bk_lm_opt_text(self, "act_lm_custom_context"))
         _bk_lm_rehome_options_actions(self)
-    MainWindow.retranslate_ui = _bk_lm_behavior_retranslate
+    register_retranslate_delta(_bk_lm_behavior_retranslate)
 except Exception:
     pass
 def _bk_lm_behavior_with_scope(self, scope, fn, *args, **kwargs):

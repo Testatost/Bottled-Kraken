@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
 seed_globals('bk', globals())
 """GEDCOM-Erzeugung über lokales LM.
 Ergänzt im LM-Überarbeitungsmenü den Eintrag "GEDCOM erzeugen" unterhalb
@@ -23,16 +24,8 @@ def _bk_gedcom_review_install_translations():
             except Exception:
                 pass
 def _bk_gedcom_review_text(window, key: str, *args) -> str:
-    try:
-        return window._tr(key, *args)
-    except Exception:
-        lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
-        data = _BK_GEDCOM_REVIEW_TEXTS.get(lang) or _BK_GEDCOM_REVIEW_TEXTS["de"]
-        text = data.get(key, _BK_GEDCOM_REVIEW_TEXTS["de"].get(key, key))
-        try:
-            return text.format(*args) if args else text
-        except Exception:
-            return text
+    lang = getattr(window, "current_lang", translation.DEFAULT_LANGUAGE)
+    return translation.translate(lang, key, *args)
 def _bk_gedcom_review_deepcopy(obj):
     try:
         return json.loads(json.dumps(obj, ensure_ascii=False))
@@ -360,9 +353,7 @@ def _bk_lm_on_gedcom_done_review(self, path: str, gedcom_text: str):
         _bk_lm_update_dropdown_state(self)
     except Exception:
         pass
-_BK_GEDCOM_REVIEW_PREV_INIT = MainWindow.__init__
 def _bk_gedcom_review_init(self, *args, **kwargs):
-    _BK_GEDCOM_REVIEW_PREV_INIT(self, *args, **kwargs)
     try:
         if hasattr(self, "act_ai_menu_gedcom") and hasattr(self, "_bk_lm_generate_gedcom"):
             try:
@@ -372,24 +363,20 @@ def _bk_gedcom_review_init(self, *args, **kwargs):
             self.act_ai_menu_gedcom.triggered.connect(lambda _checked=False: self._bk_lm_generate_gedcom())
     except Exception:
         pass
-_BK_GEDCOM_REVIEW_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_gedcom_review_retranslate(self, *args, **kwargs):
-    _BK_GEDCOM_REVIEW_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         if hasattr(self, "act_ai_menu_gedcom"):
             self.act_ai_menu_gedcom.setText(self._tr("act_lm_generate_gedcom"))
     except Exception:
         pass
 _bk_gedcom_review_install_translations()
-MainWindow.__init__ = _bk_gedcom_review_init
-MainWindow.retranslate_ui = _bk_gedcom_review_retranslate
+register_init_delta(_bk_gedcom_review_init)
+register_retranslate_delta(_bk_gedcom_review_retranslate)
 MainWindow._bk_lm_on_gedcom_done_gui = _bk_lm_on_gedcom_done_review
 __all__ = [
     'BKGedcomReviewDialog',
     '_BK_GEDCOM_PROMPT_DEFAULTS',
     '_BK_GEDCOM_REVIEW_PREV_BUILD_FROM_STRUCTURED',
-    '_BK_GEDCOM_REVIEW_PREV_INIT',
-    '_BK_GEDCOM_REVIEW_PREV_RETRANSLATE',
     '_BK_GEDCOM_REVIEW_TEXTS',
     '_BK_GEDCOM_ROBUST_TEXTS',
     '_BK_GEDCOM_SAVE_FIX_TEXTS',

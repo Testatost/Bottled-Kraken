@@ -44,7 +44,6 @@ def _ptr_start_multi_ocr_v9(self):
         input_paths=[task.path for task in tasks],
         recognition_model_paths=rec_paths,
         segmentation_model_path=seg_path,
-        device=self.device_str,
         reading_direction=self.reading_direction,
         runs=dlg.runs(),
         image_variants_enabled=True,
@@ -60,8 +59,6 @@ def _ptr_start_multi_ocr_v9(self):
     self._ptr_multi_ocr_worker.progress.connect(self.on_progress_update)
     self._ptr_multi_ocr_worker.finished_batch.connect(self._ptr_on_multi_batch_finished)
     self._ptr_multi_ocr_worker.failed.connect(self._ptr_on_multi_failed)
-    self._ptr_multi_ocr_worker.device_resolved.connect(self.on_device_resolved)
-    self._ptr_multi_ocr_worker.gpu_info.connect(self.on_gpu_info)
     self.act_play.setEnabled(False)
     self.act_stop.setEnabled(True)
     if hasattr(self, "act_ptr_multi_ocr"):

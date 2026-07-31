@@ -27,7 +27,6 @@ class MainWindowUninstallDeleteHelpMixin:
                 f'                <p>{self._tr("uninstall_delete_intro")}</p>\n'
                 f'                <p><b>{self._tr("uninstall_delete_scope_title")}</b></p>\n'
                 '                <ul>\n'
-                f'                    <li>{self._tr("uninstall_delete_scope_backends")}</li>\n'
                 f'                    <li>{self._tr("uninstall_delete_scope_whisper")}</li>\n'
                 f'                    <li>{self._tr("uninstall_delete_scope_settings")}</li>\n'
                 f'                    <li>{self._tr("uninstall_delete_scope_cache")}</li>\n'
@@ -113,13 +112,13 @@ class MainWindowUninstallDeleteHelpMixin:
                 if norm and norm not in paths:
                     paths.append(norm)
             add(str(bottled_kraken_user_root()))
+            add(os.path.join(home, "BottledKraken"))  # legacy beta location
             add(os.path.join(home, ".bottled_kraken"))
             add(os.path.join(home, ".bottled_kraken.env"))
             add(os.path.join(home, ".kraken_ocr_tool_settings"))
             if sys.platform.startswith("win"):
                 add(os.path.join(os.environ.get("LOCALAPPDATA", ""), "BottledKraken"))
                 add(os.path.join(os.environ.get("APPDATA", ""), "BottledKraken"))
-                add(os.path.join(home, "BottledKraken"))
             elif sys.platform == "darwin":
                 add(os.path.join(home, "Library", "Application Support", "BottledKraken"))
                 add(os.path.join(home, "Library", "Caches", "BottledKraken"))
@@ -138,9 +137,6 @@ class MainWindowUninstallDeleteHelpMixin:
                     add(whisper_base)
             except Exception:
                 pass
-            custom_backend_root = os.environ.get("BOTTLED_KRAKEN_BACKENDS_DIR", "").strip()
-            if custom_backend_root and "BottledKraken" in os.path.abspath(os.path.expanduser(custom_backend_root)).split(os.sep):
-                add(custom_backend_root)
             return self._dedupe_parent_delete_paths(paths)
         def _dedupe_parent_delete_paths(self, paths: List[str]) -> List[str]:
             existing = []
@@ -196,6 +192,26 @@ class MainWindowUninstallDeleteHelpMixin:
                 return True, self._tr("uninstall_delete_deleted_path", path)
             except Exception as exc:
                 return False, self._tr("uninstall_delete_failed_path", path, repr(exc))
+        def _finalize_bottled_kraken_delete(self):
+            """Delete the recorded application-data paths once more at shutdown.
+
+            The normal close event used to write language/theme settings after the
+            first deletion and thereby recreate the application settings directory.
+            This final, untranslated cleanup runs from ``aboutToQuit`` and removes
+            any application-owned path that may have been recreated while the UI
+            was still closing.
+            """
+            paths = list(getattr(self, "_uninstall_delete_paths", ()) or ())
+            for path in sorted(set(paths), key=len, reverse=True):
+                if not self._is_safe_bottled_kraken_delete_path(path):
+                    continue
+                try:
+                    if os.path.islink(path) or os.path.isfile(path):
+                        os.remove(path)
+                    elif os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                except Exception:
+                    pass
         def _run_uninstall_delete_from_help(self, parent_dialog: QDialog):
             title = self._tr("uninstall_delete_confirm_title")
             first = QMessageBox.warning(
@@ -220,6 +236,9 @@ class MainWindowUninstallDeleteHelpMixin:
                     self._tr("uninstall_delete_cancelled"),
                 )
                 return
+            # Prevent closeEvent from writing language/theme back into the just
+            # deleted settings directory.
+            self._uninstall_delete_in_progress = True
             for attr in ("hf_download_worker", "worker", "ai_worker", "voice_worker", "ai_batch_worker", "pdf_worker", "export_worker"):
                 obj = getattr(self, attr, None)
                 try:
@@ -229,6 +248,14 @@ class MainWindowUninstallDeleteHelpMixin:
                     pass
             self._release_bottled_kraken_runtime_files()
             paths = self._candidate_bottled_kraken_delete_paths()
+            self._uninstall_delete_paths = tuple(paths)
+            try:
+                app = QApplication.instance()
+                if app is not None and not getattr(self, "_uninstall_delete_cleanup_connected", False):
+                    app.aboutToQuit.connect(self._finalize_bottled_kraken_delete)
+                    self._uninstall_delete_cleanup_connected = True
+            except Exception:
+                pass
             messages: List[str] = []
             ok_count = 0
             fail_count = 0

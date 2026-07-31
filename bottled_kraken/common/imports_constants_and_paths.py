@@ -1,18 +1,17 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('shared', globals())
+from bottled_kraken.resource_paths import resource_path
 import os
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"coremltools(\.|$)")
 warnings.filterwarnings("ignore", message=r"invalid escape sequence.*\\_", category=SyntaxWarning)
 os.environ["PYTHONUTF8"] = "1"
 os.environ["PYTHONIOENCODING"] = "utf-8"
-os.environ["LANG"] = "C.UTF-8"
-os.environ["LC_ALL"] = "C.UTF-8"
 import sys
 import locale
 import platform
-from kraken import blla, rpred, serialization, containers
-from kraken.lib import models, vgsl
+from bottled_kraken.windows_coremltools_stub import install_windows_coremltools_stub
+install_windows_coremltools_stub()
 import torch
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -21,10 +20,6 @@ except Exception:
     pass
 try:
     locale.setlocale(locale.LC_ALL, "")
-except Exception:
-    pass
-try:
-    locale.getpreferredencoding = lambda do_setlocale=True: "UTF-8"
 except Exception:
     pass
 import time
@@ -80,7 +75,7 @@ from PySide6.QtWidgets import (
     QToolButton, QLineEdit, QTextEdit,
     QTextBrowser, QScrollArea, QTreeWidget, QTreeWidgetItem, QGraphicsLineItem,
     QSizePolicy, QCheckBox, QSlider, QStyleOptionButton,
-    QStyledItemDelegate, QStyleOptionViewItem, QStyle
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle, QComboBox
 )
 from shiboken6 import isValid
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
@@ -99,6 +94,7 @@ warnings.filterwarnings("ignore", message="Using legacy polygon extractor*", cat
 warnings.filterwarnings("ignore", message=r"`blla\.segment\(\)` is deprecated.*", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=r"`rpred\..*` is deprecated.*", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=r"`TorchVGSLModel\.load_model` is deprecated.*", category=DeprecationWarning)
+install_windows_coremltools_stub()
 from kraken import blla, rpred, serialization, containers
 from kraken.lib import models, vgsl
 import torch
@@ -279,9 +275,6 @@ STATUS_ICONS[STATUS_VOICE_RECORDING] = "🎤"
 VOICE_SAMPLE_RATE = 16000
 VOICE_CHANNELS = 1
 VOICE_BLOCKSIZE = 0
-def resource_path(relative_path: str) -> str:
-    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    return os.path.join(base_path, relative_path)
 def is_supported_input(path: str) -> bool:
     ext = os.path.splitext(path)[1].lower()
     return ext in SUPPORTED_IMAGE_EXTS or ext in SUPPORTED_PDF_EXTS

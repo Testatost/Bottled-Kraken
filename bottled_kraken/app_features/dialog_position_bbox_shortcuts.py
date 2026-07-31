@@ -360,19 +360,13 @@ def _bk_fix45_connect_preview_shortcut(self):
             print(f"FIX8.45 shortcut connect failed: {exc}")
         except Exception:
             pass
-try:
-    _BK_FIX45_PREV_MAINWINDOW_INIT = MainWindow.__init__
-except Exception:
-    _BK_FIX45_PREV_MAINWINDOW_INIT = None
-if callable(_BK_FIX45_PREV_MAINWINDOW_INIT) and not getattr(MainWindow.__init__, "_bk_fix45_init_wrapped", False):
-    def _bk_fix45_mainwindow_init(self, *args, **kwargs):
-        _BK_FIX45_PREV_MAINWINDOW_INIT(self, *args, **kwargs)
-        try:
-            QTimer.singleShot(0, lambda w=self: _bk_fix45_connect_preview_shortcut(w))
-        except Exception:
-            _bk_fix45_connect_preview_shortcut(self)
-    _bk_fix45_mainwindow_init._bk_fix45_init_wrapped = True
-    MainWindow.__init__ = _bk_fix45_mainwindow_init
+def _bk_fix45_mainwindow_init(self, *args, **kwargs):
+    try:
+        QTimer.singleShot(0, lambda w=self: _bk_fix45_connect_preview_shortcut(w))
+    except Exception:
+        _bk_fix45_connect_preview_shortcut(self)
+from bottled_kraken.common.chain_consolidation import register_init_delta
+register_init_delta(_bk_fix45_mainwindow_init)
 try:
     MainWindow.bk_draw_box_for_current_line_shortcut = _bk_fix45_begin_draw_box_for_current_line
 except Exception:

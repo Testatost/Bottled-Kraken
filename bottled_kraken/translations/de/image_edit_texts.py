@@ -51,7 +51,7 @@ DE_IMAGE_EDIT_TEXTS_TRANSLATIONS = {
     'overlay_resize_side_bottom': 'Untere Seite',
     'overlay_resize_fit_horizontal': 'Horizontal bis zum Rand',
     'overlay_resize_fit_vertical': 'Vertikal bis zum Rand',
-    'image_edit_title': 'Bildbearbeitung',
+    'image_edit_title': 'Bildbearbeitung – {}',
     'image_edit_prev': 'Vorheriges Bild',
     'image_edit_next': 'Nächstes Bild',
     'image_edit_grid': 'Raster',

@@ -18,120 +18,6 @@ class BKLocalJsonWaitDialog(QDialog):
     def set_status(self, text: str):
         if text:
             self.lbl_status.setText(str(text))
-def _bk_sort_records_reading_order_v18(records, image_width: int, image_height: int,
-                                       reading_mode: int = READING_MODES["TB_LR"]):
-    def cx(bb):
-        return (bb[0] + bb[2]) / 2.0
-    def cy(bb):
-        return (bb[1] + bb[3]) / 2.0
-    rev_y = reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"])
-    rev_x = reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"])
-    raw = []
-    for r in records:
-        bb = record_bbox(r)
-        if bb:
-            raw.append((r, bb))
-    if not raw:
-        return list(records)
-    angles = []
-    for r, _ in raw:
-        bl = getattr(r, "baseline", None)
-        pts = _coerce_points(bl)
-        if len(pts) >= 2:
-            x1, y1 = pts[0]
-            x2, y2 = pts[-1]
-            dx = x2 - x1
-            dy = y2 - y1
-            if abs(dx) > 1.0:
-                a = math.atan2(dy, dx)
-                if abs(a) < math.radians(20):
-                    angles.append(a)
-    skew = statistics.median(angles) if angles else 0.0
-    cs = math.cos(-skew)
-    sn = math.sin(-skew)
-    wc = max(1.0, float(image_width)) / 2.0
-    hc = max(1.0, float(image_height)) / 2.0
-    def rot(x, y):
-        x -= wc
-        y -= hc
-        xr = x * cs - y * sn
-        yr = x * sn + y * cs
-        return xr + wc, yr + hc
-    def deskew_bb(bb):
-        x0, y0, x1, y1 = bb
-        pts = [rot(x0, y0), rot(x1, y0), rot(x1, y1), rot(x0, y1)]
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        return (min(xs), min(ys), max(xs), max(ys))
-    items = []
-    heights = []
-    for r, bb in raw:
-        dbb = deskew_bb(bb)
-        items.append((r, bb, dbb))
-        h = dbb[3] - dbb[1]
-        if h > 0:
-            heights.append(h)
-    med_h = statistics.median(heights) if heights else 20.0
-    y_tol = max(10.0, med_h * 0.75)
-    items.sort(key=lambda x: cy(x[2]), reverse=rev_y)
-    rows = []
-    for r, bb, dbb in items:
-        my = cy(dbb)
-        placed = False
-        for row in rows:
-            if abs(my - row["cy"]) <= y_tol:
-                row["items"].append((r, bb, dbb))
-                n = len(row["items"])
-                row["cy"] = ((row["cy"] * (n - 1)) + my) / n
-                placed = True
-                break
-        if not placed:
-            rows.append({"cy": my, "items": [(r, bb, dbb)]})
-    rows.sort(key=lambda row: row["cy"], reverse=rev_y)
-    ordered = []
-    for row in rows:
-        row["items"].sort(key=lambda x: cx(x[2]), reverse=rev_x)
-        ordered.extend([r for r, _, _ in row["items"]])
-    return ordered
-def _bk_sort_records_handwriting_simple_v18(records, reading_mode: int = READING_MODES["TB_LR"]):
-    raw = []
-    for r in records:
-        bb = record_bbox(r)
-        if bb:
-            raw.append((r, bb))
-    if not raw:
-        return list(records)
-    rev_y = reading_mode in (READING_MODES["BT_LR"], READING_MODES["BT_RL"])
-    rev_x = reading_mode in (READING_MODES["TB_RL"], READING_MODES["BT_RL"])
-    heights = [(bb[3] - bb[1]) for _, bb in raw if (bb[3] - bb[1]) > 0]
-    med_h = statistics.median(heights) if heights else 20.0
-    y_tol = max(10.0, med_h * 0.6)
-    def cx(bb):
-        return (bb[0] + bb[2]) / 2.0
-    def cy(bb):
-        return (bb[1] + bb[3]) / 2.0
-    raw.sort(key=lambda x: cy(x[1]), reverse=rev_y)
-    rows = []
-    for r, bb in raw:
-        my = cy(bb)
-        placed = False
-        for row in rows:
-            if abs(my - row["cy"]) <= y_tol:
-                row["items"].append((r, bb))
-                n = len(row["items"])
-                row["cy"] = ((row["cy"] * (n - 1)) + my) / n
-                placed = True
-                break
-        if not placed:
-            rows.append({"cy": my, "items": [(r, bb)]})
-    rows.sort(key=lambda row: row["cy"], reverse=rev_y)
-    ordered = []
-    for row in rows:
-        row["items"].sort(key=lambda x: cx(x[1]), reverse=rev_x)
-        ordered.extend([r for r, _ in row["items"]])
-    return ordered
-sort_records_reading_order = _bk_sort_records_reading_order_v18
-sort_records_handwriting_simple = _bk_sort_records_handwriting_simple_v18
 _BK_GERMAN_NAME_ABBREVIATIONS_V18 = {
     'fr': 'Franz',
     'frz': 'Franz',
@@ -172,7 +58,6 @@ _BK_GERMAN_NAME_ABBREVIATIONS_V18 = {
     'siegm': 'Siegmund',
     'sieg': 'Siegmund',
     'wilh': 'Wilhelm',
-    'wlhm': 'Wilhelm',
     'wlhm': 'Wilhelm',
     'wilhm': 'Wilhelm',
     'gfrd': 'Gottfried',
@@ -425,8 +310,6 @@ __all__ = [
     '_bk_lm_collect_current_text_v18',
     '_bk_prev_ptr_normalize_postgres_json_v18',
     '_bk_prev_split_person_name_heuristic_v18',
-    '_bk_sort_records_handwriting_simple_v18',
-    '_bk_sort_records_reading_order_v18',
     '_bk_split_person_name_heuristic',
     '_bk_split_person_name_heuristic_v18',
     '_ptr_ai_build_postgres_json_local_v18',
@@ -434,7 +317,5 @@ __all__ = [
     '_ptr_guess_person_name_from_line_v18',
     '_ptr_normalize_postgres_json',
     '_ptr_normalize_postgres_json_v18',
-    'sort_records_handwriting_simple',
-    'sort_records_reading_order',
 ]
 register_globals('bk', globals(), __all__)

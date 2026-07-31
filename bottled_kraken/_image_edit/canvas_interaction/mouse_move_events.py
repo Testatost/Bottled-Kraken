@@ -298,7 +298,18 @@ class ImageEditCanvasMouseMoveMixin:
                 elif getattr(self, "selection_draw_mode", "rect") == "rect":
                     self.selection_polygon = None
                 if self.has_active_transform():
-                    self.transform_quad = self._quad_points_for_rect(self.selection_rect)
+                    # Bewegen darf eine laufende Verformung nicht plaetten:
+                    # Quad und Warp-Gitter werden mitverschoben statt aus dem
+                    # Rechteck neu aufgebaut (das warf Perspektive/Neigung weg).
+                    delta = self.selection_rect.topLeft() - QRectF(self.rect_before).topLeft()
+                    quad = getattr(self, "transform_quad", None)
+                    if quad and len(quad) == 4:
+                        self.transform_quad = [QPointF(pt.x() + delta.x(), pt.y() + delta.y()) for pt in quad]
+                    else:
+                        self.transform_quad = self._quad_points_for_rect(self.selection_rect)
+                    grid = getattr(self, "transform_warp_grid", None)
+                    if grid and len(grid) in (9, 25):
+                        self.transform_warp_grid = [QPointF(pt.x() + delta.x(), pt.y() + delta.y()) for pt in grid]
                 self.update(); self.changed.emit(); return
             if self.drag_mode and str(self.drag_mode).startswith("selection_resize:") and self.rect_before:
                 edge = self.drag_mode.split(":", 1)[1]

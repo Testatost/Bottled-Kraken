@@ -1,57 +1,57 @@
 FR_AI_REVISION_AND_DIALOG_TEXTS_TRANSLATIONS = {
     'dlg_ai_single_title': 'Révision IA de ligne',
-    'dlg_ai_single_status': 'Überarbeite nur Zeile {} …',
-    'msg_ai_single_started': 'LM-Überarbeitung für Zeile {} gestartet...',
-    'log_ai_single_started': 'LM-Zeilenüberarbeitung gestartet: {} | Zeile {}',
-    'msg_ai_multi_done': 'LM-Überarbeitung für {} ausgewählte Zeilen abgeschlossen.',
-    'log_ai_multi_done': 'LM-Mehrfachzeilenüberarbeitung abgeschlossen: {} | Zeilen {}',
-    'msg_ai_multi_cancelled': 'Mehrfachzeilenüberarbeitung abgebrochen.',
-    'log_ai_multi_cancelled': 'LM-Mehrfachzeilenüberarbeitung abgebrochen: {}',
-    'msg_ai_multi_failed': 'Mehrfachzeilenüberarbeitung fehlgeschlagen.',
-    'log_ai_multi_failed': 'LM-Mehrfachzeilenüberarbeitung Fehler: {} -> {}',
+    'dlg_ai_single_status': 'Révision de la seule ligne {} …',
+    'msg_ai_single_started': 'Révision LM de la ligne {} démarrée...',
+    'log_ai_single_started': 'Révision de ligne LM démarrée : {} | ligne {}',
+    'msg_ai_multi_done': 'Révision LM terminée pour {} lignes sélectionnées.',
+    'log_ai_multi_done': 'Révision LM multi-lignes terminée : {} | lignes {}',
+    'msg_ai_multi_cancelled': 'Révision multi-lignes annulée.',
+    'log_ai_multi_cancelled': 'Révision LM multi-lignes annulée : {}',
+    'msg_ai_multi_failed': 'La révision multi-lignes a échoué.',
+    'log_ai_multi_failed': 'Erreur de révision LM multi-lignes : {} -> {}',
     'msg_ai_batch_finished': 'Lot IA terminé.',
-    'log_ai_batch_debug_return': 'KI Batch Rückgabe für {}: {} Zeilen, OCR hatte {} Zeilen',
-    'log_ai_batch_debug_old_first': 'ALT erste Zeile: {}',
-    'log_ai_batch_debug_new_first': 'NEU erste Zeile: {}',
-    'log_ai_batch_debug_all': 'NEU alle Zeilen: {}',
+    'log_ai_batch_debug_return': "Retour du lot IA pour {} : {} lignes, l'OCR en comptait {}",
+    'log_ai_batch_debug_old_first': 'ANCIEN première ligne : {}',
+    'log_ai_batch_debug_new_first': 'NOUVEAU première ligne : {}',
+    'log_ai_batch_debug_all': 'NOUVEAU toutes les lignes : {}',
     'msg_ai_cancelled': 'Révision annulée.',
     'ai_status_start_free_ocr': 'Starte freie KI-OCR: {}',
     'ai_status_step1_title': '1/3 Zeilenweise Box-OCR: {}',
-    'ai_status_step1_line': '1/3 Box-OCR Zeile {}/{}: {}',
+    'ai_status_step1_line': '1/3 OCR de boîte, ligne {}/{} : {}',
     'ai_status_step2_form': '2/3 Block-Kontext-OCR (Formularmodus): {}',
     'ai_status_step2_plain': '2/3 Block-Kontext-OCR: {}',
-    'ai_status_step2_chunk': '2/3 Block-Kontext {}/{}: Zeilen {}-{}',
-    'ai_status_step3_merge': '3/3 Merge: Box primär, Page nur wenn lokal konsistent: {}',
-    'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
-    'ai_err_bad_scheme': 'Nicht unterstütztes Schema: {}',
-    'ai_err_invalid_endpoint': 'Ungültiger Endpoint.',
-    'ai_err_timeout': 'Zeitüberschreitung beim Warten auf LM Server.',
-    'ai_err_invalid_json': 'Ungültige JSON-Antwort von LM Server: {}',
+    'ai_status_step2_chunk': '2/3 Contexte de bloc {}/{} : lignes {}-{}',
+    'ai_status_step3_merge': '3/3 Fusion : boîte prioritaire, page seulement si cohérente localement : {}',
+    'ai_status_done': 'Révision IA terminée : {}',
+    'ai_err_bad_scheme': 'Schéma non pris en charge : {}',
+    'ai_err_invalid_endpoint': 'Endpoint invalide.',
+    'ai_err_timeout': "Délai d'attente dépassé pour le serveur LM.",
+    'ai_err_invalid_json': 'Réponse JSON invalide du serveur LM : {}',
     'ai_err_http': (
-        'HTTP-Fehler: {}\n{}'
+        'Erreur HTTP : {}\n{}'
 ),
-    'ai_err_server_unreachable': 'LM Server nicht erreichbar: {}',
+    'ai_err_server_unreachable': 'Serveur LM injoignable : {}',
     'ai_err_no_choices': (
-        'LM Server lieferte keine choices. Antwort:\n{}'
+        "Le serveur LM n'a renvoyé aucun élément « choices ». Réponse :\n{}"
 ),
-    'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder verwende ein nicht-thinkendes Modell.',
-    'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne reasoning.',
+    'ai_err_reasoning_truncated': "Le modèle n'a renvoyé que reasoning_content et a été tronqué avant la réponse JSON proprement dite (finish_reason=length). Augmentez max_tokens ou utilisez un modèle non « thinking ».",
+    'ai_err_reasoning_only': "Le modèle n'a renvoyé que reasoning_content, sans contenu normal. Utilisez de préférence un modèle non « thinking » ou forcez une sortie text/json sans reasoning.",
     'ai_err_no_content': 'LM Server lieferte keinen verwertbaren Antwortinhalt.',
     'ai_err_page_invalid_json': (
-        'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}'
+        "L'OCR de page n'a pas renvoyé d'objet JSON valide.\n\nContenu extrait :\n{}"
 ),
     'ai_err_page_invalid_lines': (
-        "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}"
+        "L'OCR de page n'a pas renvoyé de champ 'lines' valide.\n\nContenu extrait :\n{}"
 ),
-    'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
-    'ai_err_page_no_usable_lines': 'Seiten-OCR lieferte keine verwertbaren Zeilen: {}/{}',
+    'ai_err_page_long_blocks': "L'OCR de page a probablement fusionné plusieurs lignes cibles en longs blocs.",
+    'ai_err_page_no_usable_lines': "L'OCR de page n'a renvoyé aucune ligne exploitable : {}/{}",
     'ai_err_block_invalid_json': (
-        'Block-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}'
+        "L'OCR de bloc n'a pas renvoyé d'objet JSON valide.\n\nContenu extrait :\n{}"
 ),
     'ai_err_block_invalid_lines': (
-        "Block-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}"
+        "L'OCR de bloc n'a pas renvoyé de champ 'lines' valide.\n\nContenu extrait :\n{}"
 ),
-    'ai_err_final_merge_count': 'Finale Merge-Ausgabe gab {} statt {} Zeilen zurück.',
+    'ai_err_final_merge_count': 'La fusion finale a renvoyé {} lignes au lieu de {}.',
     'help_html_quick': (
         '\n    <div class="card warn">\n        <div class="h1">Déroulement</div>\n    </div>\n\n    <div class="card">\n        <ol>\n            <li>Charger une image ou un PDF</li>\n            <li>Optionnel : utiliser l’édition d’image comme préparation</li>\n            <li>Charger le modèle de reconnaissance</li>\n            <li>Charger le modèle de segmentation</li>\n            <li>Démarrer Kraken OCR</li>\n            <li>Vérifier les lignes détectées et les corriger si nécessaire</li>\n            <li>Optionnel : utiliser la révision LM ou Whisper</li>\n            <li>Exporter le résultat en TXT, CSV, JSON, ALTO, hOCR ou PDF</li>\n        </ol>\n    </div>\n\n    <div class="card">\n        <div class="h2">Préparation</div>\n        <span class="badge">Optionnel</span>\n        <ul>\n            <li>L’édition d’image peut déjà être utilisée <b>avant</b> l’OCR lorsqu’un scan est mal recadré, trop peu contrasté ou contient trop d’éléments autour du contenu utile.</li>\n            <li>Les outils les plus utiles ici sont la <b>zone de recadrage</b>, la <b>barre de séparation</b>, le mode <b>gris</b>, le <b>contraste</b> et le <b>smart splitting</b>.</li>\n            <li>Cela permet de préparer précisément des doubles pages, des moitiés de formulaires, des marges ou du contenu voisin gênant avant le passage OCR proprement dit.</li>\n            <li>C’est particulièrement utile pour les dossiers, les formulaires, les scans groupés et les fonds d’archives mal numérisés.</li>\n        </ul>\n    </div>\n\n    <div class="card">\n        <div class="h2">Post-traitement</div>\n        <span class="badge">Opti'
         'onnel</span>\n        <ul>\n            <li>Charger un modèle LM via LM Studio ou un autre serveur LM compatible</li>\n            <li>Lisser les lignes OCR sur le plan linguistique ou sémantique avec un modèle de langage local</li>\n            <li>Réenregistrer des lignes individuelles au microphone avec Faster-Whisper</li>\n            <li>Importer des lignes depuis TXT ou JSON</li>\n        </ul>\n    </div>\n\n    <div class="card">\n        <div class="h2">Boîtes d’overlay &amp; lignes</div>\n        <span class="badge">Optionnel</span>\n        <ul>\n            <li>Les lignes et les boîtes d’overlay peuvent être déplacées, divisées, ajoutées ou supprimées.</li>\n            <li>Cela permet d’améliorer de manière ciblée la structure des lignes avant un nouveau passage OCR.</li>\n            <li>Particulièrement utile pour les formulaires, les mises en page en colonnes et les écritures manuscrites mal segmentées.</li>\n        </ul>\n    </div>\n\n    <div class="card">\n        <div class="h2">Que fait Bottled Kraken&nbsp;?</div><br>\n        Bottled Kraken combine l’OCR classique avec une préparation par édition d’image, un post-traitement manuel et une assistance IA locale optionnelle.\n        Cela permet d’améliorer pas à pas des imprimés historiques difficiles, des manuscrits ou des pages de formulaires.\n    </div>\n'

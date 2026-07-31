@@ -1,3 +1,5 @@
+from bottled_kraken.runtime_logging import get_logger
+
 from bottled_kraken.common import (
     List,
     QThread,
@@ -47,6 +49,9 @@ class ExportWorker(QThread):
                 self.render_callback(dest_path, self.fmt, it)
                 self.file_done.emit(it.display_name, dest_path, i, total)
             except Exception as e:
+                get_logger("workers.export").exception(
+                    "Export failed for %s -> %s", it.display_name, dest_path
+                )
                 self.file_error.emit(it.display_name, str(e), i, total)
             self.progress_changed.emit(int((i / total) * 100))
         self.status_changed.emit(self._tr("export_status_done"))
@@ -107,6 +112,9 @@ class CombinedPDFExportWorker(QThread):
             self.status_changed.emit(self._tr("pdf_export_status_done"))
             self.pdf_done.emit(self.dest_path, total)
         except Exception as e:
+            get_logger("workers.export").exception(
+                "Combined PDF export failed: %s", self.dest_path
+            )
             self.export_error.emit(str(e))
         finally:
             self.finished_batch.emit()

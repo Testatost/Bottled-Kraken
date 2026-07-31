@@ -200,18 +200,18 @@ def write_positioned_docx(path, item, export_image, record_views):
     content_height = max(1.0, max_y - min_y)
     document = Document()
     section = document.sections[0]
-    section.page_width = Inches(8.27)
-    section.page_height = Inches(11.69)
+    _page_w_in, _page_h_in = bk_page_size_inches(False, None)
+    section.page_width = Inches(_page_w_in)
+    section.page_height = Inches(_page_h_in)
     margin_in = 0.28
     section.left_margin = section.right_margin = Inches(margin_in)
     section.top_margin = section.bottom_margin = Inches(margin_in)
-    usable_width_pt = (8.27 - margin_in * 2.0) * 72.0
-    usable_height_pt = (11.69 - margin_in * 2.0) * 72.0
+    usable_width_pt = (_page_w_in - margin_in * 2.0) * 72.0
+    usable_height_pt = (_page_h_in - margin_in * 2.0) * 72.0
     scale = min(usable_width_pt / content_width, usable_height_pt / content_height)
     offset_x_pt = (usable_width_pt - content_width * scale) / 2.0
     offset_y_pt = (usable_height_pt - content_height * scale) / 2.0
     font_size = 6.0
-    median_height = _median_height(records)
     try:
         normal_style = document.styles["Normal"]
         normal_style.font.name = "Consolas"
@@ -245,15 +245,20 @@ def write_positioned_docx(path, item, export_image, record_views):
     filler = document.add_paragraph()
     _run_font(filler.add_run(" "), 1.0)
     document.save(path)
+from bottled_kraken.export_page_setup import (
+    bk_page_size_cm,
+    bk_page_size_inches,
+    bk_xlsx_page_setup_xml,
+    bk_odf_orientation_name,
+)
+
+
 def _odt_xml_text(value: Any) -> str:
     return html.escape(str(value or ""), quote=False)
-def _odt_file_xml(name: str, data: str) -> bytes:
-    return data.encode("utf-8")
 def _odt_content_xml(records, page_width, page_height, min_x, min_y, max_x, max_y):
     content_width = max(1.0, max_x - min_x)
     content_height = max(1.0, max_y - min_y)
-    page_w_cm = 21.0
-    page_h_cm = 29.7
+    page_w_cm, page_h_cm = bk_page_size_cm(False, None)
     margin_cm = 0.7
     usable_w_cm = page_w_cm - margin_cm * 2.0
     usable_h_cm = page_h_cm - margin_cm * 2.0
@@ -261,7 +266,6 @@ def _odt_content_xml(records, page_width, page_height, min_x, min_y, max_x, max_
     offset_x = (usable_w_cm - content_width * scale) / 2.0
     offset_y = (usable_h_cm - content_height * scale) / 2.0
     frames = []
-    median_height = _median_height(records)
     for index, record in enumerate(records, start=1):
         if not record.get("bbox"):
             continue
@@ -312,7 +316,7 @@ def _odt_styles_xml() -> str:
         'office:version="1.2">',
         '<office:font-face-decls><style:font-face style:name="Calibri" svg:font-family="Calibri"/></office:font-face-decls>',
         '<office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="6pt" style:font-name="Consolas"/></style:default-style></office:styles>',
-        '<office:automatic-styles><style:page-layout style:name="BkPageLayout"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="0.7cm" fo:margin-bottom="0.7cm" fo:margin-left="0.7cm" fo:margin-right="0.7cm"/></style:page-layout></office:automatic-styles>',
+        '<office:automatic-styles><style:page-layout style:name="BkPageLayout"><style:page-layout-properties fo:page-width="%.1fcm" fo:page-height="%.1fcm" style:print-orientation="%s" fo:margin-top="0.7cm" fo:margin-bottom="0.7cm" fo:margin-left="0.7cm" fo:margin-right="0.7cm"/></style:page-layout></office:automatic-styles>' % (bk_page_size_cm(False, None) + (bk_odf_orientation_name(False, None),)),
         '<office:master-styles><style:master-page style:name="Standard" style:page-layout-name="BkPageLayout"/></office:master-styles>',
         '</office:document-styles>'
     ])
@@ -391,46 +395,9 @@ def _xlsx_col_name(index):
 def _xml(value):
     return html.escape(str(value or ""), quote=True)
 
-def _merge_numeric_edges(values, minimum, maximum, tolerance):
-    raw = [float(minimum), float(maximum)]
-    raw.extend(float(value) for value in values if value is not None)
-    raw = [max(float(minimum), min(float(maximum), value)) for value in raw]
-    raw = sorted(raw)
-    merged = []
-    for value in raw:
-        if not merged or abs(value - merged[-1]) > tolerance:
-            merged.append(value)
-        else:
-            merged[-1] = (merged[-1] + value) / 2.0
-    if len(merged) < 2:
-        merged = [float(minimum), float(maximum)]
-    if merged[0] > float(minimum) + tolerance:
-        merged.insert(0, float(minimum))
-    else:
-        merged[0] = float(minimum)
-    if merged[-1] < float(maximum) - tolerance:
-        merged.append(float(maximum))
-    else:
-        merged[-1] = float(maximum)
-    cleaned = [merged[0]]
-    for value in merged[1:]:
-        if value > cleaned[-1] + 0.5:
-            cleaned.append(value)
-    if len(cleaned) < 2:
-        cleaned = [float(minimum), float(maximum)]
-    return cleaned
 
-def _nearest_edge_index(edges, value):
-    value = float(value)
-    return min(range(len(edges)), key=lambda index: abs(edges[index] - value))
 
-def _column_width_from_pixels(pixels, scale):
-    width = max(0.35, float(pixels) * float(scale) / 5.25)
-    return min(28.0, width)
 
-def _row_height_from_pixels(pixels, scale):
-    height = max(3.0, float(pixels) * float(scale))
-    return min(80.0, height)
 
 def _spreadsheet_layout(records, image_size=None):
     records = [record for record in records or [] if _clean_text(record.get("text", ""))]
@@ -530,9 +497,6 @@ def _spreadsheet_layout(records, image_size=None):
         row_heights = [18.0]
     return row_count, col_count, cells, merges, col_widths, row_heights
 
-def _spreadsheet_grid(records, image_size=None, columns=120):
-    row_count, col_count, cells, _merges, _col_widths, _row_heights = _spreadsheet_layout(records, image_size)
-    return row_count, col_count, cells
 
 def _xlsx_content_types():
     return ''.join([
@@ -621,7 +585,7 @@ def _xlsx_sheet_xml(row_count, col_count, cells, merges=None, col_widths=None, r
         '<sheetData>', ''.join(rows_xml), '</sheetData>',
         merge_xml,
         '<pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0" footer="0"/>',
-        '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/>',
+        bk_xlsx_page_setup_xml(False, None),
         '</worksheet>'
     ])
 

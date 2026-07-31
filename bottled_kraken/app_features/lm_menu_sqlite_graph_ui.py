@@ -172,9 +172,9 @@ def _bk_export_sqlite_json(self):
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_sqlite.json"
     path, _ = QFileDialog.getSaveFileName(
         self,
-        _bk_fix36_tr(self, "dlg_sqlite_json_title", "SQLite-json speichern"),
+        _bk_fix36_tr(self, "dlg_sqlite_json_title"),
         os.path.join(start_dir, default_name),
-        _bk_fix36_tr(self, "filter_json_files", "JSON (*.json);;All Files (*)"),
+        _bk_fix36_tr(self, "filter_json_files"),
     )
     if not path:
         return
@@ -184,7 +184,7 @@ def _bk_export_sqlite_json(self):
         json.dump(payload, fh, ensure_ascii=False, indent=2)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_sqlite_export_done", "SQLite-json exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 def _bk_ui_connect_action_once(action, slot):
@@ -275,9 +275,7 @@ def _bk_lm_update_dropdown_state(self):
         self.act_ai_menu_canonical.setEnabled(bool(task) and not busy)
     if hasattr(self, "act_ai_menu_canonical_load"):
         self.act_ai_menu_canonical_load.setEnabled(not busy)
-_BK_UI_PREV_MAINWINDOW_INIT = MainWindow.__init__
 def _bk_ui_mainwindow_init(self, *args, **kwargs):
-    _BK_UI_PREV_MAINWINDOW_INIT(self, *args, **kwargs)
     try:
         if str(getattr(self, "overlay_display_mode", "all") or "all").lower() not in {"none", "current", "selected", "all"}:
             self.overlay_display_mode = "all"
@@ -289,9 +287,7 @@ def _bk_ui_mainwindow_init(self, *args, **kwargs):
         _bk_ui_ensure_lm_menu_order(self)
     except Exception:
         pass
-_BK_UI_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_ui_retranslate_ui(self, *args, **kwargs):
-    _BK_UI_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_ui_rebuild_overlay_menu(self)
         _bk_ui_ensure_overlay_resize_in_edit_menu(self)
@@ -303,13 +299,12 @@ try:
     MainWindow._set_overlay_display_mode = _bk_ui_set_overlay_display_mode
     MainWindow._bk_export_sqlite_json = _bk_export_sqlite_json
     MainWindow.bk_export_sqlite_persons = _bk_export_sqlite_json
-    MainWindow.__init__ = _bk_ui_mainwindow_init
-    MainWindow.retranslate_ui = _bk_ui_retranslate_ui
+    from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
+    register_init_delta(_bk_ui_mainwindow_init)
+    register_retranslate_delta(_bk_ui_retranslate_ui)
 except Exception:
     pass
 __all__ = [
-    '_BK_UI_PREV_MAINWINDOW_INIT',
-    '_BK_UI_PREV_RETRANSLATE',
     '_BK_UI_PREV_UPDATE_DROPDOWN_STATE',
     '_bk_export_sqlite_json',
     '_bk_lm_update_dropdown_state',

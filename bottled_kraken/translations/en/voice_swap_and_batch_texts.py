@@ -29,7 +29,7 @@ EN_VOICE_SWAP_AND_BATCH_TEXTS_TRANSLATIONS = {
     'warn_whisper_model_not_loaded': "No loaded Whisper model is active. Please choose a model under 'Whisper options'.",
     'warn_no_microphone_available': 'No microphone is available.',
     'log_voice_stopping': 'Stopping voice recording...',
-    'image_edit_title': 'Image editing',
+    'image_edit_title': 'Image editing – {}',
     'image_edit_erase_rect': 'Remove area (rectangle)',
     'image_edit_erase_ellipse': 'Remove area (circle)',
     'image_edit_erase_clear': 'Delete selection (Del)',
@@ -69,39 +69,39 @@ EN_VOICE_SWAP_AND_BATCH_TEXTS_TRANSLATIONS = {
         'No import file matches the loaded images.\n\nThe filenames must match by base name.'
 ),
     'log_import_error': 'Import error: {} -> {}',
-    'log_voice_import_started': 'Sprachimport gestartet: {} | Zeile {} | Mikrofon: {} | Modell: {}',
-    'warn_voice_cancelled': 'Aufnahme abgebrochen.',
-    'warn_voice_not_finished': 'Aufnahme wurde nicht regulär beendet.',
+    'log_voice_import_started': 'Voice import started: {} | line {} | microphone: {} | model: {}',
+    'warn_voice_cancelled': 'Recording cancelled.',
+    'warn_voice_not_finished': 'Recording did not finish normally.',
     'warn_voice_no_audio_data': 'Keine Audiodaten aufgenommen.',
-    'voice_status_prepare_wav': 'Audiodatei wird vorbereitet...',
+    'voice_status_prepare_wav': 'Preparing audio file...',
     'voice_status_load_whisper': 'Lade faster-whisper...',
-    'voice_status_transcribe_line': 'Transkribiere ausgewählte Zeile lokal ({}/{})...',
-    'voice_status_fallback_cpu': 'Initialisierung auf {}/{} fehlgeschlagen. Neuer Versuch mit CPU/int8 …',
+    'voice_status_transcribe_line': 'Transcribing selected line locally ({}/{})...',
+    'voice_status_fallback_cpu': 'Initialization on {}/{} failed. Retrying with CPU/int8 …',
     'voice_status_finalize': 'Bereite Text auf...',
-    'voice_status_microphone_active': "Mikrofon aktiv … bitte sprechen. Zum Beenden 'Aufnahme stoppen' klicken.",
-    'voice_status_input_device': 'Aufnahmegerät: {}',
+    'voice_status_microphone_active': "Microphone active … please speak. Click 'Stop recording' to finish.",
+    'voice_status_input_device': 'Recording device: {}',
     'audio_device_default_mic': 'Systemstandard-Mikrofon',
-    'audio_device_generic': 'Gerät {}',
+    'audio_device_generic': 'Device {}',
     'whisper_status_model': 'Modell: {}',
     'whisper_status_mic': 'Mikrofon: {}',
     'whisper_status_path': 'Pfad: {}',
-    'dlg_whisper_model_dir': 'Whisper-Modellordner wählen',
+    'dlg_whisper_model_dir': 'Select Whisper model folder',
     'msg_whisper_path_set': 'Whisper-Pfad gesetzt: {}',
     'warn_whisper_model_present': (
-        'Das Faster-Whisper large-v3 Modell ist bereits vorhanden.\n\nPfad:\n{}\n\nEin erneuter Download ist nicht nötig.'
+        'The Faster-Whisper large-v3 model is already present.\n\nPath:\n{}\n\nA new download is not necessary.'
 ),
     'msg_whisper_model_already_present': 'Whisper-Modell bereits vorhanden: {}',
     'warn_whisper_download_start_failed': (
-        'Download des Whisper-Modells konnte nicht gestartet werden:\n{}'
+        'Whisper model download could not be started:\n{}'
 ),
-    'msg_whisper_download_start_failed': 'Whisper-Download konnte nicht gestartet werden.',
+    'msg_whisper_download_start_failed': 'Whisper download could not be started.',
     'msg_whisper_model_loaded': 'Whisper-Modell geladen: {}',
     'info_whisper_model_downloaded': (
         'Das Faster-Whisper-Modell wurde erfolgreich heruntergeladen.\n\nZielordner:\n{}'
 ),
-    'msg_whisper_download_failed': 'Whisper-Download fehlgeschlagen.',
+    'msg_whisper_download_failed': 'Whisper download failed.',
     'warn_whisper_download_failed': (
-        'Download des Whisper-Modells fehlgeschlagen:\n{}'
+        'Whisper model download failed:\n{}'
 ),
     'dlg_help_title': 'Hinweise',
     'help_nav_quick': 'Workflow',
@@ -182,29 +182,29 @@ EN_VOICE_SWAP_AND_BATCH_TEXTS_TRANSLATIONS = {
     'btn_ai_script_mixed': 'Mixed script',
     'dlg_ai_connecting': 'Connecting to local LM server…',
     'dlg_ai_single_title': 'AI line revision',
-    'dlg_ai_single_status': 'Überarbeite nur Zeile {} …',
-    'msg_ai_single_started': 'LM-Überarbeitung für Zeile {} gestartet...',
-    'log_ai_single_started': 'LM-Zeilenüberarbeitung gestartet: {} | Zeile {}',
-    'msg_ai_multi_done': 'LM-Überarbeitung für {} ausgewählte Zeilen abgeschlossen.',
-    'log_ai_multi_done': 'LM-Mehrfachzeilenüberarbeitung abgeschlossen: {} | Zeilen {}',
-    'msg_ai_multi_cancelled': 'Mehrfachzeilenüberarbeitung abgebrochen.',
-    'log_ai_multi_cancelled': 'LM-Mehrfachzeilenüberarbeitung abgebrochen: {}',
-    'msg_ai_multi_failed': 'Mehrfachzeilenüberarbeitung fehlgeschlagen.',
-    'log_ai_multi_failed': 'LM-Mehrfachzeilenüberarbeitung Fehler: {} -> {}',
+    'dlg_ai_single_status': 'Revising only line {} …',
+    'msg_ai_single_started': 'LM revision for line {} started...',
+    'log_ai_single_started': 'LM line revision started: {} | line {}',
+    'msg_ai_multi_done': 'LM revision finished for {} selected lines.',
+    'log_ai_multi_done': 'LM multi-line revision finished: {} | lines {}',
+    'msg_ai_multi_cancelled': 'Multi-line revision cancelled.',
+    'log_ai_multi_cancelled': 'LM multi-line revision cancelled: {}',
+    'msg_ai_multi_failed': 'Multi-line revision failed.',
+    'log_ai_multi_failed': 'LM multi-line revision error: {} -> {}',
     'msg_ai_batch_finished': 'AI batch finished.',
-    'log_ai_batch_debug_return': 'KI Batch Rückgabe für {}: {} Zeilen, OCR hatte {} Zeilen',
-    'log_ai_batch_debug_old_first': 'ALT erste Zeile: {}',
-    'log_ai_batch_debug_new_first': 'NEU erste Zeile: {}',
-    'log_ai_batch_debug_all': 'NEU alle Zeilen: {}',
+    'log_ai_batch_debug_return': 'AI batch return for {}: {} lines, OCR had {} lines',
+    'log_ai_batch_debug_old_first': 'OLD first line: {}',
+    'log_ai_batch_debug_new_first': 'NEW first line: {}',
+    'log_ai_batch_debug_all': 'NEW all lines: {}',
     'msg_ai_cancelled': 'Revision cancelled.',
     'ai_status_start_free_ocr': 'Starte freie KI-OCR: {}',
     'ai_status_step1_title': '1/3 Zeilenweise Box-OCR: {}',
-    'ai_status_step1_line': '1/3 Box-OCR Zeile {}/{}: {}',
+    'ai_status_step1_line': '1/3 Box OCR line {}/{}: {}',
     'ai_status_step2_form': '2/3 Block-Kontext-OCR (Formularmodus): {}',
     'ai_status_step2_plain': '2/3 Block-Kontext-OCR: {}',
-    'ai_status_step2_chunk': '2/3 Block-Kontext {}/{}: Zeilen {}-{}',
-    'ai_status_step3_merge': '3/3 Merge: Box primär, Page nur wenn lokal konsistent: {}',
-    'ai_status_done': 'KI-Überarbeitung abgeschlossen: {}',
+    'ai_status_step2_chunk': '2/3 Block context {}/{}: lines {}-{}',
+    'ai_status_step3_merge': '3/3 Merge: box primary, page only if locally consistent: {}',
+    'ai_status_done': 'AI revision finished: {}',
     'ai_err_bad_scheme': 'Unsupported scheme: {}',
     'ai_err_invalid_endpoint': 'Invalid endpoint.',
     'ai_err_timeout': 'Timeout while waiting for LM server.',
@@ -214,26 +214,26 @@ EN_VOICE_SWAP_AND_BATCH_TEXTS_TRANSLATIONS = {
 ),
     'ai_err_server_unreachable': 'LM server not reachable: {}',
     'ai_err_no_choices': (
-        'LM server lieferte keine choices. Antwort:\n{}'
+        'LM server returned no choices. Response:\n{}'
 ),
-    'ai_err_reasoning_truncated': 'Das Modell hat nur reasoning_content geliefert und wurde vor der eigentlichen JSON-Antwort abgeschnitten (finish_reason=length). Erhöhe max_tokens oder verwende ein nicht-thinkendes Modell.',
-    'ai_err_reasoning_only': 'Das Modell hat nur reasoning_content geliefert, aber keinen normalen content. Verwende am besten ein nicht-thinkendes Modell oder erzwinge text/json ohne reasoning.',
+    'ai_err_reasoning_truncated': 'The model returned only reasoning_content and was cut off before the actual JSON answer (finish_reason=length). Increase max_tokens or use a non-thinking model.',
+    'ai_err_reasoning_only': 'The model returned only reasoning_content but no regular content. Preferably use a non-thinking model or force text/json output without reasoning.',
     'ai_err_no_content': 'LM server returned no usable response content.',
     'ai_err_page_invalid_json': (
-        'Seiten-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}'
+        'Page OCR did not return a valid JSON object.\n\nExtracted content:\n{}'
 ),
     'ai_err_page_invalid_lines': (
-        "Seiten-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}"
+        "Page OCR did not return a valid 'lines' field.\n\nExtracted content:\n{}"
 ),
-    'ai_err_page_long_blocks': 'Seiten-OCR hat vermutlich mehrere Zielzeilen zu langen Blöcken zusammengezogen.',
-    'ai_err_page_no_usable_lines': 'Seiten-OCR lieferte keine verwertbaren Zeilen: {}/{}',
+    'ai_err_page_long_blocks': 'Page OCR probably merged several target lines into long blocks.',
+    'ai_err_page_no_usable_lines': 'Page OCR returned no usable lines: {}/{}',
     'ai_err_block_invalid_json': (
-        'Block-OCR lieferte kein gültiges JSON-Objekt.\n\nExtrahierter Content:\n{}'
+        'Block OCR did not return a valid JSON object.\n\nExtracted content:\n{}'
 ),
     'ai_err_block_invalid_lines': (
-        "Block-OCR lieferte kein gültiges Feld 'lines'.\n\nExtrahierter Content:\n{}"
+        "Block OCR did not return a valid 'lines' field.\n\nExtracted content:\n{}"
 ),
-    'ai_err_final_merge_count': 'Finale Merge-Ausgabe gab {} statt {} Zeilen zurück.',
+    'ai_err_final_merge_count': 'Final merge output returned {} lines instead of {}.',
     'help_html_quick': (
         '\n            <div class="card warn">\n                <div class="h1">Workflow</div>\n            </div>\n\n            <div class="card">\n                <ol>\n                    <li>Load an image or PDF</li>\n                    <li>Optional: use image editing for preparation</li>\n                    <li>Load the recognition model</li>\n                    <li>Load the segmentation model</li>\n                    <li>Start Kraken OCR</li>\n                    <li>Check the recognized lines and correct them if needed</li>\n                    <li>Optional: use LM revision or Whisper</li>\n                    <li>Export the result as TXT, CSV, JSON, ALTO, hOCR, or PDF</li>\n                </ol>\n            </div>\n\n            <div class="card">\n                <div class="h2">Preparation</div>\n                <span class="badge">Optional</span>\n                <ul>\n                    <li>Image editing can already be used <b>before</b> OCR if a scan is poorly cropped, too low in contrast, or contains too much surrounding content.</li>\n                    <li>The most useful tools here are <b>crop area</b>, <b>separator bar</b>, <b>gray</b>, <b>contrast</b>, and <b>smart splitting</b>.</li>\n                    <li>This makes it easier to prepare double pages, form halves, margins, or distracting neighboring content before the actual OCR pass.</li>\n                    <li>It is especially helpful for record pages, forms, batch scans, and badly digitized archival material.</li>\n                </ul>\n            </div>\n\n            <div class="card">\n                <div class="h2">Post-'
         'processing</div>\n                <span class="badge">Optional</span>\n                <ul>\n                    <li>Load an LM model via LM Studio or another compatible LM server</li>\n                    <li>Smooth OCR lines linguistically or semantically with a local language model</li>\n                    <li>Re-record individual lines with Faster-Whisper through the microphone</li>\n                    <li>Import lines from TXT or JSON</li>\n                </ul>\n            </div>\n\n            <div class="card">\n                <div class="h2">Overlay boxes &amp; lines</div>\n                <span class="badge">Optional</span>\n                <ul>\n                    <li>Lines and overlay boxes can be moved, split, added, or deleted.</li>\n                    <li>This allows the line structure to be improved in a targeted way before running OCR again.</li>\n                    <li>Especially useful for forms, column layouts, and badly segmented handwriting.</li>\n                </ul>\n            </div>\n\n            <div class="card">\n                <div class="h2">What does Bottled Kraken do?</div><br>\n                Bottled Kraken combines classic OCR with preparatory image editing, manual post-processing, and optional local AI support.\n                This lets you improve difficult historical prints, handwriting, or form pages step by step.\n            </div>\n        '

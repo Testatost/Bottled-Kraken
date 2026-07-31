@@ -2,16 +2,12 @@ from bottled_kraken.common import _help_html
 from bottled_kraken.common import (
     Dict,
     Optional,
-    QMessageBox,
     QTextBrowser,
     QThread,
     QTimer,
     Signal,
     html,
     isValid,
-)
-from bottled_kraken.workers import (
-    clear_external_ocr_backend_cache,
 )
 class HardwareSnapshotWorker(QThread):
     done = Signal(dict)
@@ -21,11 +17,7 @@ class HardwareSnapshotWorker(QThread):
         self.owner = owner
     def run(self):
         try:
-            try:
-                clear_external_ocr_backend_cache()
-            except Exception:
-                pass
-            snapshot = self.owner._hardware_snapshot(refresh_backends=True)
+            snapshot = self.owner._hardware_snapshot()
             self.done.emit(snapshot)
         except Exception as exc:
             self.failed.emit(repr(exc))
@@ -45,14 +37,9 @@ class MainWindowHardwareStatusMixin:
                 f'                <div class="small" style="margin-top:8px;">{self._tr("help_hw_check_background")}</div>\n'
                 '            </div>\n'
             )
-        def _build_hardware_requirements_help_html(self, hw: Optional[Dict[str, object]] = None, *, refresh_backends: bool = False) -> str:
+        def _build_hardware_requirements_help_html(self, hw: Optional[Dict[str, object]] = None) -> str:
             if hw is None:
-                try:
-                    if refresh_backends:
-                        clear_external_ocr_backend_cache()
-                except Exception:
-                    pass
-                hw = self._hardware_snapshot(refresh_backends=refresh_backends)
+                hw = self._hardware_snapshot()
             kraken_level, kraken_key = self._hardware_feature_status(hw, "kraken")
             lm_level, lm_key = self._hardware_feature_status(hw, "lm")
             whisper_level, whisper_key = self._hardware_feature_status(hw, "whisper")
@@ -64,6 +51,44 @@ class MainWindowHardwareStatusMixin:
             ram_gb = float(hw.get("ram_gb", 0.0) or 0.0)
             gpu_label = html.escape(str(hw.get("gpu_label", self._tr("help_hw_gpu_none"))))
             gpu_vram_text = html.escape(str(hw.get("gpu_vram_text", self._tr("help_hw_vram_unknown"))))
+            gpu_devices = hw.get("gpu_devices", [])
+            gpu_rows = ""
+            if isinstance(gpu_devices, list) and gpu_devices:
+                rows = []
+                for index, device in enumerate(gpu_devices, 1):
+                    if not isinstance(device, dict):
+                        continue
+                    name = html.escape(str(device.get("name", "") or self._tr("help_hw_unknown")))
+                    driver_name = str(device.get("driver_name", "") or "").strip()
+                    driver_version = str(device.get("driver_version", "") or "").strip()
+                    driver_parts = [part for part in (driver_name, driver_version) if part]
+                    if bool(device.get("driver_loaded", False)):
+                        driver_text = " ".join(driver_parts) or self._tr("help_hw_unknown")
+                    else:
+                        driver_text = self._tr("help_hw_driver_missing")
+                    try:
+                        vram_bytes = int(device.get("vram_bytes", 0) or 0)
+                    except Exception:
+                        vram_bytes = 0
+                    vram_text = (
+                        self._tr("help_hw_fmt_gb", round(vram_bytes / (1024 ** 3), 1))
+                        if vram_bytes > 0
+                        else self._tr("help_hw_vram_unknown")
+                    )
+                    details = (
+                        f'{html.escape(self._tr("help_hw_label_driver"))}: {html.escape(driver_text)}'
+                        f' · {html.escape(self._tr("help_hw_label_vram"))}: {html.escape(vram_text)}'
+                    )
+                    rows.append(
+                        f'<tr><td><b>GPU {index}</b></td><td>{name}'
+                        f'<br><span class="small">{details}</span></td></tr>'
+                    )
+                gpu_rows = "".join(rows)
+            if not gpu_rows:
+                gpu_rows = (
+                    f'<tr><td><b>GPU</b></td><td>{gpu_label}</td></tr>'
+                    f'<tr><td><b>{self._tr("help_hw_label_vram")}</b></td><td>{gpu_vram_text}</td></tr>'
+                )
             kraken_text = self._tr(kraken_key)
             lm_text = self._tr(lm_key)
             whisper_text = self._tr(whisper_key)
@@ -84,8 +109,7 @@ class MainWindowHardwareStatusMixin:
                 f'                                <tr><td><b>CPU</b></td><td>{cpu_name}</td></tr>\n'
                 f'                                <tr><td><b>{self._tr("help_hw_label_threads")}</b></td><td>{cpu_threads}</td></tr>\n'
                 f'                                <tr><td><b>RAM</b></td><td>{self._tr("help_hw_fmt_gb", ram_gb)}</td></tr>\n'
-                f'                                <tr><td><b>GPU</b></td><td>{gpu_label}</td></tr>\n'
-                f'                                <tr><td><b>{self._tr("help_hw_label_vram")}</b></td><td>{gpu_vram_text}</td></tr>\n'
+                f'                                {gpu_rows}\n'
                 '                            </table>\n'
                 '                        </td>\n'
                 '                        <td style="width:30%; vertical-align:top;">\n'
@@ -137,10 +161,7 @@ class MainWindowHardwareStatusMixin:
             def _finish(hw: Dict[str, object]):
                 try:
                     if _browser_alive():
-                        html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(
-                            hw,
-                            refresh_backends=False,
-                        )
+                        html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(hw)
                         quick_browser.setHtml(_help_html(self.current_theme, html_text))
                 except Exception:
                     pass
@@ -148,9 +169,7 @@ class MainWindowHardwareStatusMixin:
             def _failed(_msg: str):
                 try:
                     if _browser_alive():
-                        html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html(
-                            refresh_backends=False,
-                        )
+                        html_text = self._tr("help_html_quick") + self._build_hardware_requirements_help_html()
                         quick_browser.setHtml(_help_html(self.current_theme, html_text))
                 except Exception:
                     pass
@@ -158,38 +177,3 @@ class MainWindowHardwareStatusMixin:
             worker.done.connect(_finish)
             worker.failed.connect(_failed)
             QTimer.singleShot(120, worker.start)
-        def _refresh_hw_menu_availability(self):
-            caps = self._gpu_capabilities()
-            for dev, act in self.hw_actions.items():
-                ok, detail = caps.get(dev, (False, ""))
-                if dev == "cpu":
-                    act.setEnabled(True)
-                    act.setToolTip(self._tr("msg_device_cpu"))
-                    continue
-                act.setEnabled(ok)
-                act.setToolTip(detail if detail else self._tr("msg_not_available"))
-            if self.device_str != "cpu":
-                ok, _ = caps.get(self.device_str, (False, ""))
-                if not ok:
-                    self.device_str = "cpu"
-                    if "cpu" in self.hw_actions:
-                        self.hw_actions["cpu"].setChecked(True)
-        def set_device(self, dev: str):
-            caps = self._gpu_capabilities()
-            ok, detail = caps.get(dev, (False, ""))
-            if not ok:
-                QMessageBox.warning(self, self._tr("warn_title"), self._tr("msg_hw_not_available"))
-                dev = "cpu"
-                ok, detail = caps.get("cpu", (True, "CPU"))
-            self.device_str = dev
-            if dev in self.hw_actions:
-                self.hw_actions[dev].setChecked(True)
-            if detail:
-                self.status_bar.showMessage(self._tr("msg_detected_gpu", detail))
-            else:
-                label_key = {
-                    "cpu": "msg_device_cpu",
-                    "cuda": "msg_device_cuda",
-                    "rocm": "msg_device_rocm",
-                }.get(dev, "msg_device_cpu")
-                self.status_bar.showMessage(self._tr("msg_device", self._tr(label_key)))

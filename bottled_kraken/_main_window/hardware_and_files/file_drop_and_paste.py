@@ -4,31 +4,10 @@ from bottled_kraken.common import (
     QDropEvent,
     QFileDialog,
     QMessageBox,
-    QThread,
-    Signal,
     is_supported_drop_or_paste_file,
     os,
     re,
 )
-from bottled_kraken.workers import (
-    clear_external_ocr_backend_cache,
-)
-class HardwareSnapshotWorker(QThread):
-    done = Signal(dict)
-    failed = Signal(str)
-    def __init__(self, owner):
-        super().__init__(owner)
-        self.owner = owner
-    def run(self):
-        try:
-            try:
-                clear_external_ocr_backend_cache()
-            except Exception:
-                pass
-            snapshot = self.owner._hardware_snapshot(refresh_backends=True)
-            self.done.emit(snapshot)
-        except Exception as exc:
-            self.failed.emit(repr(exc))
 class MainWindowFileDropAndPasteMixin:
         def dragEnterEvent(self, event: QDragEnterEvent):
             if not event.mimeData().hasUrls():

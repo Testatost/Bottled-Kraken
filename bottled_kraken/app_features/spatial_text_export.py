@@ -84,8 +84,6 @@ def _bk_fix38_spatial_text_from_recs(recs) -> str:
         return "\n".join(_bk_fix36_clean_text(x) for x in _bk_fix38_resolve_ditto_marks_in_lines([getattr(rv, "text", "") for rv in recs]) if _bk_fix36_clean_text(x)) + "\n"
     min_x = min(float(rv.bbox[0]) for rv in with_boxes)
     max_x = max(float(rv.bbox[2]) for rv in with_boxes)
-    min_y = min(float(rv.bbox[1]) for rv in with_boxes)
-    max_y = max(float(rv.bbox[3]) for rv in with_boxes)
     width_px = max(1.0, max_x - min_x)
     target_cols = max(90, min(220, int(width_px / 5.5)))
     px_per_col = max(1.0, width_px / float(target_cols))
@@ -130,7 +128,7 @@ def _bk_fix38_export_task_as_spatial_txt(self, task):
     out_text = _bk_fix38_spatial_text_from_recs(recs)
     default_name = _bk_fix38_default_export_name(task, ".txt")
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
-    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_txt_plain", "Text (.txt)"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_text_files", "Text Files (*.txt)"))
+    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_txt_plain"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_text_files"))
     if not path:
         return
     if not path.lower().endswith(".txt"):
@@ -139,7 +137,7 @@ def _bk_fix38_export_task_as_spatial_txt(self, task):
         fh.write(out_text)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done", "Table-layout export finished."), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done"), 5000)
     except Exception:
         pass
 def _bk_fix38_export_task_as_spatial_docx(self, task):
@@ -150,7 +148,7 @@ def _bk_fix38_export_task_as_spatial_docx(self, task):
     out_text = _bk_fix38_spatial_text_from_recs(recs)
     default_name = _bk_fix38_default_export_name(task, ".docx")
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
-    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_docx", "Word (.docx)"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_word_files", "Word Files (*.docx)"))
+    path, _ = QFileDialog.getSaveFileName(self, _bk_fix36_tr(self, "export_format_docx"), os.path.join(start_dir, default_name), _bk_fix36_tr(self, "filter_word_files"))
     if not path:
         return
     if not path.lower().endswith(".docx"):
@@ -176,7 +174,7 @@ def _bk_fix38_export_task_as_spatial_docx(self, task):
         return
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done", "Table-layout export finished."), 5000)
+        self.status_bar.showMessage(_bk_fix36_tr(self, "msg_origami_table_export_done"), 5000)
     except Exception:
         pass
 MainWindow.bk_export_origami_table_txt = lambda self: _bk_fix38_export_task_as_spatial_txt(self, _bk_fix36_current_task(self))
@@ -207,30 +205,12 @@ try:
     MainWindow._export_format_items = _bk_fix38_export_format_items
 except Exception:
     pass
-try:
-    _BK_FIX38_PREV_EXPORT_SINGLE_INTERACTIVE = MainWindow._export_single_interactive
-except Exception:
-    _BK_FIX38_PREV_EXPORT_SINGLE_INTERACTIVE = None
-def _bk_fix38_export_single_interactive(self, task, fmt, *args, **kwargs):
-    if _bk_fix38_is_standard_txt_docx(fmt):
-        if "docx" in str(fmt).lower() or str(fmt).lower() == "word":
-            return _bk_fix38_export_task_as_spatial_docx(self, task)
-        return _bk_fix38_export_task_as_spatial_txt(self, task)
-    if callable(_BK_FIX38_PREV_EXPORT_SINGLE_INTERACTIVE):
-        return _BK_FIX38_PREV_EXPORT_SINGLE_INTERACTIVE(self, task, fmt, *args, **kwargs)
-    return None
-if callable(_BK_FIX38_PREV_EXPORT_SINGLE_INTERACTIVE):
-    MainWindow._export_single_interactive = _bk_fix38_export_single_interactive
-_BK_FIX38_PREV_INIT = MainWindow.__init__
 def _bk_fix38_mainwindow_init(self, *args, **kwargs):
-    _BK_FIX38_PREV_INIT(self, *args, **kwargs)
     try:
         _bk_fix37_ensure_sqlite_menu_action(self)
     except Exception:
         pass
-_BK_FIX38_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_fix38_retranslate_ui(self, *args, **kwargs):
-    _BK_FIX38_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_fix37_ensure_sqlite_menu_action(self)
         if hasattr(self, "export_format_actions"):
@@ -243,8 +223,9 @@ def _bk_fix38_retranslate_ui(self, *args, **kwargs):
                         pass
     except Exception:
         pass
-MainWindow.__init__ = _bk_fix38_mainwindow_init
-MainWindow.retranslate_ui = _bk_fix38_retranslate_ui
+from bottled_kraken.common.chain_consolidation import register_init_delta, register_retranslate_delta
+register_init_delta(_bk_fix38_mainwindow_init)
+register_retranslate_delta(_bk_fix38_retranslate_ui)
 def _bk_fix38_cleanup_task_ditto(self, task=None):
     try:
         if task is None:
@@ -279,9 +260,7 @@ def _bk_fix38_remove_old_origami_actions(self):
                     self.export_menu.removeAction(act)
     except Exception:
         pass
-_BK_FIX38B_PREV_INIT = MainWindow.__init__
 def _bk_fix38b_mainwindow_init(self, *args, **kwargs):
-    _BK_FIX38B_PREV_INIT(self, *args, **kwargs)
     try:
         _bk_fix38_remove_old_origami_actions(self)
         _bk_fix38_ensure_lm_page_boxes_action(self)
@@ -289,24 +268,18 @@ def _bk_fix38b_mainwindow_init(self, *args, **kwargs):
         _bk_fix38_cleanup_task_ditto(self)
     except Exception:
         pass
-_BK_FIX38B_PREV_RETRANSLATE = MainWindow.retranslate_ui
 def _bk_fix38b_retranslate_ui(self, *args, **kwargs):
-    _BK_FIX38B_PREV_RETRANSLATE(self, *args, **kwargs)
     try:
         _bk_fix38_remove_old_origami_actions(self)
         _bk_fix38_ensure_lm_page_boxes_action(self)
         _bk_fix37_ensure_sqlite_menu_action(self)
     except Exception:
         pass
-MainWindow.__init__ = _bk_fix38b_mainwindow_init
-MainWindow.retranslate_ui = _bk_fix38b_retranslate_ui
+register_init_delta(_bk_fix38b_mainwindow_init)
+register_retranslate_delta(_bk_fix38b_retranslate_ui)
 __all__ = [
-    '_BK_FIX38B_PREV_INIT',
-    '_BK_FIX38B_PREV_RETRANSLATE',
     '_BK_FIX38_ATTACHED_DITTO_RE',
     '_BK_FIX38_DITTO_MARK_RE',
-    '_BK_FIX38_PREV_INIT',
-    '_BK_FIX38_PREV_RETRANSLATE',
     '_bk_fix36_resolve_ditto_marks_in_lines',
     '_bk_fix36_table_text_from_recs',
     '_bk_fix37_expand_ditto_text',
@@ -315,7 +288,6 @@ __all__ = [
     '_bk_fix38_default_export_name',
     '_bk_fix38_expand_ditto_text',
     '_bk_fix38_export_format_items',
-    '_bk_fix38_export_single_interactive',
     '_bk_fix38_export_task_as_spatial_docx',
     '_bk_fix38_export_task_as_spatial_txt',
     '_bk_fix38_is_standard_txt_docx',

@@ -1,4 +1,5 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
+from bottled_kraken.common.chain_consolidation import register_render_handler, RENDER_NOT_HANDLED
 seed_globals('bk', globals())
 from bottled_kraken.common import (
     QFileDialog,
@@ -36,6 +37,16 @@ try:
 except Exception:
     QGridLayout = None
     QGroupBox = None
+from bottled_kraken.export_page_setup import (
+    bk_get_export_orientation,
+    bk_set_export_orientation,
+    bk_resolve_landscape,
+    bk_resolve_portrait,
+    bk_page_size_cm,
+    bk_page_size_inches,
+    bk_xlsx_page_setup_xml,
+    bk_odf_orientation_name,
+)
 from bottled_kraken.export_layout import (
     _clean_text,
     _content_bounds,
@@ -74,8 +85,23 @@ def _bk_screen_available_geometry(widget=None):
     except Exception:
         app = None
     screen = None
+    # Zuerst den Bildschirm des Elternfensters verwenden. Vor dem ersten
+    # show() hat ein Dialog noch kein windowHandle und mapToGlobal liefert
+    # Koordinaten nahe (0,0) - auf Multi-Monitor-Systemen wurde der Dialog
+    # dadurch auf dem falschen (z. B. zweiten) Bildschirm platziert.
     try:
-        if widget is not None and hasattr(widget, "windowHandle"):
+        parent = widget.parentWidget() if widget is not None and hasattr(widget, "parentWidget") else None
+        if parent is not None:
+            top = parent.window() if hasattr(parent, "window") else parent
+            handle = top.windowHandle() if hasattr(top, "windowHandle") else None
+            if handle is not None and handle.screen() is not None:
+                screen = handle.screen()
+            elif hasattr(QApplication, "screenAt"):
+                screen = QApplication.screenAt(top.mapToGlobal(top.rect().center()))
+    except Exception:
+        screen = None
+    try:
+        if screen is None and widget is not None and hasattr(widget, "windowHandle"):
             handle = widget.windowHandle()
             if handle is not None:
                 screen = handle.screen()
@@ -102,6 +128,21 @@ def _bk_keep_dialog_inside_screen(dialog, margin=12):
     geom = _bk_screen_available_geometry(dialog)
     if geom is None:
         return
+    # Solange der Dialog noch nicht sichtbar war, wird er ueber dem
+    # Elternfenster zentriert. Ohne diese Zentrierung landete er auf
+    # Multi-Monitor-Systemen auf dem falschen Bildschirm.
+    try:
+        if not dialog.isVisible():
+            parent = dialog.parentWidget()
+            if parent is not None:
+                top = parent.window()
+                center = top.frameGeometry().center()
+                size = dialog.frameGeometry().size()
+                if size.width() <= 0 or size.height() <= 0:
+                    size = dialog.sizeHint()
+                dialog.move(int(center.x() - size.width() / 2), int(center.y() - size.height() / 2))
+    except Exception:
+        pass
     try:
         frame = dialog.frameGeometry()
         if frame.width() <= 0 or frame.height() <= 0:
@@ -131,23 +172,53 @@ def _bk_keep_dialog_inside_screen(dialog, margin=12):
         pass
 
 
+def _bk_dialog_content_min_size(dialog):
+    """Tatsaechlichen Mindestplatz des Dialoginhalts ermitteln.
+
+    Frueher wurde der Dialog hart auf feste Groessen (z. B. 560x300)
+    geklemmt. Sobald zusaetzliche Gruppen (etwa das Seitenformat)
+    hinzukamen, passte der Inhalt nicht mehr und Qt quetschte die
+    Darstellungs-Radiobuttons bis zur Unsichtbarkeit zusammen. Deshalb
+    duerfen Minimal-/Maximalgroessen nie unter den Layout-Mindestbedarf
+    fallen.
+    """
+    w = h = 0
+    try:
+        lay = dialog.layout()
+        if lay is not None:
+            ms = lay.totalMinimumSize()
+            w = max(w, int(ms.width()))
+            h = max(h, int(ms.height()))
+            sh = lay.totalSizeHint()
+            h = max(h, int(sh.height()))
+            w = max(w, int(sh.width()))
+    except Exception:
+        pass
+    try:
+        sh = dialog.sizeHint()
+        w = max(w, int(sh.width()))
+        h = max(h, int(sh.height()))
+    except Exception:
+        pass
+    return w, h
+
+
 def _bk_resize_export_dialog_for_mode(dialog, detailed=False, txt_only=False):
     geom = _bk_screen_available_geometry(dialog)
-    if txt_only:
-        target_w, target_h = 520, 220
+    if txt_only or not detailed:
+        target_w, target_h = (520, 220) if txt_only else (560, 300)
+        need_w, need_h = _bk_dialog_content_min_size(dialog)
+        target_w = max(target_w, need_w + 12)
+        target_h = max(target_h, need_h + 12)
+        if geom is not None:
+            try:
+                target_w = min(target_w, int(geom.width()) - 32)
+                target_h = min(target_h, int(geom.height()) - 72)
+            except Exception:
+                pass
         try:
             dialog.setMinimumSize(target_w, target_h)
-            dialog.setMaximumSize(target_w, target_h)
-            dialog.resize(target_w, target_h)
-        except Exception:
-            pass
-        _bk_keep_dialog_inside_screen(dialog)
-        return
-    if not detailed:
-        target_w, target_h = 560, 300
-        try:
-            dialog.setMinimumSize(target_w, target_h)
-            dialog.setMaximumSize(target_w, target_h)
+            dialog.setMaximumSize(16777215, 16777215)
             dialog.resize(target_w, target_h)
         except Exception:
             pass
@@ -164,15 +235,51 @@ def _bk_resize_export_dialog_for_mode(dialog, detailed=False, txt_only=False):
             max_h = max(430, min(max_h, int(geom.height()) - 72))
         except Exception:
             pass
-    min_w = min(760, max_w)
-    min_h = min(620, max_h)
+    need_w, need_h = _bk_dialog_content_min_size(dialog)
+    max_w = max(max_w, min(need_w + 12, int(geom.width()) - 32) if geom is not None else need_w + 12)
+    max_h = max(max_h, min(need_h + 12, int(geom.height()) - 72) if geom is not None else need_h + 12)
+    min_w = min(max(760, need_w + 12), max_w)
+    min_h = min(max(620, need_h + 12), max_h)
     try:
         dialog.setMinimumSize(min_w, min_h)
-        dialog.setMaximumSize(max_w, max_h)
+        dialog.setMaximumSize(16777215, 16777215)
         dialog.resize(max_w, max_h)
     except Exception:
         pass
     _bk_keep_dialog_inside_screen(dialog)
+
+
+def _bk_registry_lookup(key):
+    """Schluessel direkt in den Sprachdateien nachschlagen (ohne Fenster).
+
+    Reihenfolge: Standardsprache, danach alle verfuegbaren Sprachen. Gibt
+    "" zurueck, wenn der Schluessel in keiner Sprachdatei existiert.
+    """
+    try:
+        from bottled_kraken.translation import translation as _bk_translation
+    except Exception:
+        return ""
+    candidates = []
+    try:
+        default_lang = getattr(_bk_translation, "DEFAULT_LANGUAGE", None)
+        if default_lang:
+            candidates.append(default_lang)
+    except Exception:
+        pass
+    try:
+        candidates.extend(list(_bk_translation.available_languages()))
+    except Exception:
+        candidates.extend(["de", "en", "fr"])
+    for lang in candidates:
+        if not lang:
+            continue
+        try:
+            value = _bk_translation.translate(lang, key)
+        except Exception:
+            continue
+        if value and value != key:
+            return value
+    return ""
 
 
 def _bk_tab_tr(window, key, fallback=""):
@@ -182,7 +289,99 @@ def _bk_tab_tr(window, key, fallback=""):
             return value
     except Exception:
         pass
+    # Fehlt der Schluessel in der aktiven Sprache, zuerst die uebrigen
+    # Sprachdateien befragen. Die fest im Code stehenden Fallback-Texte
+    # kommen nur noch zum Zug, wenn ein Schluessel in KEINER Sprachdatei
+    # existiert - dadurch erscheinen keine deutschen Texte mehr in der
+    # englischen oder franzoesischen Oberflaeche.
+    registry = _bk_registry_lookup(key)
+    if registry:
+        return registry
     return fallback or key
+
+
+def _bk_tr_registry(window, key):
+    """Uebersetzung ausschliesslich aus den Sprachdateien beziehen.
+
+    Erst die aktive Sprache des Fensters, danach die uebrigen
+    Sprachregistraturen. Es gibt bewusst KEINE fest im Quellcode
+    hinterlegten Sprachtexte; schlimmstenfalls wird der Schluessel selbst
+    zurueckgegeben.
+    """
+    try:
+        value = window._tr(key)
+        if value and value != key:
+            return value
+    except Exception:
+        pass
+    registry = _bk_registry_lookup(key)
+    if registry:
+        return registry
+    return key
+
+
+def _bk_add_export_orientation_group(self, dlg, layout):
+    """Auswahlgruppe Hoch-/Querformat in einen Export-Dialog einfuegen.
+
+    Die Gruppe persistiert die Auswahl selbst, sobald der Dialog mit OK
+    bestaetigt wird (dlg.accepted). Dadurch funktioniert sie in allen
+    Dialog-Generationen, ohne deren accept-Handler anzupassen. Bei
+    Abbrechen bleibt die bisherige Einstellung unveraendert.
+    """
+    try:
+        current = bk_get_export_orientation(self)
+    except Exception:
+        current = "auto"
+    box = QGroupBox(_bk_tr_registry(self, "export_orientation_group"), dlg) if QGroupBox is not None else None
+    row = QHBoxLayout(box) if box is not None else QHBoxLayout()
+    row.setContentsMargins(10, 8, 10, 8)
+    row.setSpacing(14)
+    rb_auto = QRadioButton(_bk_tr_registry(self, "export_orientation_auto"), dlg)
+    rb_portrait = QRadioButton(_bk_tr_registry(self, "export_orientation_portrait"), dlg)
+    rb_landscape = QRadioButton(_bk_tr_registry(self, "export_orientation_landscape"), dlg)
+    # Eigene Button-Gruppe: verhindert in jeder Dialog-Generation, dass die
+    # Radiobuttons mit den Darstellungs-Radiobuttons exklusiv gekoppelt werden.
+    try:
+        from PySide6.QtWidgets import QButtonGroup as _BKQButtonGroup
+        group = _BKQButtonGroup(dlg)
+        group.setExclusive(True)
+        for rb in (rb_auto, rb_portrait, rb_landscape):
+            group.addButton(rb)
+        dlg._bk_orientation_button_group = group
+    except Exception:
+        pass
+    rb_auto.setChecked(current not in {"portrait", "landscape"})
+    rb_portrait.setChecked(current == "portrait")
+    rb_landscape.setChecked(current == "landscape")
+    row.addWidget(rb_auto); row.addWidget(rb_portrait); row.addWidget(rb_landscape); row.addStretch(1)
+    if box is not None:
+        layout.addWidget(box)
+    else:
+        layout.addLayout(row)
+    radios = {"auto": rb_auto, "portrait": rb_portrait, "landscape": rb_landscape, "box": box}
+
+    def _persist_orientation():
+        try:
+            bk_set_export_orientation(_bk_orientation_from_radios(radios), self)
+        except Exception:
+            pass
+
+    try:
+        dlg.accepted.connect(_persist_orientation)
+    except Exception:
+        pass
+    return radios
+
+
+def _bk_orientation_from_radios(radios) -> str:
+    try:
+        if radios and radios.get("landscape") is not None and radios["landscape"].isChecked():
+            return "landscape"
+        if radios and radios.get("portrait") is not None and radios["portrait"].isChecked():
+            return "portrait"
+    except Exception:
+        pass
+    return "auto"
 
 
 def _bk_tab_clean(value) -> str:
@@ -639,20 +838,8 @@ def _bk_build_transcription_rows(record_views, image_size=None):
     return out
 
 
-def _bk_tabular_column_title(window, key):
-    column = _BK_TABULAR_COLUMN_BY_KEY.get(str(key))
-    if not column:
-        return str(key or "")
-    return _bk_tab_tr(window, column[1], column[2])
 
 
-def _bk_normalize_column_keys(column_keys=None):
-    keys = []
-    for key in (column_keys or _BK_TABULAR_DEFAULT_KEYS):
-        key = str(key or "")
-        if key in _BK_TABULAR_COLUMN_BY_KEY and key not in keys:
-            keys.append(key)
-    return keys or list(_BK_TABULAR_DEFAULT_KEYS)
 
 
 def _bk_tabular_columns_for_export(window=None, column_keys=None):
@@ -722,7 +909,7 @@ def _bk_write_transcription_xlsx(path, rows, column_keys=None, window=None):
         '<sheetData>', ''.join(row_xml), '</sheetData>',
         '<autoFilter ref="A1:%s%d"/>' % (last_col, max(1, len(matrix))),
         '<pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0" footer="0"/>',
-        '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>',
+        bk_xlsx_page_setup_xml(True, window),
         '</worksheet>',
     ])
     content_types = ''.join([
@@ -876,7 +1063,7 @@ def _bk_write_lines_docx(path, record_views):
         from docx import Document
         from docx.shared import Pt
     except Exception as exc:
-        raise RuntimeError("python-docx fehlt; DOCX kann nicht geschrieben werden.") from exc
+        raise RuntimeError(_bk_registry_lookup("err_no_docx_package_short") or "python-docx") from exc
     doc = Document()
     try:
         normal = doc.styles["Normal"]
@@ -904,7 +1091,8 @@ def _bk_write_lines_odt(path, record_views):
         '<office:automatic-styles><style:style style:name="P1" style:family="paragraph"><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/><style:text-properties fo:font-size="10pt" style:font-name="Arial"/></style:style></office:automatic-styles>',
         '<office:body><office:text>', ''.join(body), '</office:text></office:body></office:document-content>',
     ])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="10pt" style:font-name="Arial"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="1.5cm" fo:margin-bottom="1.5cm" fo:margin-left="1.5cm" fo:margin-right="1.5cm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>'
+    _odt_page_w, _odt_page_h = bk_page_size_cm(False, None)
+    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="10pt" style:font-name="Arial"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="%.1fcm" fo:page-height="%.1fcm" style:print-orientation="%s" fo:margin-top="1.5cm" fo:margin-bottom="1.5cm" fo:margin-left="1.5cm" fo:margin-right="1.5cm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>' % (_odt_page_w, _odt_page_h, bk_odf_orientation_name(False, None))
     meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
     settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
     manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>'
@@ -931,13 +1119,17 @@ def _bk_write_table_docx(path, rows, column_keys=None, window=None):
         from docx import Document
         from docx.shared import Pt
     except Exception as exc:
-        raise RuntimeError("python-docx fehlt; DOCX kann nicht geschrieben werden.") from exc
+        raise RuntimeError(_bk_registry_lookup("err_no_docx_package_short") or "python-docx") from exc
     matrix = _bk_table_matrix_from_rows(rows, column_keys, window)
     doc = Document()
     try:
         section = doc.sections[0]
-        section.orientation = 1
-        section.page_width, section.page_height = section.page_height, section.page_width
+        # Bisher war hier immer Querformat erzwungen. Jetzt entscheidet die
+        # im Export-Dialog gewaehlte Ausrichtung (Standard weiterhin quer).
+        use_landscape = bool(bk_resolve_landscape(True, window))
+        if use_landscape:
+            section.orientation = 1
+            section.page_width, section.page_height = section.page_height, section.page_width
         normal = doc.styles["Normal"]
         normal.font.name = "Arial"
         normal.font.size = Pt(8)
@@ -975,54 +1167,6 @@ def _bk_write_table_docx(path, rows, column_keys=None, window=None):
     doc.save(path)
 
 
-def _bk_write_table_odt(path, rows, column_keys=None, window=None):
-    keys = _bk_normalize_column_keys(column_keys)
-    matrix = _bk_table_matrix_from_rows(rows, keys, window)
-    widths = [float(_BK_TABULAR_COLUMN_BY_KEY.get(key, (None, None, None, 16.0, 3.0))[4]) for key in keys]
-    column_styles = []
-    columns = []
-    for idx, width in enumerate(widths, start=1):
-        column_styles.append('<style:style style:name="co%d" style:family="table-column"><style:table-column-properties style:column-width="%.3fcm"/></style:style>' % (idx, width))
-        columns.append('<table:table-column table:style-name="co%d"/>' % idx)
-    table_rows = []
-    for r_idx, row in enumerate(matrix, start=1):
-        style = "ceHeader" if r_idx == 1 else "ceBody"
-        cells = []
-        for c_idx in range(len(widths)):
-            text = row[c_idx] if c_idx < len(row) else ""
-            cells.append('<table:table-cell table:style-name="%s" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % (style, _bk_ods_text(text)))
-        table_rows.append('<table:table-row>%s</table:table-row>' % ''.join(cells))
-    content = ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<office:document-content ',
-        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ',
-        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" ',
-        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" ',
-        'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" ',
-        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" ',
-        'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" ',
-        'office:version="1.2">',
-        '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>',
-        '<office:automatic-styles>', ''.join(column_styles),
-        '<style:style style:name="ceHeader" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #808080" fo:background-color="#E9EEF6" fo:padding="0.05cm"/><style:text-properties fo:font-size="8pt" fo:font-weight="bold" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>',
-        '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.05cm"/><style:text-properties fo:font-size="8pt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>',
-        '</office:automatic-styles>',
-        '<office:body><office:text><table:table table:name="Transkription">', ''.join(columns), ''.join(table_rows), '</table:table></office:text></office:body></office:document-content>',
-    ])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="29.7cm" fo:page-height="21cm" fo:margin-top="1.2cm" fo:margin-bottom="1.2cm" fo:margin-left="1.2cm" fo:margin-right="1.2cm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>'
-    meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
-    settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
-    manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>'
-    with zipfile.ZipFile(path, "w") as archive:
-        info = zipfile.ZipInfo("mimetype")
-        info.date_time = (2020, 1, 1, 0, 0, 0)
-        info.compress_type = zipfile.ZIP_STORED
-        archive.writestr(info, "application/vnd.oasis.opendocument.text")
-        for name, data in (("content.xml", content), ("styles.xml", styles), ("meta.xml", meta), ("settings.xml", settings), ("META-INF/manifest.xml", manifest)):
-            zi = zipfile.ZipInfo(name)
-            zi.date_time = (2020, 1, 1, 0, 0, 0)
-            zi.compress_type = zipfile.ZIP_DEFLATED
-            archive.writestr(zi, data.encode("utf-8"))
 
 
 def _bk_load_saved_column_keys(window):
@@ -1046,21 +1190,6 @@ def _bk_load_saved_column_keys(window):
     return _bk_normalize_column_keys(keys)
 
 
-def _bk_save_column_keys(window, keys):
-    normalized = _bk_normalize_column_keys(keys)
-    try:
-        setattr(window, "_bk_export_selected_column_keys", list(normalized))
-    except Exception:
-        pass
-    try:
-        settings = getattr(window, "settings", None)
-        if settings is not None:
-            settings.setValue("export/table_column_keys", json.dumps(list(normalized), ensure_ascii=False))
-            settings.setValue("export/table_column_keys_user_saved", True)
-            settings.sync()
-    except Exception:
-        pass
-    return normalized
 
 
 def _bk_current_column_keys_for_render(window):
@@ -1072,7 +1201,7 @@ def _bk_current_column_keys_for_render(window):
 
 def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
 
     layout = QVBoxLayout(dlg)
@@ -1080,7 +1209,7 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
     layout.setSpacing(10)
 
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
 
@@ -1088,16 +1217,16 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
     mode_box = None
     if include_text_modes:
         if QGroupBox is not None:
-            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg)
+            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg)
             mode_layout = QVBoxLayout(mode_box)
             mode_layout.setContentsMargins(12, 10, 12, 10)
             mode_layout.setSpacing(6)
         else:
             mode_layout = QVBoxLayout()
             mode_layout.setSpacing(6)
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle mit auswählbaren Spalten"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table"})
         rb_lines.setChecked(mode == "lines")
@@ -1110,11 +1239,13 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
         else:
             layout.addLayout(mode_layout)
 
+    _bk_add_export_orientation_group(self, dlg, layout)
+
     selected_keys = _bk_load_saved_column_keys_for_dialog(self)
     checkboxes = {}
 
     if QGroupBox is not None:
-        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg)
+        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg)
         columns_layout = QVBoxLayout(columns_box)
         columns_layout.setContentsMargins(12, 10, 12, 10)
         columns_layout.setSpacing(8)
@@ -1122,7 +1253,7 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
         columns_box = None
         columns_layout = QVBoxLayout()
         columns_layout.setSpacing(8)
-        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg))
+        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label"), dlg))
 
     if QGridLayout is not None:
         checkbox_grid = QGridLayout()
@@ -1148,9 +1279,9 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
 
     quick_row = QHBoxLayout()
     quick_row.setSpacing(8)
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     quick_row.addWidget(btn_all)
     quick_row.addWidget(btn_none)
     quick_row.addWidget(btn_remember)
@@ -1178,7 +1309,7 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["remembered"] = True
         result["columns"] = _bk_save_column_keys(self, keys)
@@ -1211,8 +1342,8 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception:
         pass
 
@@ -1238,7 +1369,7 @@ def _bk_column_choice_dialog(self, fmt=None, include_text_modes=False):
                 mode = "table"
         keys = current_checked_keys()
         if mode == "table" and not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["mode"] = mode
         result["columns"] = _bk_normalize_column_keys(keys)
@@ -1286,10 +1417,6 @@ def _bk_text_layout_choice_dialog(self, fmt):
 
 
 try:
-    _BK_TABULAR_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_TABULAR_PREV_RENDER_FILE = None
-try:
     _BK_TABULAR_PREV_EXPORT_SINGLE = MainWindow._export_single_interactive
 except Exception:
     _BK_TABULAR_PREV_EXPORT_SINGLE = None
@@ -1297,18 +1424,12 @@ try:
     _BK_TABULAR_PREV_EXPORT_BATCH = MainWindow._export_batch
 except Exception:
     _BK_TABULAR_PREV_EXPORT_BATCH = None
-try:
-    _BK_TABULAR_PREV_SQLITE_EXPORT = MainWindow._bk_export_sqlite_json
-except Exception:
-    _BK_TABULAR_PREV_SQLITE_EXPORT = None
 
 
 def _bk_tabular_render_file(self, path: str, fmt: str, item: TaskItem):
     fmt_l = str(fmt or "").lower().lstrip(".")
     if not item or not getattr(item, "results", None):
-        if callable(_BK_TABULAR_PREV_RENDER_FILE):
-            return _BK_TABULAR_PREV_RENDER_FILE(self, path, fmt, item)
-        return None
+        return RENDER_NOT_HANDLED
     _text, _kr, pil_image, record_views = item.results
     try:
         export_image = _load_image_color(item.path)
@@ -1349,53 +1470,17 @@ def _bk_tabular_render_file(self, path: str, fmt: str, item: TaskItem):
             return write_positioned_docx(path, item, export_image, record_views)
         if fmt_l == "odt":
             return write_positioned_odt(path, item, export_image, record_views)
-    if callable(_BK_TABULAR_PREV_RENDER_FILE):
-        return _BK_TABULAR_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
+    return RENDER_NOT_HANDLED
 
 
-def _bk_tabular_export_single_interactive(self, item: TaskItem, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_TABLE_EXPORT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None:
-            return
-        self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-        if result.get("remembered"):
-            self._bk_export_selected_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-    elif fmt_l in _BK_TEXT_LAYOUT_FMTS:
-        mode = _bk_text_layout_choice_dialog(self, fmt_l)
-        if mode is None:
-            return
-        self._bk_export_text_layout_mode = mode
-    if callable(_BK_TABULAR_PREV_EXPORT_SINGLE):
-        return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-    return None
 
 
-def _bk_tabular_export_batch(self, items, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_TABLE_EXPORT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None:
-            return
-        self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-        if result.get("remembered"):
-            self._bk_export_selected_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-    elif fmt_l in _BK_TEXT_LAYOUT_FMTS:
-        mode = _bk_text_layout_choice_dialog(self, fmt_l)
-        if mode is None:
-            return
-        self._bk_export_text_layout_mode = mode
-    if callable(_BK_TABULAR_PREV_EXPORT_BATCH):
-        return _BK_TABULAR_PREV_EXPORT_BATCH(self, items, fmt)
-    return None
 
 
 def _bk_export_sqlite_json_tabular(self):
     task = _bk_fix36_current_task(self) if callable(globals().get("_bk_fix36_current_task")) else None
     if not task or not getattr(task, "results", None):
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_ocr_results", "Keine OCR-Ergebnisse vorhanden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_ocr_results"))
         return
     try:
         _txt, _kr, pil_image, recs = task.results
@@ -1408,7 +1493,7 @@ def _bk_export_sqlite_json_tabular(self):
     except Exception:
         rows = []
     if not rows:
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_exportable_person_entries", "Keine exportierbaren Einträge gefunden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_exportable_person_entries"))
         return
     result = _bk_column_choice_dialog(self, "sqlite-json", include_text_modes=False)
     if result is None:
@@ -1421,9 +1506,9 @@ def _bk_export_sqlite_json_tabular(self):
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_sqlite.json"
     path, _filter = QFileDialog.getSaveFileName(
         self,
-        _bk_tab_tr(self, "dlg_sqlite_json_title", "SQLite-json speichern"),
+        _bk_tab_tr(self, "dlg_sqlite_json_title"),
         os.path.join(start_dir, default_name),
-        _bk_tab_tr(self, "filter_json_files", "JSON (*.json);;All Files (*)"),
+        _bk_tab_tr(self, "filter_json_files"),
     )
     if not path:
         return
@@ -1432,15 +1517,13 @@ def _bk_export_sqlite_json_tabular(self):
     _bk_write_transcription_json(path, task, rows, column_keys, self)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done", "SQLite-json exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 
 
 try:
-    MainWindow._render_file = _bk_tabular_render_file
-    MainWindow._export_single_interactive = _bk_tabular_export_single_interactive
-    MainWindow._export_batch = _bk_tabular_export_batch
+    register_render_handler(_bk_tabular_render_file)
     MainWindow._bk_export_sqlite_json = _bk_export_sqlite_json_tabular
     MainWindow.bk_export_sqlite_persons = _bk_export_sqlite_json_tabular
 except Exception:
@@ -1462,8 +1545,6 @@ __all__ = [
     '_bk_export_sqlite_json_tabular',
     '_bk_plain_lines',
     '_bk_sqlite_tabular_payload',
-    '_bk_tabular_export_batch',
-    '_bk_tabular_export_single_interactive',
     '_bk_tabular_render_file',
     '_bk_text_layout_choice_dialog',
     '_bk_write_lines_docx',
@@ -1529,46 +1610,8 @@ _BK_ZONE_TYPE_TRANSLATION = {
 }
 
 
-def _bk_export_zone_title(window, zone_type: str) -> str:
-    key, fallback = _BK_ZONE_TYPE_TRANSLATION.get(str(zone_type or "data"), _BK_ZONE_TYPE_TRANSLATION["data"])
-    return _bk_tab_tr(window, key, fallback)
 
 
-def _bk_export_clean_zone(zone, order: int = 0):
-    if not isinstance(zone, dict):
-        return None
-    try:
-        x0 = float(zone.get("x0", 0.0))
-        y0 = float(zone.get("y0", 0.0))
-        x1 = float(zone.get("x1", 0.0))
-        y1 = float(zone.get("y1", 0.0))
-    except Exception:
-        return None
-    if x1 < x0:
-        x0, x1 = x1, x0
-    if y1 < y0:
-        y0, y1 = y1, y0
-    if x1 - x0 < 3 or y1 - y0 < 3:
-        return None
-    zone_type = str(zone.get("type", "data") or "data")
-    if zone_type not in _BK_ZONE_TYPES:
-        zone_type = "data"
-    name = str(zone.get("name", "") or "").strip()
-    if not name:
-        name = f"Bereich {int(order) + 1}"
-    try:
-        order_value = int(zone.get("order", order) or order)
-    except Exception:
-        order_value = int(order or 0)
-    return {
-        "x0": x0,
-        "y0": y0,
-        "x1": x1,
-        "y1": y1,
-        "type": zone_type,
-        "name": name,
-        "order": order_value,
-    }
 
 
 def _bk_get_task_export_zones(task) -> list:
@@ -1598,28 +1641,6 @@ def _bk_set_task_export_zones(task, zones) -> list:
     return clean
 
 
-def _bk_zone_center(record):
-    return float(record.get("cx", record.get("x0", 0.0)) or 0.0), float(record.get("cy", record.get("y0", 0.0)) or 0.0)
-
-
-def _bk_zone_contains_record(zone, record) -> bool:
-    if not zone or not record.get("bbox"):
-        return False
-    cx, cy = _bk_zone_center(record)
-    if float(zone["x0"]) <= cx <= float(zone["x1"]) and float(zone["y0"]) <= cy <= float(zone["y1"]):
-        return True
-    try:
-        x0 = max(float(zone["x0"]), float(record.get("x0", 0.0)))
-        y0 = max(float(zone["y0"]), float(record.get("y0", 0.0)))
-        x1 = min(float(zone["x1"]), float(record.get("x1", 0.0)))
-        y1 = min(float(zone["y1"]), float(record.get("y1", 0.0)))
-        if x1 <= x0 or y1 <= y0:
-            return False
-        record_area = max(1.0, float(record.get("w", 0.0) or 0.0) * float(record.get("h", 0.0) or 0.0))
-        return ((x1 - x0) * (y1 - y0)) / record_area >= 0.35
-    except Exception:
-        return False
-
 
 def _bk_zone_records(records, zone):
     return [record for record in (records or []) if _bk_zone_contains_record(zone, record)]
@@ -1629,505 +1650,14 @@ def _bk_zone_is_ignored(record, zones) -> bool:
     return any(_bk_zone_contains_record(zone, record) for zone in zones if zone.get("type") == "ignore")
 
 
-def _bk_zone_has_type(record, zones, zone_types) -> bool:
-    types = set(zone_types or [])
-    return any(_bk_zone_contains_record(zone, record) for zone in zones if zone.get("type") in types)
 
 
-def _bk_zone_number_for_record(record, number_records, median_height):
-    if not number_records:
-        return ""
-    rx1 = float(record.get("x1", record.get("x0", 0.0)) or 0.0)
-    rx0 = float(record.get("x0", 0.0) or 0.0)
-    rcy = float(record.get("cy", record.get("y0", 0.0)) or 0.0)
-    candidates = []
-    for number in number_records:
-        txt = _bk_tab_number_value(number.get("text", ""))
-        if not txt:
-            continue
-        ncy = float(number.get("cy", number.get("y0", 0.0)) or 0.0)
-        nx0 = float(number.get("x0", 0.0) or 0.0)
-        dy = abs(ncy - rcy)
-        dx = 0.0 if nx0 >= rx0 else abs(nx0 - rx0) + 500.0
-        if nx0 >= rx1 - 6:
-            dx = nx0 - rx1
-        if dy <= max(7.0, median_height * 1.15, float(record.get("h", 0.0) or 0.0) * 1.05):
-            candidates.append((dy, dx, txt, number))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[0][2]
 
 
-def _bk_zone_year_for_record(record, year_records, median_height):
-    if not year_records:
-        return ""
-    rcx = float(record.get("cx", record.get("x0", 0.0)) or 0.0)
-    ry0 = float(record.get("y0", 0.0) or 0.0)
-    candidates = []
-    for year in year_records:
-        txt = _bk_tab_year_value(year.get("text", ""))
-        if not txt:
-            continue
-        yy1 = float(year.get("y1", year.get("y0", 0.0)) or 0.0)
-        if yy1 > ry0 + median_height * 0.35:
-            continue
-        dy = ry0 - float(year.get("cy", year.get("y0", 0.0)) or 0.0)
-        dx = abs(float(year.get("cx", year.get("x0", 0.0)) or 0.0) - rcx)
-        candidates.append((dy, dx, txt, year))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[0][2]
 
 
-def _bk_build_transcription_rows_with_zones(record_views, image_size=None, zones=None):
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [zone for zone in zones if zone]
-    zones.sort(key=lambda z: (int(z.get("order", 0) or 0), float(z.get("x0", 0.0)), float(z.get("y0", 0.0))))
-    data_zones = [zone for zone in zones if zone.get("type") == "data"]
-    if not data_zones:
-        return _bk_build_transcription_rows(record_views, image_size)
-    raw_records = _records_from_views(record_views)
-    if not raw_records:
-        return []
-    raw_records = [record for record in raw_records if not _bk_zone_is_ignored(record, zones)]
-    raw_records = _bk_tab_expand_numeric_records(raw_records)
-    page_width, _page_height = _page_size(image_size, raw_records)
-    median_height = _median_height(raw_records)
-    number_zone_records = []
-    year_zone_records = []
-    for zone in zones:
-        records = _bk_zone_records(raw_records, zone)
-        if zone.get("type") == "number":
-            number_zone_records.extend([record for record in records if _bk_tab_number_value(record.get("text", ""))])
-        elif zone.get("type") == "year":
-            year_zone_records.extend([record for record in records if _bk_tab_year_value(record.get("text", ""))])
-    typed_nondata_zones = [zone for zone in zones if zone.get("type") in {"number", "year", "ignore"}]
-    rows = []
-    seen = set()
-    for zone_order, zone in enumerate(data_zones):
-        zone_records_all = _bk_zone_records(raw_records, zone)
-        records_in_zone = [record for record in zone_records_all if not _bk_zone_has_type(record, typed_nondata_zones, {"number", "year", "ignore"})]
-        if not records_in_zone:
-            continue
-        zone_width = max(1.0, float(zone.get("x1", 0.0)) - float(zone.get("x0", 0.0)))
-        merged_zone_records = _bk_tab_merge_visual_row_records(records_in_zone, zone_width)
-        local_years = [record for record in zone_records_all if _bk_tab_year_value(record.get("text", "")) and not _bk_zone_has_type(record, typed_nondata_zones, {"number", "ignore"})]
-        all_years = list(year_zone_records) + local_years
-        for record in merged_zone_records:
-            text = _bk_tab_clean(record.get("text", ""))
-            if not text or _bk_tab_is_separator(text) or _bk_tab_is_standalone_year(text):
-                continue
-            if not _bk_tab_has_letters(text):
-                continue
-            if len(text) <= 2 and len(text.split()) <= 1:
-                continue
-            context_year = _bk_zone_year_for_record(record, all_years, median_height)
-            if not context_year:
-                context_year = _bk_tab_nearest_context_year(record, all_years, page_width, median_height)
-            number = _bk_zone_number_for_record(record, number_zone_records, median_height)
-            if not number:
-                number = _bk_tab_matching_number(record, number_zone_records, page_width, median_height)
-            row = _bk_tab_make_row_from_record(record, context_year, number)
-            if not row:
-                continue
-            row["_zone_order"] = zone_order
-            key = (
-                zone_order,
-                row.get("family_name", "").casefold(),
-                row.get("given_names", "").casefold(),
-                row.get("number", ""),
-                row.get("original_line", "").casefold(),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(row)
-    rows.sort(key=lambda row: (int(row.get("_zone_order", 0) or 0), float(row.get("_source_y", 0.0) or 0.0), float(row.get("_source_x", 0.0) or 0.0)))
-    last_year = ""
-    last_place = ""
-    out = []
-    for idx, row in enumerate(rows, start=1):
-        row = dict(row)
-        ysrc = _bk_tab_clean(row.get("year_in_source", ""))
-        if _bk_tab_is_ditto(ysrc):
-            row["year_resolved"] = last_year
-            row["year_in_source"] = "„"
-        else:
-            row["year_resolved"] = ysrc
-            if ysrc:
-                last_year = ysrc
-        psrc = _bk_tab_clean(row.get("place_in_source", ""))
-        if _bk_tab_is_ditto(psrc):
-            row["place_resolved"] = last_place
-            row["place_in_source"] = "„"
-        else:
-            row["place_resolved"] = psrc
-            if psrc:
-                last_place = psrc
-        row["id"] = f"entry_{idx:04d}"
-        row.pop("_source_x", None)
-        row.pop("_source_y", None)
-        row.pop("_zone_order", None)
-        out.append(row)
-    return out
 
 
-class _BKExportZoneGraphicsView(QGraphicsView):
-    def __init__(self, parent_dialog):
-        super().__init__(parent_dialog)
-        self._dialog = parent_dialog
-        self._start = None
-        self._rubber = None
-        self.setMouseTracking(True)
-        try:
-            self.setDragMode(QGraphicsView.NoDrag)
-            self.setRenderHint(self.renderHints())
-        except Exception:
-            pass
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._start = self.mapToScene(event.position().toPoint() if hasattr(event, "position") else event.pos())
-            if self._rubber is not None:
-                try:
-                    self.scene().removeItem(self._rubber)
-                except Exception:
-                    pass
-                self._rubber = None
-            self._rubber = QGraphicsRectItem(QRectF(self._start, self._start))
-            self._rubber.setPen(QPen(QColor(40, 130, 255), 2, Qt.DashLine))
-            self._rubber.setBrush(QBrush(QColor(40, 130, 255, 35)))
-            self.scene().addItem(self._rubber)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._start is not None and self._rubber is not None:
-            pos = self.mapToScene(event.position().toPoint() if hasattr(event, "position") else event.pos())
-            self._rubber.setRect(QRectF(self._start, pos).normalized())
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if self._start is not None and self._rubber is not None:
-            rect = self._rubber.rect().normalized()
-            try:
-                self.scene().removeItem(self._rubber)
-            except Exception:
-                pass
-            self._rubber = None
-            self._start = None
-            if rect.width() >= 6 and rect.height() >= 6:
-                self._dialog.add_zone_from_rect(rect)
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        try:
-            self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-        except Exception:
-            pass
-
-
-class _BKExportZonesDialog(QDialog):
-    def __init__(self, window, task, image_path, zones=None):
-        super().__init__(window)
-        self._window = window
-        self._task = task
-        self._image_path = image_path
-        self._zones = [_bk_export_clean_zone(z, i) for i, z in enumerate(zones or [])]
-        self._zones = [z for z in self._zones if z]
-        self._items = []
-        self.setWindowTitle(_bk_tab_tr(window, "export_zones_title", "Tabellenbereiche festlegen"))
-        self.setModal(True)
-        self.resize(1380, 900)
-        try:
-            self.setWindowState(self.windowState() | Qt.WindowMaximized)
-        except Exception:
-            pass
-        root = QHBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(12)
-
-        self.scene = QGraphicsScene(self)
-        self.view = _BKExportZoneGraphicsView(self)
-        self.view.setScene(self.scene)
-        pixmap = QPixmap(str(image_path or "")) if QPixmap is not None else None
-        self._image_w = 0
-        self._image_h = 0
-        if pixmap is not None and not pixmap.isNull():
-            self._image_w = int(pixmap.width())
-            self._image_h = int(pixmap.height())
-            self.scene.addPixmap(pixmap)
-            self.scene.setSceneRect(QRectF(0, 0, pixmap.width(), pixmap.height()))
-        root.addWidget(self.view, 3)
-
-        side = QVBoxLayout()
-        side.setSpacing(8)
-        intro = QLabel(_bk_tab_tr(window, "export_zones_intro", "Ziehe Bereiche direkt auf dem Bild. Die Reihenfolge in dieser Liste bestimmt die Export-Reihenfolge."), self)
-        intro.setWordWrap(True)
-        side.addWidget(intro)
-        self.table = QTableWidget(0, 4, self)
-        self.table.setMinimumWidth(700)
-        self.table.setHorizontalHeaderLabels([
-            _bk_tab_tr(window, "export_zones_col_order", "Nr."),
-            _bk_tab_tr(window, "export_zones_col_name", "Name"),
-            _bk_tab_tr(window, "export_zones_col_type", "Typ"),
-            _bk_tab_tr(window, "export_zones_col_rect", "Bereich"),
-        ])
-        try:
-            self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-            self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-            self.table.horizontalHeader().setStretchLastSection(False)
-            self.table.setColumnWidth(0, 55)
-            self.table.setColumnWidth(1, 210)
-            self.table.setColumnWidth(2, 245)
-            self.table.setColumnWidth(3, 185)
-        except Exception:
-            pass
-        side.addWidget(self.table, 1)
-
-        self._updating_geometry = False
-        if QGroupBox is not None and QFormLayout is not None and QSpinBox is not None:
-            edit_box = QGroupBox(_bk_tab_tr(window, "export_zones_edit_group", "Auswahlbereich bearbeiten"), self)
-            edit_layout = QFormLayout(edit_box)
-            edit_layout.setContentsMargins(12, 10, 12, 10)
-            self.spin_x = QSpinBox(edit_box)
-            self.spin_y = QSpinBox(edit_box)
-            self.spin_w = QSpinBox(edit_box)
-            self.spin_h = QSpinBox(edit_box)
-            for spin in (self.spin_x, self.spin_y, self.spin_w, self.spin_h):
-                spin.setRange(0, 999999)
-                spin.valueChanged.connect(self._geometry_spin_changed)
-            self.spin_w.setMinimum(3)
-            self.spin_h.setMinimum(3)
-            edit_layout.addRow(_bk_tab_tr(window, "export_zones_x", "X"), self.spin_x)
-            edit_layout.addRow(_bk_tab_tr(window, "export_zones_y", "Y"), self.spin_y)
-            edit_layout.addRow(_bk_tab_tr(window, "export_zones_width", "Breite"), self.spin_w)
-            edit_layout.addRow(_bk_tab_tr(window, "export_zones_height", "Höhe"), self.spin_h)
-            side.addWidget(edit_box)
-        else:
-            self.spin_x = self.spin_y = self.spin_w = self.spin_h = None
-
-        button_row1 = QHBoxLayout()
-        self.btn_up = QPushButton(_bk_tab_tr(window, "export_zones_up", "Nach oben"), self)
-        self.btn_down = QPushButton(_bk_tab_tr(window, "export_zones_down", "Nach unten"), self)
-        button_row1.addWidget(self.btn_up)
-        button_row1.addWidget(self.btn_down)
-        side.addLayout(button_row1)
-
-        button_row2 = QHBoxLayout()
-        self.btn_delete = QPushButton(_bk_tab_tr(window, "export_zones_delete", "Löschen"), self)
-        self.btn_clear = QPushButton(_bk_tab_tr(window, "export_zones_clear", "Alle löschen"), self)
-        button_row2.addWidget(self.btn_delete)
-        button_row2.addWidget(self.btn_clear)
-        side.addLayout(button_row2)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        try:
-            buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok", "OK"))
-            buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel", "Abbrechen"))
-        except Exception:
-            pass
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        side.addWidget(buttons)
-        root.addLayout(side, 2)
-
-        self.btn_delete.clicked.connect(self.delete_selected)
-        self.btn_clear.clicked.connect(self.clear_zones)
-        self.btn_up.clicked.connect(lambda: self.move_selected(-1))
-        self.btn_down.clicked.connect(lambda: self.move_selected(1))
-        self.table.itemChanged.connect(self._table_item_changed)
-        try:
-            self.table.itemSelectionChanged.connect(self._selected_zone_changed)
-        except Exception:
-            pass
-        self.refresh_table()
-        self._selected_zone_changed()
-
-    def _zone_type_combo(self, zone_type):
-        combo = QComboBox(self.table)
-        for value in _BK_ZONE_TYPES:
-            combo.addItem(_bk_export_zone_title(self._window, value), value)
-        idx = combo.findData(zone_type if zone_type in _BK_ZONE_TYPES else "data")
-        combo.setCurrentIndex(max(0, idx))
-        combo.currentIndexChanged.connect(lambda _=0, c=combo: self._combo_changed(c))
-        return combo
-
-    def _combo_changed(self, combo):
-        row = self.table.indexAt(combo.pos()).row()
-        if 0 <= row < len(self._zones):
-            self._zones[row]["type"] = str(combo.currentData() or "data")
-            self.redraw_zones()
-
-    def _table_item_changed(self, item):
-        if item is None:
-            return
-        row = item.row()
-        if 0 <= row < len(self._zones) and item.column() == 1:
-            self._zones[row]["name"] = str(item.text() or "").strip() or f"Bereich {row + 1}"
-            self.redraw_zones()
-
-    def add_zone_from_rect(self, rect):
-        zone = _bk_export_clean_zone({
-            "x0": rect.left(),
-            "y0": rect.top(),
-            "x1": rect.right(),
-            "y1": rect.bottom(),
-            "type": "data",
-            "name": _bk_tab_tr(self._window, "export_zone_default_name", "Bereich {}" ).format(len(self._zones) + 1),
-            "order": len(self._zones),
-        }, len(self._zones))
-        if zone:
-            self._zones.append(zone)
-            self.refresh_table(select_row=len(self._zones) - 1)
-
-    def _format_zone_rect(self, zone):
-        return f'{int(zone["x0"])} / {int(zone["y0"])} / {int(zone["x1"] - zone["x0"])} × {int(zone["y1"] - zone["y0"])}'
-
-    def _set_geometry_widgets_enabled(self, enabled):
-        for widget in (getattr(self, "spin_x", None), getattr(self, "spin_y", None), getattr(self, "spin_w", None), getattr(self, "spin_h", None)):
-            if widget is not None:
-                widget.setEnabled(bool(enabled))
-
-    def _selected_zone_changed(self):
-        if getattr(self, "spin_x", None) is None:
-            return
-        row = self.selected_row()
-        enabled = 0 <= row < len(self._zones)
-        self._set_geometry_widgets_enabled(enabled)
-        if not enabled:
-            return
-        zone = self._zones[row]
-        self._updating_geometry = True
-        try:
-            self.spin_x.setValue(int(round(zone["x0"])))
-            self.spin_y.setValue(int(round(zone["y0"])))
-            self.spin_w.setValue(max(3, int(round(zone["x1"] - zone["x0"]))))
-            self.spin_h.setValue(max(3, int(round(zone["y1"] - zone["y0"]))))
-        finally:
-            self._updating_geometry = False
-        self.redraw_zones()
-
-    def _geometry_spin_changed(self):
-        if getattr(self, "spin_x", None) is None:
-            return
-        if getattr(self, "_updating_geometry", False):
-            return
-        row = self.selected_row()
-        if not (0 <= row < len(self._zones)):
-            return
-        x = int(self.spin_x.value())
-        y = int(self.spin_y.value())
-        w = max(3, int(self.spin_w.value()))
-        h = max(3, int(self.spin_h.value()))
-        max_w = max(3, int(getattr(self, "_image_w", 0) or 0))
-        max_h = max(3, int(getattr(self, "_image_h", 0) or 0))
-        if max_w > 3:
-            x = max(0, min(x, max_w - 3))
-            w = max(3, min(w, max_w - x))
-        if max_h > 3:
-            y = max(0, min(y, max_h - 3))
-            h = max(3, min(h, max_h - y))
-        zone = self._zones[row]
-        zone.update({"x0": float(x), "y0": float(y), "x1": float(x + w), "y1": float(y + h)})
-        item = self.table.item(row, 3)
-        if item is not None:
-            item.setText(self._format_zone_rect(zone))
-        self.redraw_zones()
-
-    def refresh_table(self, select_row=-1):
-        self.table.blockSignals(True)
-        self.table.setRowCount(0)
-        for row, zone in enumerate(self._zones):
-            zone["order"] = row
-            self.table.insertRow(row)
-            order_item = QTableWidgetItem(str(row + 1))
-            order_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            name_item = QTableWidgetItem(str(zone.get("name", f"Bereich {row + 1}")))
-            rect_item = QTableWidgetItem(self._format_zone_rect(zone))
-            rect_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            self.table.setItem(row, 0, order_item)
-            self.table.setItem(row, 1, name_item)
-            self.table.setCellWidget(row, 2, self._zone_type_combo(zone.get("type", "data")))
-            self.table.setItem(row, 3, rect_item)
-        self.table.blockSignals(False)
-        self.redraw_zones()
-        if 0 <= select_row < self.table.rowCount():
-            self.table.selectRow(select_row)
-        self._selected_zone_changed()
-
-    def redraw_zones(self):
-        for item in list(self._items):
-            try:
-                self.scene.removeItem(item)
-            except Exception:
-                pass
-        self._items = []
-        colors = {
-            "data": QColor(40, 130, 255, 80),
-            "number": QColor(255, 200, 0, 90),
-            "year": QColor(0, 170, 80, 80),
-            "ignore": QColor(220, 20, 20, 60),
-        }
-        pens = {
-            "data": QColor(40, 130, 255),
-            "number": QColor(210, 150, 0),
-            "year": QColor(0, 145, 80),
-            "ignore": QColor(210, 20, 20),
-        }
-        for row, zone in enumerate(self._zones):
-            rect = QRectF(float(zone["x0"]), float(zone["y0"]), float(zone["x1"] - zone["x0"]), float(zone["y1"] - zone["y0"]))
-            item = QGraphicsRectItem(rect)
-            ztype = zone.get("type", "data")
-            pen_width = 3 if row == self.selected_row() else 2
-            item.setPen(QPen(pens.get(ztype, pens["data"]), pen_width))
-            item.setBrush(QBrush(colors.get(ztype, colors["data"])))
-            item.setZValue(10 + row)
-            self.scene.addItem(item)
-            self._items.append(item)
-
-    def selected_row(self):
-        try:
-            rows = self.table.selectionModel().selectedRows()
-            if rows:
-                return rows[0].row()
-        except Exception:
-            pass
-        return -1
-
-    def delete_selected(self):
-        row = self.selected_row()
-        if 0 <= row < len(self._zones):
-            self._zones.pop(row)
-            self.refresh_table(select_row=min(row, len(self._zones) - 1))
-
-    def clear_zones(self):
-        self._zones = []
-        self.refresh_table()
-
-    def move_selected(self, delta):
-        row = self.selected_row()
-        new_row = row + int(delta)
-        if 0 <= row < len(self._zones) and 0 <= new_row < len(self._zones):
-            self._zones[row], self._zones[new_row] = self._zones[new_row], self._zones[row]
-            self.refresh_table(select_row=new_row)
-
-    def zones(self):
-        out = []
-        for row, zone in enumerate(self._zones):
-            clean = _bk_export_clean_zone(zone, row)
-            if clean:
-                clean["order"] = len(out)
-                out.append(clean)
-        return out
 
 
 def _bk_open_export_zones_dialog(window, task):
@@ -2137,11 +1667,11 @@ def _bk_open_export_zones_dialog(window, task):
         except Exception:
             task = None
     if task is None:
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_need_done_for_ai", "Bitte zuerst OCR-Ergebnisse erzeugen."))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_need_done_for_ai"))
         return None
     path = getattr(task, "path", "")
     if not path or not os.path.exists(path):
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_project_file_missing", "Datei nicht gefunden: {}").format(path))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_project_file_missing").format(path))
         return None
     dlg = _BKExportZonesDialog(window, task, path, _bk_get_task_export_zones(task))
     try:
@@ -2174,7 +1704,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
         dlg.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
     except Exception:
         pass
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
 
     layout = QVBoxLayout(dlg)
@@ -2182,7 +1712,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
     layout.setSpacing(10)
 
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
 
@@ -2190,16 +1720,16 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
     mode_box = None
     if include_text_modes:
         if QGroupBox is not None:
-            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg)
+            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg)
             mode_layout = QVBoxLayout(mode_box)
             mode_layout.setContentsMargins(12, 10, 12, 10)
             mode_layout.setSpacing(6)
         else:
             mode_layout = QVBoxLayout()
             mode_layout.setSpacing(6)
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle mit auswählbaren Spalten"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table"})
         rb_lines.setChecked(mode == "lines")
@@ -2216,7 +1746,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
     checkboxes = {}
 
     if QGroupBox is not None:
-        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg)
+        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg)
         columns_layout = QVBoxLayout(columns_box)
         columns_layout.setContentsMargins(12, 10, 12, 10)
         columns_layout.setSpacing(8)
@@ -2224,7 +1754,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
         columns_box = None
         columns_layout = QVBoxLayout()
         columns_layout.setSpacing(8)
-        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg))
+        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label"), dlg))
 
     if QGridLayout is not None:
         checkbox_grid = QGridLayout()
@@ -2250,18 +1780,18 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
 
     zone_row = QHBoxLayout()
     zone_row.setSpacing(8)
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     cb_zones.setChecked(bool(getattr(self, "_bk_export_use_zones", False)))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_row.addWidget(cb_zones, 1)
     zone_row.addWidget(btn_zones)
     columns_layout.addLayout(zone_row)
 
     quick_row = QHBoxLayout()
     quick_row.setSpacing(8)
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     quick_row.addWidget(btn_all)
     quick_row.addWidget(btn_none)
     quick_row.addWidget(btn_remember)
@@ -2289,7 +1819,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["remembered"] = True
         result["columns"] = _bk_save_column_keys(self, keys)
@@ -2340,8 +1870,8 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception:
         pass
 
@@ -2367,7 +1897,7 @@ def _bk_zone_column_choice_dialog(self, fmt=None, include_text_modes=False):
                 mode = "table"
         keys = current_checked_keys()
         if mode == "table" and not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["mode"] = mode
         result["columns"] = _bk_normalize_column_keys(keys)
@@ -2405,10 +1935,6 @@ try:
 except Exception:
     pass
 
-try:
-    _BK_ZONE_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_ZONE_PREV_RENDER_FILE = None
 
 
 def _bk_zone_rows_for_item(item, image_size, use_zones):
@@ -2419,52 +1945,14 @@ def _bk_zone_rows_for_item(item, image_size, use_zones):
     return _bk_build_transcription_rows(record_views, image_size)
 
 
-def _bk_zone_tabular_render_file(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None) and (fmt_l in _BK_TABLE_EXPORT_FMTS or fmt_l in _BK_TEXT_LAYOUT_FMTS):
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-        except Exception:
-            export_image = pil_image
-        image_size = getattr(export_image, "size", None) or getattr(pil_image, "size", None)
-        column_keys = _bk_current_column_keys_for_render(self)
-        use_zones = bool(getattr(self, "_bk_export_use_zones", False))
-        if fmt_l in _BK_TABLE_EXPORT_FMTS:
-            rows = _bk_zone_rows_for_item(item, image_size, use_zones)
-            if fmt_l == "csv":
-                return _bk_write_transcription_csv(path, rows, column_keys, self)
-            if fmt_l == "json":
-                return _bk_write_transcription_json(path, item, rows, column_keys, self)
-            if fmt_l in {"xlsx", "excel"}:
-                return _bk_write_transcription_xlsx(path, rows, column_keys, self)
-            if fmt_l in {"ods", "calc"}:
-                return _bk_write_transcription_ods(path, rows, column_keys, self)
-        if fmt_l in _BK_TEXT_LAYOUT_FMTS:
-            mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
-            if mode == "table":
-                rows = _bk_zone_rows_for_item(item, image_size, use_zones)
-                if fmt_l in {"txt", "text", "txt_plain"}:
-                    return _bk_write_table_txt(path, rows, column_keys, self)
-                if fmt_l in {"docx", "word"}:
-                    return _bk_write_table_docx(path, rows, column_keys, self)
-                if fmt_l == "odt":
-                    return _bk_write_table_odt(path, rows, column_keys, self)
-    if callable(_BK_ZONE_PREV_RENDER_FILE):
-        return _BK_ZONE_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
-try:
-    _BK_ZONE_PREV_SQLITE_EXPORT = MainWindow._bk_export_sqlite_json
-except Exception:
-    _BK_ZONE_PREV_SQLITE_EXPORT = None
 
 
 def _bk_zone_export_sqlite_json(self):
     task = _bk_fix36_current_task(self) if callable(globals().get("_bk_fix36_current_task")) else None
     if not task or not getattr(task, "results", None):
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_ocr_results", "Keine OCR-Ergebnisse vorhanden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_ocr_results"))
         return
     result = _bk_column_choice_dialog(self, "sqlite-json", include_text_modes=False)
     if result is None:
@@ -2485,15 +1973,15 @@ def _bk_zone_export_sqlite_json(self):
     except Exception:
         rows = []
     if not rows:
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_exportable_person_entries", "Keine exportierbaren Einträge gefunden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_exportable_person_entries"))
         return
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_sqlite.json"
     path, _filter = QFileDialog.getSaveFileName(
         self,
-        _bk_tab_tr(self, "dlg_sqlite_json_title", "SQLite-json speichern"),
+        _bk_tab_tr(self, "dlg_sqlite_json_title"),
         os.path.join(start_dir, default_name),
-        _bk_tab_tr(self, "filter_json_files", "JSON (*.json);;All Files (*)"),
+        _bk_tab_tr(self, "filter_json_files"),
     )
     if not path:
         return
@@ -2502,7 +1990,7 @@ def _bk_zone_export_sqlite_json(self):
     _bk_write_transcription_json(path, task, rows, column_keys, self)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done", "SQLite-json exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 
@@ -2539,7 +2027,6 @@ def _bk_zone_task_from_dict(self, data):
 
 
 try:
-    MainWindow._render_file = _bk_zone_tabular_render_file
     MainWindow._bk_export_sqlite_json = _bk_zone_export_sqlite_json
     MainWindow.bk_export_sqlite_persons = _bk_zone_export_sqlite_json
     MainWindow._task_to_dict = _bk_zone_task_to_dict
@@ -2556,7 +2043,6 @@ try:
         '_bk_set_task_export_zones',
         '_bk_zone_column_choice_dialog',
         '_bk_zone_export_sqlite_json',
-        '_bk_zone_tabular_render_file',
     ])
     register_globals('bk', globals(), __all__)
 except Exception:
@@ -2590,52 +2076,9 @@ _BK_ZONE_LEGACY_TYPES = {
 }
 
 
-def _bk_export_zone_title(window, zone_type: str) -> str:
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(str(zone_type or "names"), str(zone_type or "names"))
-    key, fallback = _BK_ZONE_TYPE_TRANSLATION.get(zone_type, _BK_ZONE_TYPE_TRANSLATION["names"])
-    return _bk_tab_tr(window, key, fallback)
 
 
-def _bk_export_clean_zone(zone, order: int = 0):
-    if not isinstance(zone, dict):
-        return None
-    try:
-        x0 = float(zone.get("x0", 0.0))
-        y0 = float(zone.get("y0", 0.0))
-        x1 = float(zone.get("x1", 0.0))
-        y1 = float(zone.get("y1", 0.0))
-    except Exception:
-        return None
-    if x1 < x0:
-        x0, x1 = x1, x0
-    if y1 < y0:
-        y0, y1 = y1, y0
-    if x1 - x0 < 3 or y1 - y0 < 3:
-        return None
-    zone_type = str(zone.get("type", "names") or "names")
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(zone_type, zone_type)
-    if zone_type not in _BK_ZONE_TYPES:
-        zone_type = "names"
-    name = str(zone.get("name", "") or "").strip()
-    if not name:
-        name = f"Bereich {int(order) + 1}"
-    try:
-        order_value = int(zone.get("order", order) or order)
-    except Exception:
-        order_value = int(order or 0)
-    return {
-        "x0": x0,
-        "y0": y0,
-        "x1": x1,
-        "y1": y1,
-        "type": zone_type,
-        "name": name,
-        "order": order_value,
-    }
 
-
-def _bk_zone_value_text(text: str) -> str:
-    return _bk_tab_clean(text)
 
 
 def _bk_zone_age_value(text: str) -> str:
@@ -2665,154 +2108,8 @@ def _bk_zone_page_number_value(text: str) -> str:
     return _bk_tab_number_value(text)
 
 
-def _bk_zone_records_of_type(records, zones, zone_type):
-    out = []
-    for zone in zones or []:
-        if zone.get("type") == zone_type:
-            out.extend(_bk_zone_records(records, zone))
-    return out
 
 
-def _bk_zone_first_same_line_value(record, records, value_func, median_height):
-    if not records:
-        return ""
-    rcy = float(record.get("cy", record.get("y0", 0.0)) or 0.0)
-    rcx = float(record.get("cx", record.get("x0", 0.0)) or 0.0)
-    rh = float(record.get("h", median_height) or median_height)
-    y_tol = max(7.0, median_height * 1.15, rh * 1.10)
-    candidates = []
-    for candidate in records:
-        value = value_func(candidate.get("text", ""))
-        if not value:
-            continue
-        ccy = float(candidate.get("cy", candidate.get("y0", 0.0)) or 0.0)
-        ccx = float(candidate.get("cx", candidate.get("x0", 0.0)) or 0.0)
-        dy = abs(ccy - rcy)
-        if dy <= y_tol:
-            candidates.append((dy, abs(ccx - rcx), value, candidate))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[0][2]
-
-
-def _bk_zone_heading_year_for_record(record, heading_records, median_height):
-    years = []
-    for record_item in heading_records or []:
-        value = _bk_zone_year_value(record_item.get("text", ""))
-        if value and value != "„":
-            clone = dict(record_item)
-            clone["text"] = value
-            years.append(clone)
-    return _bk_zone_year_for_record(record, years, median_height)
-
-
-def _bk_build_transcription_rows_with_zones(record_views, image_size=None, zones=None):
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [zone for zone in zones if zone]
-    zones.sort(key=lambda z: (int(z.get("order", 0) or 0), float(z.get("x0", 0.0)), float(z.get("y0", 0.0))))
-    name_zones = [zone for zone in zones if zone.get("type") == "names"]
-    if not name_zones:
-        return _bk_build_transcription_rows(record_views, image_size)
-
-    raw_records = _records_from_views(record_views)
-    if not raw_records:
-        return []
-    raw_records = [record for record in raw_records if not _bk_zone_is_ignored(record, zones)]
-    raw_records = _bk_tab_expand_numeric_records(raw_records)
-    page_width, _page_height = _page_size(image_size, raw_records)
-    median_height = _median_height(raw_records)
-
-    typed_non_name_zones = [zone for zone in zones if zone.get("type") not in {"names"}]
-    age_records = _bk_zone_records_of_type(raw_records, zones, "age")
-    year_records = _bk_zone_records_of_type(raw_records, zones, "years")
-    place_records = _bk_zone_records_of_type(raw_records, zones, "places")
-    page_records = _bk_zone_records_of_type(raw_records, zones, "page_numbers")
-    heading_records = _bk_zone_records_of_type(raw_records, zones, "heading")
-
-    rows = []
-    seen = set()
-    for zone_order, zone in enumerate(name_zones):
-        records_in_zone = [
-            record for record in _bk_zone_records(raw_records, zone)
-            if not _bk_zone_has_type(
-                record,
-                typed_non_name_zones,
-                {"heading", "age", "years", "places", "page_numbers", "other", "ignore"},
-            )
-        ]
-        if not records_in_zone:
-            continue
-        zone_width = max(1.0, float(zone.get("x1", 0.0)) - float(zone.get("x0", 0.0)))
-        merged_records = _bk_tab_merge_visual_row_records(records_in_zone, zone_width)
-        for record in merged_records:
-            text = _bk_tab_clean(record.get("text", ""))
-            if not text or _bk_tab_is_separator(text) or _bk_tab_is_standalone_year(text):
-                continue
-            if not _bk_tab_has_letters(text):
-                continue
-            if len(text) <= 2 and len(text.split()) <= 1:
-                continue
-            same_line_year = _bk_zone_first_same_line_value(record, year_records, _bk_zone_year_value, median_height)
-            heading_year = _bk_zone_heading_year_for_record(record, heading_records, median_height)
-            context_year = same_line_year or heading_year or _bk_tab_nearest_context_year(record, year_records, page_width, median_height)
-            number = _bk_zone_first_same_line_value(record, page_records, _bk_zone_page_number_value, median_height)
-            age = _bk_zone_first_same_line_value(record, age_records, _bk_zone_age_value, median_height)
-            place = _bk_zone_first_same_line_value(record, place_records, _bk_zone_place_value, median_height)
-
-            row = _bk_tab_make_row_from_record(record, context_year, number)
-            if not row:
-                continue
-            if age:
-                row["age_original"] = age
-            if context_year:
-                row["year_in_source"] = context_year
-            if place:
-                row["place_in_source"] = place
-                row["place_resolved"] = place
-            if number:
-                row["number"] = number
-            row["_zone_order"] = zone_order
-            key = (
-                zone_order,
-                row.get("family_name", "").casefold(),
-                row.get("given_names", "").casefold(),
-                row.get("number", ""),
-                row.get("original_line", "").casefold(),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(row)
-
-    rows.sort(key=lambda row: (int(row.get("_zone_order", 0) or 0), float(row.get("_source_y", 0.0) or 0.0), float(row.get("_source_x", 0.0) or 0.0)))
-    last_year = ""
-    last_place = ""
-    out = []
-    for idx, row in enumerate(rows, start=1):
-        row = dict(row)
-        ysrc = _bk_tab_clean(row.get("year_in_source", ""))
-        if _bk_tab_is_ditto(ysrc):
-            row["year_resolved"] = last_year
-            row["year_in_source"] = "„"
-        else:
-            row["year_resolved"] = ysrc
-            if ysrc:
-                last_year = ysrc
-        psrc = _bk_tab_clean(row.get("place_in_source", ""))
-        if _bk_tab_is_ditto(psrc):
-            row["place_resolved"] = last_place
-            row["place_in_source"] = "„"
-        else:
-            row["place_resolved"] = psrc
-            if psrc:
-                last_place = psrc
-        row["id"] = f"entry_{idx:04d}"
-        row.pop("_source_x", None)
-        row.pop("_source_y", None)
-        row.pop("_zone_order", None)
-        out.append(row)
-    return out
 
 
 class _BKExportZoneRectItem(QGraphicsRectItem if QGraphicsRectItem is not None else object):
@@ -3001,7 +2298,7 @@ class _BKExportZonesDialog(QDialog):
         self._zones = [_bk_export_clean_zone(z, i) for i, z in enumerate(zones or [])]
         self._zones = [z for z in self._zones if z]
         self._items = []
-        self.setWindowTitle(_bk_tab_tr(window, "export_zones_title", "Tabellenbereiche festlegen"))
+        self.setWindowTitle(_bk_tab_tr(window, "export_zones_title"))
         self.setModal(True)
         self.resize(1480, 940)
         try:
@@ -3028,16 +2325,16 @@ class _BKExportZonesDialog(QDialog):
 
         side = QVBoxLayout()
         side.setSpacing(8)
-        intro = QLabel(_bk_tab_tr(window, "export_zones_intro", "Ziehe Bereiche direkt auf dem Bild. Bereiche können per Drag&Drop und über die Eckpunkte angepasst werden."), self)
+        intro = QLabel(_bk_tab_tr(window, "export_zones_intro"), self)
         intro.setWordWrap(True)
         side.addWidget(intro)
 
         self.table = QTableWidget(0, 3, self)
         self.table.setMinimumWidth(720)
         self.table.setHorizontalHeaderLabels([
-            _bk_tab_tr(window, "export_zones_col_name", "Name"),
-            _bk_tab_tr(window, "export_zones_col_type", "Typ"),
-            _bk_tab_tr(window, "export_zones_col_rect", "Bereich"),
+            _bk_tab_tr(window, "export_zones_col_name"),
+            _bk_tab_tr(window, "export_zones_col_type"),
+            _bk_tab_tr(window, "export_zones_col_rect"),
         ])
         try:
             self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -3051,23 +2348,23 @@ class _BKExportZonesDialog(QDialog):
         side.addWidget(self.table, 1)
 
         button_row1 = QHBoxLayout()
-        self.btn_up = QPushButton(_bk_tab_tr(window, "export_zones_up", "Nach oben"), self)
-        self.btn_down = QPushButton(_bk_tab_tr(window, "export_zones_down", "Nach unten"), self)
+        self.btn_up = QPushButton(_bk_tab_tr(window, "export_zones_up"), self)
+        self.btn_down = QPushButton(_bk_tab_tr(window, "export_zones_down"), self)
         button_row1.addWidget(self.btn_up)
         button_row1.addWidget(self.btn_down)
         side.addLayout(button_row1)
 
         button_row2 = QHBoxLayout()
-        self.btn_delete = QPushButton(_bk_tab_tr(window, "export_zones_delete", "Löschen"), self)
-        self.btn_clear = QPushButton(_bk_tab_tr(window, "export_zones_clear", "Alle löschen"), self)
+        self.btn_delete = QPushButton(_bk_tab_tr(window, "export_zones_delete"), self)
+        self.btn_clear = QPushButton(_bk_tab_tr(window, "export_zones_clear"), self)
         button_row2.addWidget(self.btn_delete)
         button_row2.addWidget(self.btn_clear)
         side.addLayout(button_row2)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         try:
-            buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok", "OK"))
-            buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel", "Abbrechen"))
+            buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok"))
+            buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel"))
         except Exception:
             pass
         buttons.accepted.connect(self.accept)
@@ -3168,7 +2465,7 @@ class _BKExportZonesDialog(QDialog):
             "x1": rect.right(),
             "y1": rect.bottom(),
             "type": "names",
-            "name": _bk_tab_tr(self._window, "export_zone_default_name", "Bereich {}").format(len(self._zones) + 1),
+            "name": _bk_tab_tr(self._window, "export_zone_default_name").format(len(self._zones) + 1),
             "order": len(self._zones),
         }, len(self._zones))
         if zone:
@@ -3306,8 +2603,6 @@ try:
     __all__.extend([
         '_BKExportZoneRectItem',
         '_bk_zone_age_value',
-        '_bk_zone_first_same_line_value',
-        '_bk_zone_heading_year_for_record',
         '_bk_zone_page_number_value',
         '_bk_zone_place_value',
         '_bk_zone_year_value',
@@ -3334,51 +2629,8 @@ _BK_ZONE_LEGACY_TYPES = {
 }
 
 
-def _bk_export_zone_title(window, zone_type: str) -> str:
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(str(zone_type or "original_line"), str(zone_type or "original_line"))
-    if zone_type == "ignore":
-        return _bk_tab_tr(window, "export_zone_type_ignore", "Ignorieren")
-    if zone_type in _BK_TABULAR_COLUMN_BY_KEY:
-        return _bk_tabular_column_title(window, zone_type)
-    return _bk_tabular_column_title(window, "original_line")
 
 
-def _bk_export_clean_zone(zone, order: int = 0):
-    if not isinstance(zone, dict):
-        return None
-    try:
-        x0 = float(zone.get("x0", 0.0))
-        y0 = float(zone.get("y0", 0.0))
-        x1 = float(zone.get("x1", 0.0))
-        y1 = float(zone.get("y1", 0.0))
-    except Exception:
-        return None
-    if x1 < x0:
-        x0, x1 = x1, x0
-    if y1 < y0:
-        y0, y1 = y1, y0
-    if x1 - x0 < 3 or y1 - y0 < 3:
-        return None
-    zone_type = str(zone.get("type", "original_line") or "original_line")
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(zone_type, zone_type)
-    if zone_type not in _BK_ZONE_TYPES:
-        zone_type = "original_line"
-    name = str(zone.get("name", "") or "").strip()
-    if not name:
-        name = f"Bereich {int(order) + 1}"
-    try:
-        order_value = int(zone.get("order", order) or order)
-    except Exception:
-        order_value = int(order or 0)
-    return {
-        "x0": x0,
-        "y0": y0,
-        "x1": x1,
-        "y1": y1,
-        "type": zone_type,
-        "name": name,
-        "order": order_value,
-    }
 
 
 def _bk_zone_contains_record(zone, record) -> bool:
@@ -3404,207 +2656,10 @@ def _bk_zone_contains_record(zone, record) -> bool:
     return ((ix1 - ix0) * (iy1 - iy0)) >= 1.0
 
 
-def _bk_zone_records_of_type(records, zones, zone_type):
-    out = []
-    seen = set()
-    for zone in zones or []:
-        if zone.get("type") != zone_type:
-            continue
-        for record in _bk_zone_records(records, zone):
-            key = int(record.get("index", id(record)) or 0)
-            if key not in seen:
-                seen.add(key)
-                out.append(record)
-    return out
 
 
-def _bk_zone_value_for_column(column_key: str, text: str) -> str:
-    text = _bk_tab_clean(text)
-    if not text:
-        return ""
-    if column_key == "family_name":
-        fam, _given, _full = _bk_tab_split_name(text)
-        return fam or text.strip(" ,.;:-")
-    if column_key == "given_names":
-        _fam, given, _full = _bk_tab_split_name(text)
-        return given or text.strip(" ,.;:-")
-    if column_key == "relationship":
-        return _bk_tab_extract_relationship(text) or text.strip(" ,.;:-")
-    if column_key == "age_original":
-        return _bk_zone_age_value(text)
-    if column_key == "date_original":
-        return _bk_tab_extract_date(text)
-    if column_key == "year_resolved":
-        return _bk_zone_year_value(text)
-    if column_key == "place_in_source":
-        return _bk_zone_place_value(text)
-    if column_key == "number":
-        return _bk_zone_page_number_value(text)
-    if column_key == "original_line":
-        return text
-    return text
 
 
-def _bk_zone_records_by_column(records, zones):
-    by_col = {key: [] for key in _BK_TABULAR_KEYS}
-    for key in _BK_TABULAR_KEYS:
-        by_col[key] = _bk_zone_records_of_type(records, zones, key)
-    return by_col
-
-
-def _bk_zone_field_same_line_value(record, field_records, column_key, median_height):
-    return _bk_zone_first_same_line_value(
-        record,
-        field_records,
-        lambda value: _bk_zone_value_for_column(column_key, value),
-        median_height,
-    )
-
-
-def _bk_zone_merge_records_in_zone(records, zone):
-    zone_width = max(1.0, float(zone.get("x1", 0.0)) - float(zone.get("x0", 0.0)))
-    return _bk_tab_merge_visual_row_records(_bk_zone_records(records, zone), zone_width)
-
-
-def _bk_zone_base_records(raw_records, zones):
-    preferred = ("original_line", "family_name", "given_names", "relationship")
-    for key in preferred:
-        zones_for_key = [z for z in zones if z.get("type") == key]
-        if zones_for_key:
-            out = []
-            for zone in zones_for_key:
-                out.extend(_bk_zone_merge_records_in_zone(raw_records, zone))
-            if out:
-                return key, out
-    return "", []
-
-
-def _bk_zone_join_original_line(row_values, fallback=""):
-    parts = []
-    for key in _BK_TABULAR_KEYS:
-        if key == "original_line":
-            continue
-        value = _bk_tab_clean(row_values.get(key, ""))
-        if value:
-            parts.append(value)
-    joined = _bk_tab_join_text_fragments(parts)
-    return joined or _bk_tab_clean(fallback)
-
-
-def _bk_build_transcription_rows_with_zones(record_views, image_size=None, zones=None):
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [zone for zone in zones if zone]
-    zones.sort(key=lambda z: (int(z.get("order", 0) or 0), float(z.get("x0", 0.0)), float(z.get("y0", 0.0))))
-    if not zones:
-        return _bk_build_transcription_rows(record_views, image_size)
-
-    raw_records = _records_from_views(record_views)
-    if not raw_records:
-        return []
-    raw_records = [record for record in raw_records if not _bk_zone_is_ignored(record, zones)]
-    raw_records = _bk_tab_expand_numeric_records(raw_records)
-    if not raw_records:
-        return []
-
-    page_width, _page_height = _page_size(image_size, raw_records)
-    median_height = _median_height(raw_records)
-    by_col = _bk_zone_records_by_column(raw_records, zones)
-    base_key, base_records = _bk_zone_base_records(raw_records, zones)
-    if not base_records:
-        return _bk_build_transcription_rows(record_views, image_size)
-
-    rows = []
-    seen = set()
-    for base in sorted(base_records, key=lambda r: (float(r.get("y0", 0.0) or 0.0), float(r.get("x0", 0.0) or 0.0), int(r.get("index", 0) or 0))):
-        base_text = _bk_tab_clean(base.get("text", ""))
-        if not base_text or _bk_tab_is_separator(base_text):
-            continue
-        row_values = {key: "" for key in _BK_TABULAR_KEYS}
-
-        if base_key == "original_line":
-            parsed = _bk_tab_make_row_from_record(base, "", "") or {}
-            for key in _BK_TABULAR_KEYS:
-                row_values[key] = _bk_tab_clean(parsed.get(key, ""))
-            row_values["original_line"] = base_text
-        else:
-            row_values[base_key] = _bk_zone_value_for_column(base_key, base_text)
-            row_values["original_line"] = base_text
-
-        for key in _BK_TABULAR_KEYS:
-            if key == base_key or key == "original_line":
-                continue
-            value = _bk_zone_field_same_line_value(base, by_col.get(key, []), key, median_height)
-            if value:
-                row_values[key] = value
-
-        if not row_values.get("year_resolved"):
-            row_values["year_resolved"] = _bk_zone_heading_year_for_record(base, by_col.get("year_resolved", []), median_height)
-            if not row_values.get("year_resolved"):
-                row_values["year_resolved"] = _bk_tab_nearest_context_year(base, by_col.get("year_resolved", []), page_width, median_height)
-
-        if not row_values.get("original_line"):
-            row_values["original_line"] = _bk_zone_join_original_line(row_values, base_text)
-        else:
-            # Wenn mehrere Spaltenbereiche existieren, soll Originalzeile alle gleichzeiligen Werte enthalten.
-            merged_original = _bk_zone_join_original_line(row_values, row_values.get("original_line", ""))
-            if merged_original:
-                row_values["original_line"] = merged_original
-
-        # Wenn nur Originalzeile gesetzt ist, trotzdem die klassische Namenszerlegung nutzen.
-        if not row_values.get("family_name") and row_values.get("original_line"):
-            fam, given, _full = _bk_tab_split_name(row_values["original_line"])
-            row_values["family_name"] = fam
-            if not row_values.get("given_names"):
-                row_values["given_names"] = given
-        if not (row_values.get("family_name") or row_values.get("given_names") or row_values.get("original_line")):
-            continue
-
-        row = {
-            "family_name": row_values.get("family_name", ""),
-            "given_names": row_values.get("given_names", ""),
-            "relationship": row_values.get("relationship", ""),
-            "age_original": row_values.get("age_original", ""),
-            "date_original": row_values.get("date_original", ""),
-            "year_resolved": row_values.get("year_resolved", ""),
-            "year_in_source": row_values.get("year_resolved", ""),
-            "place_resolved": row_values.get("place_in_source", ""),
-            "place_in_source": row_values.get("place_in_source", ""),
-            "number": row_values.get("number", ""),
-            "original_line": row_values.get("original_line", ""),
-            "_source_y": float(base.get("y0", 0.0) or 0.0),
-            "_source_x": float(base.get("x0", 0.0) or 0.0),
-        }
-        key = tuple(_bk_tab_clean(row.get(k, "")).casefold() for k in ("family_name", "given_names", "relationship", "number", "original_line"))
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(row)
-
-    rows.sort(key=lambda row: (float(row.get("_source_y", 0.0) or 0.0), float(row.get("_source_x", 0.0) or 0.0)))
-    out = []
-    last_year = ""
-    last_place = ""
-    for idx, row in enumerate(rows, start=1):
-        row = dict(row)
-        ysrc = _bk_tab_clean(row.get("year_in_source", ""))
-        if _bk_tab_is_ditto(ysrc):
-            row["year_resolved"] = last_year
-            row["year_in_source"] = "„"
-        elif ysrc:
-            row["year_resolved"] = ysrc
-            last_year = ysrc
-        psrc = _bk_tab_clean(row.get("place_in_source", ""))
-        if _bk_tab_is_ditto(psrc):
-            row["place_resolved"] = last_place
-            row["place_in_source"] = "„"
-        elif psrc:
-            row["place_resolved"] = psrc
-            last_place = psrc
-        row["id"] = f"entry_{idx:04d}"
-        row.pop("_source_x", None)
-        row.pop("_source_y", None)
-        out.append(row)
-    return out
 
 
 # Griffpunkt-Fix: Bei Mausklick auf einen Bereich darf der Bereich nicht sofort neu gezeichnet werden,
@@ -3641,7 +2696,7 @@ def _bk_zone_dialog_init_final(self, window, task, image_path, zones=None):
     self._zones = [z for z in self._zones if z]
     self._items = []
     self._suppress_zone_redraw = False
-    self.setWindowTitle(_bk_tab_tr(window, "export_zones_title", "Tabellenbereiche festlegen"))
+    self.setWindowTitle(_bk_tab_tr(window, "export_zones_title"))
     self.setModal(True)
     self.resize(1520, 940)
     try:
@@ -3671,7 +2726,6 @@ def _bk_zone_dialog_init_final(self, window, task, image_path, zones=None):
     intro = QLabel(_bk_tab_tr(
         window,
         "export_zones_intro_column_types",
-        "Ziehe Bereiche direkt auf dem Bild. Klicke einen Bereich an, um ihn auszuwählen. Ziehe ihn zum Verschieben oder ziehe die Eckpunkte zum Skalieren. Der Datentyp entspricht den Tabellenspalten.",
     ), self)
     intro.setWordWrap(True)
     side.addWidget(intro)
@@ -3679,9 +2733,9 @@ def _bk_zone_dialog_init_final(self, window, task, image_path, zones=None):
     self.table = QTableWidget(0, 3, self)
     self.table.setMinimumWidth(760)
     self.table.setHorizontalHeaderLabels([
-        _bk_tab_tr(window, "export_zones_col_name", "Name"),
-        _bk_tab_tr(window, "export_zones_col_type", "Datentyp"),
-        _bk_tab_tr(window, "export_zones_col_rect", "Bereich"),
+        _bk_tab_tr(window, "export_zones_col_name"),
+        _bk_tab_tr(window, "export_zones_col_type"),
+        _bk_tab_tr(window, "export_zones_col_rect"),
     ])
     try:
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -3695,23 +2749,23 @@ def _bk_zone_dialog_init_final(self, window, task, image_path, zones=None):
     side.addWidget(self.table, 1)
 
     button_row1 = QHBoxLayout()
-    self.btn_up = QPushButton(_bk_tab_tr(window, "export_zones_up", "Nach oben"), self)
-    self.btn_down = QPushButton(_bk_tab_tr(window, "export_zones_down", "Nach unten"), self)
+    self.btn_up = QPushButton(_bk_tab_tr(window, "export_zones_up"), self)
+    self.btn_down = QPushButton(_bk_tab_tr(window, "export_zones_down"), self)
     button_row1.addWidget(self.btn_up)
     button_row1.addWidget(self.btn_down)
     side.addLayout(button_row1)
 
     button_row2 = QHBoxLayout()
-    self.btn_delete = QPushButton(_bk_tab_tr(window, "export_zones_delete", "Löschen"), self)
-    self.btn_clear = QPushButton(_bk_tab_tr(window, "export_zones_clear", "Alle löschen"), self)
+    self.btn_delete = QPushButton(_bk_tab_tr(window, "export_zones_delete"), self)
+    self.btn_clear = QPushButton(_bk_tab_tr(window, "export_zones_clear"), self)
     button_row2.addWidget(self.btn_delete)
     button_row2.addWidget(self.btn_clear)
     side.addLayout(button_row2)
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel"))
     except Exception:
         pass
     buttons.accepted.connect(self.accept)
@@ -3732,14 +2786,6 @@ def _bk_zone_dialog_init_final(self, window, task, image_path, zones=None):
     self.refresh_table()
 
 
-def _bk_zone_combo_final(self, row, zone_type):
-    combo = QComboBox(self.table)
-    for value in _BK_ZONE_TYPES:
-        combo.addItem(_bk_export_zone_title(self._window, value), value)
-    idx = combo.findData(zone_type if zone_type in _BK_ZONE_TYPES else "original_line")
-    combo.setCurrentIndex(max(0, idx))
-    combo.currentIndexChanged.connect(lambda _=0, r=row, c=combo: self._combo_changed(r, c))
-    return combo
 
 
 def _bk_zone_add_from_rect_final(self, rect):
@@ -3749,7 +2795,7 @@ def _bk_zone_add_from_rect_final(self, rect):
         "x1": rect.right(),
         "y1": rect.bottom(),
         "type": "original_line",
-        "name": _bk_tab_tr(self._window, "export_zone_default_name", "Bereich {}").format(len(self._zones) + 1),
+        "name": _bk_tab_tr(self._window, "export_zone_default_name").format(len(self._zones) + 1),
         "order": len(self._zones),
     }, len(self._zones))
     if zone:
@@ -3837,29 +2883,29 @@ def _bk_zone_table_item_changed_final(self, item):
 
 def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(16, 14, 16, 14)
     layout.setSpacing(10)
 
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
 
     rb_original = rb_lines = rb_table = None
     if include_text_modes:
         if QGroupBox is not None:
-            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg)
+            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg)
             mode_layout = QVBoxLayout(mode_box)
             mode_layout.setContentsMargins(12, 10, 12, 10)
         else:
             mode_box = None
             mode_layout = QVBoxLayout()
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle mit auswählbaren Spalten"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table"})
         rb_lines.setChecked(mode == "lines")
@@ -3875,13 +2921,13 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
     selected_keys = _bk_load_saved_column_keys(self)
     checkboxes = {}
     if QGroupBox is not None:
-        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg)
+        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg)
         columns_layout = QVBoxLayout(columns_box)
         columns_layout.setContentsMargins(12, 10, 12, 10)
     else:
         columns_box = None
         columns_layout = QVBoxLayout()
-        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg))
+        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label"), dlg))
 
     if QGridLayout is not None:
         checkbox_grid = QGridLayout()
@@ -3902,9 +2948,9 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
             columns_layout.addWidget(cb)
 
     quick_row = QHBoxLayout()
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     quick_row.addWidget(btn_all)
     quick_row.addWidget(btn_none)
     quick_row.addWidget(btn_remember)
@@ -3916,15 +2962,15 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
         layout.addLayout(columns_layout)
 
     # Unabhängig von der Tabellen-Darstellung: Bereiche können immer definiert werden.
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try:
         remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception:
         remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1)
     zone_layout.addWidget(btn_zones)
     if zone_box is not None:
@@ -3948,7 +2994,7 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["remembered"] = True
         result["columns"] = _bk_save_column_keys(self, keys)
@@ -4018,8 +3064,8 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception:
         pass
 
@@ -4043,7 +3089,7 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
                 mode = "original"
         keys = current_checked_keys()
         if mode == "table" and not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["mode"] = mode
         result["columns"] = _bk_normalize_column_keys(keys)
@@ -4070,7 +3116,6 @@ def _bk_zone_column_choice_dialog_final(self, fmt=None, include_text_modes=False
 try:
     _BKExportZoneRectItem.mousePressEvent = _bk_zone_rect_mouse_press_final
     _BKExportZonesDialog.__init__ = _bk_zone_dialog_init_final
-    _BKExportZonesDialog._zone_type_combo = _bk_zone_combo_final
     _BKExportZonesDialog.add_zone_from_rect = _bk_zone_add_from_rect_final
     _BKExportZonesDialog.redraw_zones = _bk_zone_redraw_final
     _BKExportZonesDialog.refresh_table = _bk_zone_refresh_table_final
@@ -4160,51 +3205,8 @@ _BK_ZONE_LEGACY_TYPES = {
 }
 
 
-def _bk_export_zone_title(window, zone_type: str) -> str:
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(str(zone_type or "full_name"), str(zone_type or "full_name"))
-    if zone_type == "ignore":
-        return _bk_tab_tr(window, "export_zone_type_ignore", "Ignorieren")
-    if zone_type in _BK_TABULAR_COLUMN_BY_KEY:
-        return _bk_tabular_column_title(window, zone_type)
-    return _bk_tabular_column_title(window, "full_name")
 
 
-def _bk_export_clean_zone(zone, order: int = 0):
-    if not isinstance(zone, dict):
-        return None
-    try:
-        x0 = float(zone.get("x0", 0.0))
-        y0 = float(zone.get("y0", 0.0))
-        x1 = float(zone.get("x1", 0.0))
-        y1 = float(zone.get("y1", 0.0))
-    except Exception:
-        return None
-    if x1 < x0:
-        x0, x1 = x1, x0
-    if y1 < y0:
-        y0, y1 = y1, y0
-    if x1 - x0 < 3 or y1 - y0 < 3:
-        return None
-    zone_type = str(zone.get("type", "full_name") or "full_name")
-    zone_type = _BK_ZONE_LEGACY_TYPES.get(zone_type, zone_type)
-    if zone_type not in _BK_ZONE_TYPES:
-        zone_type = "full_name"
-    name = str(zone.get("name", "") or "").strip()
-    if not name:
-        name = f"Bereich {int(order) + 1}"
-    try:
-        order_value = int(zone.get("order", order) or order)
-    except Exception:
-        order_value = int(order or 0)
-    return {
-        "x0": x0,
-        "y0": y0,
-        "x1": x1,
-        "y1": y1,
-        "type": zone_type,
-        "name": name,
-        "order": order_value,
-    }
 
 
 def _bk_zone_date_parts(text: str):
@@ -4235,120 +3237,10 @@ def _bk_zone_postal_code(text: str) -> str:
     return m.group(0) if m else ""
 
 
-def _bk_zone_value_for_column(column_key: str, text: str) -> str:
-    text = _bk_tab_clean(text)
-    if not text:
-        return ""
-    if column_key == "family_name":
-        fam, _given, _full = _bk_tab_split_name(text)
-        return fam or text.strip(" ,.;:-")
-    if column_key == "given_names":
-        _fam, given, _full = _bk_tab_split_name(text)
-        return given or text.strip(" ,.;:-")
-    if column_key == "full_name":
-        fam, given, full = _bk_tab_split_name(text)
-        return full or _bk_tab_join_text_fragments([fam, given]) or text.strip(" ,.;:-")
-    if column_key == "middle_names":
-        return _bk_zone_middle_names(text) or text.strip(" ,.;:-")
-    if column_key == "relationship":
-        return _bk_tab_extract_relationship(text) or text.strip(" ,.;:-")
-    if column_key == "age_original":
-        return _bk_zone_age_value(text) or text.strip(" ,.;:-")
-    if column_key == "days":
-        day, _month = _bk_zone_date_parts(text)
-        return day or text.strip(" ,.;:-")
-    if column_key == "months":
-        _day, month = _bk_zone_date_parts(text)
-        return month or text.strip(" ,.;:-")
-    if column_key in {"date_original", "marriage_date", "death_date"}:
-        return _bk_tab_extract_date(text) or text.strip(" ,.;:-")
-    if column_key == "year_resolved":
-        return _bk_zone_year_value(text) or text.strip(" ,.;:-")
-    if column_key in {"place_in_source", "residence_place", "birth_place", "death_place", "street"}:
-        return _bk_zone_place_value(text) or text.strip(" ,.;:-")
-    if column_key == "house_number":
-        return _bk_zone_house_number(text) or text.strip(" ,.;:-")
-    if column_key == "postal_code":
-        return _bk_zone_postal_code(text) or text.strip(" ,.;:-")
-    if column_key == "number":
-        return _bk_zone_page_number_value(text) or text.strip(" ,.;:-")
-    if column_key in {
-        "occupation",
-        "spouse",
-        "partner",
-        "children",
-        "grandchildren",
-        "grandparents",
-        "great_grandparents",
-        "great_great_grandparents",
-        "other",
-        "unknown",
-        "original_line",
-    }:
-        return text
-    return text
 
 
-def _bk_zone_records_of_type(records, zones, zone_type):
-    out = []
-    seen = set()
-    for zone in zones or []:
-        if zone.get("type") != zone_type:
-            continue
-        zone_records = _bk_zone_records(records, zone)
-        # Alle Overlay-Boxen innerhalb eines Bereichs werden zeilenweise zu einem
-        # logischen Wert verbunden. Das ist wichtig bei selbst gezeichneten oder
-        # getrennten Boxen innerhalb derselben Spalte.
-        zone_width = max(1.0, float(zone.get("x1", 0.0)) - float(zone.get("x0", 0.0)))
-        for record in _bk_tab_merge_visual_row_records(zone_records, zone_width):
-            key = (
-                round(float(record.get("x0", 0.0) or 0.0), 2),
-                round(float(record.get("y0", 0.0) or 0.0), 2),
-                _bk_tab_clean(record.get("text", "")),
-            )
-            if key not in seen:
-                seen.add(key)
-                out.append(record)
-    return out
 
 
-def _bk_zone_field_same_line_value(record, field_records, column_key, median_height):
-    if not field_records:
-        return ""
-    rcy = float(record.get("cy", record.get("y0", 0.0)) or 0.0)
-    rh = float(record.get("h", median_height) or median_height)
-    y_tol = max(7.0, median_height * 1.15, rh * 1.10)
-    candidates = []
-    for candidate in field_records:
-        value = _bk_zone_value_for_column(column_key, candidate.get("text", ""))
-        if not value:
-            continue
-        ccy = float(candidate.get("cy", candidate.get("y0", 0.0)) or 0.0)
-        if abs(ccy - rcy) <= y_tol:
-            candidates.append((float(candidate.get("x0", 0.0) or 0.0), value))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: item[0])
-    values = []
-    for _x, value in candidates:
-        if value and value not in values:
-            values.append(value)
-    if column_key in {"number", "house_number", "postal_code", "days", "months", "year_resolved"}:
-        return values[-1] if values else ""
-    return _bk_tab_join_text_fragments(values)
-
-
-def _bk_zone_base_records(raw_records, zones):
-    preferred = ("full_name", "original_line", "family_name", "given_names", "relationship")
-    for key in preferred:
-        zones_for_key = [z for z in zones if z.get("type") == key]
-        if zones_for_key:
-            out = []
-            for zone in zones_for_key:
-                out.extend(_bk_zone_records_of_type(raw_records, [zone], key))
-            if out:
-                return key, out
-    return "", []
 
 
 def _bk_zone_apply_name_values(row_values, key, value):
@@ -4374,134 +3266,8 @@ def _bk_zone_apply_name_values(row_values, key, value):
                 row_values["middle_names"] = " ".join(parts[1:])
 
 
-def _bk_zone_join_original_line(row_values, fallback=""):
-    parts = []
-    for key in _BK_TABULAR_KEYS:
-        if key in {"original_line", "unknown"}:
-            continue
-        value = _bk_tab_clean(row_values.get(key, ""))
-        if value:
-            parts.append(value)
-    joined = _bk_tab_join_text_fragments(parts)
-    return joined or _bk_tab_clean(fallback)
 
 
-def _bk_build_transcription_rows_with_zones(record_views, image_size=None, zones=None):
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [zone for zone in zones if zone]
-    zones.sort(key=lambda z: (int(z.get("order", 0) or 0), float(z.get("x0", 0.0)), float(z.get("y0", 0.0))))
-    if not zones:
-        return _bk_build_transcription_rows(record_views, image_size)
-
-    raw_records = _records_from_views(record_views)
-    if not raw_records:
-        return []
-    raw_records = [record for record in raw_records if not _bk_zone_is_ignored(record, zones)]
-    raw_records = _bk_tab_expand_numeric_records(raw_records)
-    if not raw_records:
-        return []
-
-    page_width, _page_height = _page_size(image_size, raw_records)
-    median_height = _median_height(raw_records)
-    by_col = {key: _bk_zone_records_of_type(raw_records, zones, key) for key in _BK_TABULAR_KEYS}
-    base_key, base_records = _bk_zone_base_records(raw_records, zones)
-    if not base_records:
-        return _bk_build_transcription_rows(record_views, image_size)
-
-    rows = []
-    seen = set()
-    for base in sorted(base_records, key=lambda r: (float(r.get("y0", 0.0) or 0.0), float(r.get("x0", 0.0) or 0.0), int(r.get("index", 0) or 0))):
-        base_text = _bk_tab_clean(base.get("text", ""))
-        if not base_text or _bk_tab_is_separator(base_text):
-            continue
-        row_values = {key: "" for key in _BK_TABULAR_KEYS}
-        base_value = _bk_zone_value_for_column(base_key, base_text)
-        if base_key in {"full_name", "family_name", "given_names"}:
-            _bk_zone_apply_name_values(row_values, base_key, base_value)
-            row_values["original_line"] = base_text
-        elif base_key == "original_line":
-            parsed = _bk_tab_make_row_from_record(base, "", "") or {}
-            for key in _BK_TABULAR_KEYS:
-                row_values[key] = _bk_tab_clean(parsed.get(key, ""))
-            row_values["original_line"] = base_text
-            full = _bk_tab_join_text_fragments([row_values.get("family_name", ""), row_values.get("given_names", "")])
-            if full:
-                row_values["full_name"] = full
-                row_values["middle_names"] = row_values.get("middle_names") or _bk_zone_middle_names(full)
-        else:
-            row_values[base_key] = base_value
-            row_values["original_line"] = base_text
-
-        for key in _BK_TABULAR_KEYS:
-            if key == base_key or key == "original_line":
-                continue
-            value = _bk_zone_field_same_line_value(base, by_col.get(key, []), key, median_height)
-            if not value:
-                continue
-            if key in {"full_name", "family_name", "given_names"}:
-                _bk_zone_apply_name_values(row_values, key, value)
-            else:
-                row_values[key] = value
-
-        if not row_values.get("year_resolved"):
-            row_values["year_resolved"] = _bk_zone_heading_year_for_record(base, by_col.get("year_resolved", []), median_height)
-            if not row_values.get("year_resolved"):
-                row_values["year_resolved"] = _bk_tab_nearest_context_year(base, by_col.get("year_resolved", []), page_width, median_height)
-        if row_values.get("date_original"):
-            row_values["days"] = row_values.get("days") or _bk_zone_date_parts(row_values["date_original"])[0]
-            row_values["months"] = row_values.get("months") or _bk_zone_date_parts(row_values["date_original"])[1]
-        if not row_values.get("full_name"):
-            full = _bk_tab_join_text_fragments([row_values.get("family_name", ""), row_values.get("given_names", "")])
-            if full:
-                row_values["full_name"] = full
-        if not row_values.get("original_line"):
-            row_values["original_line"] = _bk_zone_join_original_line(row_values, base_text)
-        else:
-            merged_original = _bk_zone_join_original_line(row_values, row_values.get("original_line", ""))
-            if merged_original:
-                row_values["original_line"] = merged_original
-
-        if not (row_values.get("family_name") or row_values.get("given_names") or row_values.get("full_name") or row_values.get("original_line")):
-            continue
-
-        row = {key: row_values.get(key, "") for key in _BK_TABULAR_KEYS}
-        # Kompatibilität mit älteren Exportern/JSON-Verbrauchern.
-        row["year_in_source"] = row.get("year_resolved", "")
-        row["place_resolved"] = row.get("place_in_source", "")
-        row["_source_y"] = float(base.get("y0", 0.0) or 0.0)
-        row["_source_x"] = float(base.get("x0", 0.0) or 0.0)
-        key = tuple(_bk_tab_clean(row.get(k, "")).casefold() for k in ("family_name", "given_names", "full_name", "number", "original_line"))
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(row)
-
-    rows.sort(key=lambda row: (float(row.get("_source_y", 0.0) or 0.0), float(row.get("_source_x", 0.0) or 0.0)))
-    out = []
-    last_year = ""
-    last_place = ""
-    for idx, row in enumerate(rows, start=1):
-        row = dict(row)
-        ysrc = _bk_tab_clean(row.get("year_in_source", row.get("year_resolved", "")))
-        if _bk_tab_is_ditto(ysrc):
-            row["year_resolved"] = last_year
-            row["year_in_source"] = "„"
-        elif ysrc:
-            row["year_resolved"] = ysrc
-            row["year_in_source"] = ysrc
-            last_year = ysrc
-        psrc = _bk_tab_clean(row.get("place_in_source", ""))
-        if _bk_tab_is_ditto(psrc):
-            row["place_resolved"] = last_place
-            row["place_in_source"] = "„"
-        elif psrc:
-            row["place_resolved"] = psrc
-            last_place = psrc
-        row["id"] = f"entry_{idx:04d}"
-        row.pop("_source_x", None)
-        row.pop("_source_y", None)
-        out.append(row)
-    return out
 
 
 def _bk_zone_rect_expanded_bounding_rect(self):
@@ -4593,11 +3359,11 @@ def _bk_open_export_zones_dialog_global(window, task):
         except Exception:
             task = None
     if task is None:
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_need_done_for_ai", "Bitte zuerst OCR-Ergebnisse erzeugen."))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_need_done_for_ai"))
         return None
     path = getattr(task, "path", "")
     if not path or not os.path.exists(path):
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_project_file_missing", "Datei nicht gefunden: {}").format(path))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_project_file_missing").format(path))
         return None
     task_zones = _bk_get_task_export_zones(task)
     initial_zones = task_zones or _bk_export_load_global_zones(window)
@@ -4628,7 +3394,7 @@ def _bk_open_export_zones_dialog_global(window, task):
 def _bk_zone_dialog_init_genealogy(self, window, task, image_path, zones=None):
     _bk_zone_dialog_init_final(self, window, task, image_path, zones)
     try:
-        self.cb_remember_zones = QCheckBox(_bk_tab_tr(window, "export_zones_remember", "Sensible Bereiche merken"), self)
+        self.cb_remember_zones = QCheckBox(_bk_tab_tr(window, "export_zones_remember"), self)
         layout = self.layout()
         side_layout = layout.itemAt(1).layout() if layout and layout.count() > 1 else None
         if side_layout is not None:
@@ -4657,46 +3423,12 @@ def _bk_zone_rows_for_item_global(window, item, image_size, use_zones):
     return rows
 
 
-def _bk_zone_tabular_render_file_global(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None) and (fmt_l in _BK_TABLE_EXPORT_FMTS or fmt_l in _BK_TEXT_LAYOUT_FMTS):
-        _text, _kr, pil_image, record_views = item.results
-        try:
-            export_image = _load_image_color(item.path)
-        except Exception:
-            export_image = pil_image
-        image_size = getattr(export_image, "size", None) or getattr(pil_image, "size", None)
-        column_keys = _bk_current_column_keys_for_render(self)
-        use_zones = bool(getattr(self, "_bk_export_use_zones", False))
-        if fmt_l in _BK_TABLE_EXPORT_FMTS:
-            rows = _bk_zone_rows_for_item_global(self, item, image_size, use_zones)
-            if fmt_l == "csv":
-                return _bk_write_transcription_csv(path, rows, column_keys, self)
-            if fmt_l == "json":
-                return _bk_write_transcription_json(path, item, rows, column_keys, self)
-            if fmt_l in {"xlsx", "excel"}:
-                return _bk_write_transcription_xlsx(path, rows, column_keys, self)
-            if fmt_l in {"ods", "calc"}:
-                return _bk_write_transcription_ods(path, rows, column_keys, self)
-        if fmt_l in _BK_TEXT_LAYOUT_FMTS:
-            mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
-            if mode == "table":
-                rows = _bk_zone_rows_for_item_global(self, item, image_size, use_zones)
-                if fmt_l in {"txt", "text", "txt_plain"}:
-                    return _bk_write_table_txt(path, rows, column_keys, self)
-                if fmt_l in {"docx", "word"}:
-                    return _bk_write_table_docx(path, rows, column_keys, self)
-                if fmt_l == "odt":
-                    return _bk_write_table_odt(path, rows, column_keys, self)
-    if callable(_BK_ZONE_PREV_RENDER_FILE):
-        return _BK_ZONE_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
 def _bk_zone_export_sqlite_json_global(self):
     task = _bk_fix36_current_task(self) if callable(globals().get("_bk_fix36_current_task")) else None
     if not task or not getattr(task, "results", None):
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_ocr_results", "Keine OCR-Ergebnisse vorhanden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_ocr_results"))
         return
     result = _bk_column_choice_dialog(self, "sqlite-json", include_text_modes=False)
     if result is None:
@@ -4717,15 +3449,15 @@ def _bk_zone_export_sqlite_json_global(self):
     except Exception:
         rows = []
     if not rows:
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_exportable_person_entries", "Keine exportierbaren Einträge gefunden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_exportable_person_entries"))
         return
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_sqlite.json"
     path, _filter = QFileDialog.getSaveFileName(
         self,
-        _bk_tab_tr(self, "dlg_sqlite_json_title", "SQLite-json speichern"),
+        _bk_tab_tr(self, "dlg_sqlite_json_title"),
         os.path.join(start_dir, default_name),
-        _bk_tab_tr(self, "filter_json_files", "JSON (*.json);;All Files (*)"),
+        _bk_tab_tr(self, "filter_json_files"),
     )
     if not path:
         return
@@ -4734,7 +3466,7 @@ def _bk_zone_export_sqlite_json_global(self):
     _bk_write_transcription_json(path, task, rows, column_keys, self)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done", "SQLite-json exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 
@@ -4747,14 +3479,12 @@ try:
     _BKExportZoneRectItem.shape = _bk_zone_rect_expanded_shape
     _BKExportZoneRectItem.mousePressEvent = _bk_zone_rect_mouse_press_resizable
     _BKExportZonesDialog.__init__ = _bk_zone_dialog_init_genealogy
-    _BKExportZonesDialog._zone_type_combo = _bk_zone_combo_final
     _BKExportZonesDialog.add_zone_from_rect = _bk_zone_add_from_rect_final
     _BKExportZonesDialog.redraw_zones = _bk_zone_redraw_final
     _BKExportZonesDialog.refresh_table = _bk_zone_refresh_table_final
     _BKExportZonesDialog._table_item_changed = _bk_zone_table_item_changed_final
     _BKExportZonesDialog._selected_zone_changed = _bk_zone_selected_changed_final
     _bk_open_export_zones_dialog = _bk_open_export_zones_dialog_global
-    MainWindow._render_file = _bk_zone_tabular_render_file_global
     MainWindow._bk_export_sqlite_json = _bk_zone_export_sqlite_json_global
     MainWindow.bk_export_sqlite_persons = _bk_zone_export_sqlite_json_global
 except Exception:
@@ -4786,21 +3516,21 @@ def _bk_zone_grid_position_columnwise(index: int, total: int, columns: int = 3):
 
 def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False):
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(18, 16, 18, 16)
     layout.setSpacing(12)
 
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
 
     rb_original = rb_lines = rb_table = None
     if include_text_modes:
         if QGroupBox is not None:
-            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg)
+            mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg)
             mode_layout = QVBoxLayout(mode_box)
             mode_layout.setContentsMargins(12, 10, 12, 10)
             mode_layout.setSpacing(6)
@@ -4808,9 +3538,9 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
             mode_box = None
             mode_layout = QVBoxLayout()
             mode_layout.setSpacing(6)
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle mit auswählbaren Spalten"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table"})
         rb_lines.setChecked(mode == "lines")
@@ -4825,7 +3555,7 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
     selected_keys = _bk_load_saved_column_keys(self)
     checkboxes = {}
     if QGroupBox is not None:
-        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg)
+        columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg)
         columns_layout = QVBoxLayout(columns_box)
         columns_layout.setContentsMargins(12, 10, 12, 10)
         columns_layout.setSpacing(8)
@@ -4833,7 +3563,7 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
         columns_box = None
         columns_layout = QVBoxLayout()
         columns_layout.setSpacing(8)
-        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg))
+        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label"), dlg))
 
     if QGridLayout is not None:
         checkbox_grid = QGridLayout()
@@ -4857,9 +3587,9 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
 
     quick_row = QHBoxLayout()
     quick_row.setSpacing(8)
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     quick_row.addWidget(btn_all)
     quick_row.addWidget(btn_none)
     quick_row.addWidget(btn_remember)
@@ -4871,16 +3601,16 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
     else:
         layout.addLayout(columns_layout)
 
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
     zone_layout.setSpacing(8)
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try:
         remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception:
         remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1)
     zone_layout.addWidget(btn_zones)
     if zone_box is not None:
@@ -4904,7 +3634,7 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["remembered"] = True
         result["columns"] = _bk_save_column_keys(self, keys)
@@ -4975,8 +3705,8 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception:
         pass
 
@@ -5000,7 +3730,7 @@ def _bk_zone_column_choice_dialog_tall(self, fmt=None, include_text_modes=False)
                 mode = "original"
         keys = current_checked_keys()
         if mode == "table" and not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["mode"] = mode
         result["columns"] = _bk_normalize_column_keys(keys)
@@ -5279,15 +4009,13 @@ def _bk_zone_tabular_render_file_filtered(self, path: str, fmt: str, item: TaskI
                     return _bk_write_table_docx(path, rows, column_keys, self)
                 if fmt_l == "odt":
                     return _bk_write_table_odt(path, rows, column_keys, self)
-    if callable(_BK_ZONE_PREV_RENDER_FILE):
-        return _BK_ZONE_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
+    return RENDER_NOT_HANDLED
 
 
 def _bk_zone_export_sqlite_json_filtered(self):
     task = _bk_fix36_current_task(self) if callable(globals().get("_bk_fix36_current_task")) else None
     if not task or not getattr(task, "results", None):
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_ocr_results", "Keine OCR-Ergebnisse vorhanden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_ocr_results"))
         return
     result = _bk_column_choice_dialog(self, "sqlite-json", include_text_modes=False)
     if result is None:
@@ -5308,15 +4036,15 @@ def _bk_zone_export_sqlite_json_filtered(self):
     except Exception:
         rows = []
     if not rows:
-        QMessageBox.information(self, _bk_tab_tr(self, "info_title", "Info"), _bk_tab_tr(self, "warn_no_exportable_person_entries", "Keine exportierbaren Einträge gefunden."))
+        QMessageBox.information(self, _bk_tab_tr(self, "info_title"), _bk_tab_tr(self, "warn_no_exportable_person_entries"))
         return
     start_dir = getattr(self, "current_export_dir", "") or os.path.dirname(getattr(task, "path", "") or "") or os.getcwd()
     default_name = os.path.splitext(os.path.basename(getattr(task, "path", "bottled_kraken")))[0] + "_sqlite.json"
     path, _filter = QFileDialog.getSaveFileName(
         self,
-        _bk_tab_tr(self, "dlg_sqlite_json_title", "SQLite-json speichern"),
+        _bk_tab_tr(self, "dlg_sqlite_json_title"),
         os.path.join(start_dir, default_name),
-        _bk_tab_tr(self, "filter_json_files", "JSON (*.json);;All Files (*)"),
+        _bk_tab_tr(self, "filter_json_files"),
     )
     if not path:
         return
@@ -5325,7 +4053,7 @@ def _bk_zone_export_sqlite_json_filtered(self):
     _bk_write_transcription_json(path, task, rows, column_keys, self)
     try:
         self.current_export_dir = os.path.dirname(path)
-        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done", "SQLite-json exportiert: {}").format(os.path.basename(path)), 5000)
+        self.status_bar.showMessage(_bk_tab_tr(self, "msg_sqlite_export_done").format(os.path.basename(path)), 5000)
     except Exception:
         pass
 
@@ -5337,7 +4065,7 @@ try:
     _BKExportZoneRectItem.HANDLE_SIZE = 18.0
     _BKExportZoneRectItem._handle_at = _bk_zone_rect_handle_at_large
     _BKExportZoneRectItem.mousePressEvent = _bk_zone_rect_mouse_press_no_redraw
-    MainWindow._render_file = _bk_zone_tabular_render_file_filtered
+    register_render_handler(_bk_zone_tabular_render_file_filtered)
     MainWindow._bk_export_sqlite_json = _bk_zone_export_sqlite_json_filtered
     MainWindow.bk_export_sqlite_persons = _bk_zone_export_sqlite_json_filtered
 except Exception:
@@ -5461,24 +4189,6 @@ def _bk_extract_ai_rows_json(text: str):
     return out
 
 
-def _bk_finish_ai_zone_rows(rows):
-    out = []
-    for idx, row in enumerate(rows or [], start=1):
-        item = {key: _bk_tab_clean(row.get(key, "")) for key in _BK_TABULAR_KEYS}
-        if not item.get("full_name"):
-            item["full_name"] = _bk_tab_join_text_fragments([item.get("family_name", ""), item.get("given_names", "")])
-        if not item.get("middle_names") and item.get("full_name"):
-            item["middle_names"] = _bk_zone_middle_names(item.get("full_name", ""))
-        if item.get("date_original"):
-            item["days"] = item.get("days") or _bk_zone_date_parts(item.get("date_original", ""))[0]
-            item["months"] = item.get("months") or _bk_zone_date_parts(item.get("date_original", ""))[1]
-        if not item.get("original_line"):
-            item["original_line"] = _bk_zone_join_original_line(item)
-        item["year_in_source"] = item.get("year_resolved", "")
-        item["place_resolved"] = item.get("place_in_source", "")
-        item["id"] = f"entry_{idx:04d}"
-        out.append(item)
-    return out
 
 
 def _bk_build_transcription_rows_with_zones_ai(window, item, image_size=None, zones=None):
@@ -5511,23 +4221,11 @@ def _bk_build_transcription_rows_with_zones_ai(window, item, image_size=None, zo
     if not column_keys:
         return []
     allowed = {key: _bk_tabular_column_title(window, key) for key in column_keys}
-    system_prompt = (
-        "Du strukturierst OCR-Text aus festgelegten Bildbereichen zu Tabellenzeilen. "
-        "Du bekommst OCR-Zeilen mit x/y-Positionen und Bereichs-Datentypen. "
-        "Ordne Werte derselben Person/Zeile anhand ähnlicher y-Positionen zusammen. "
-        "Gib ausschließlich gültiges JSON zurück. Keine Erklärung. Kein Markdown."
-    )
-    user_prompt = (
-        "Erzeuge eine Tabelle aus diesen Bereichsdaten.\n"
-        "Nutze ausschließlich diese JSON-Schlüssel als Spalten: " + ", ".join(column_keys) + ".\n"
-        "Spaltenbeschriftungen: " + json.dumps(allowed, ensure_ascii=False) + "\n"
-        "Wichtige Regeln:\n"
-        "- Jeder Datensatz soll eine logisch zusammengehörige Zeile/Person sein.\n"
-        "- Werte aus schmalen Spalten wie Seitenzahlen, Jahre, Tage oder Monate müssen der passenden y-Zeile zugeordnet werden.\n"
-        "- Lasse eine Zelle leer, wenn kein sicher passender Wert vorhanden ist.\n"
-        "- Verändere historische Schreibweisen nicht unnötig.\n"
-        "- Antworte exakt als {\"rows\":[{...}]} mit den erlaubten Spaltenschlüsseln.\n\n"
-        "Bereichsdaten:\n" + json.dumps(zone_payload, ensure_ascii=False)
+    system_prompt = _bk_tab_tr(window, "ai_prompt_export_zones_system")
+    user_prompt = _bk_tab_tr(window, "ai_prompt_export_zones_user").format(
+        ", ".join(column_keys),
+        json.dumps(allowed, ensure_ascii=False),
+        json.dumps({"zones": zones or [], "candidates": zone_payload}, ensure_ascii=False),
     )
     try:
         worker = AIRevisionWorker(
@@ -5601,10 +4299,6 @@ def _bk_zone_rows_for_item_global_ai(window, item, image_size, use_zones):
     return _bk_build_transcription_rows_with_zones(record_views, image_size, zones) if zones else _bk_build_transcription_rows(record_views, image_size)
 
 
-try:
-    _BK_PREV_OPEN_EXPORT_ZONES_DIALOG_AI = _bk_open_export_zones_dialog_global
-except Exception:
-    _BK_PREV_OPEN_EXPORT_ZONES_DIALOG_AI = _bk_open_export_zones_dialog
 
 try:
     _BK_PREV_EXPORT_ZONES_INIT_AI = _BKExportZonesDialog.__init__
@@ -5616,7 +4310,7 @@ def _bk_zone_dialog_init_ai_options(self, window, task, image_path, zones=None):
     if callable(_BK_PREV_EXPORT_ZONES_INIT_AI):
         _BK_PREV_EXPORT_ZONES_INIT_AI(self, window, task, image_path, zones)
     try:
-        self.cb_ai_zones = QCheckBox(_bk_tab_tr(window, "export_zones_ai_support", "KI-Unterstützung"), self)
+        self.cb_ai_zones = QCheckBox(_bk_tab_tr(window, "export_zones_ai_support"), self)
         self.cb_ai_zones.setChecked(_bk_export_zones_ai_enabled(window))
         layout = self.layout()
         side_layout = layout.itemAt(1).layout() if layout and layout.count() > 1 else None
@@ -5648,11 +4342,11 @@ def _bk_open_export_zones_dialog_ai(window, task):
         except Exception:
             task = None
     if task is None:
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_need_done_for_ai", "Bitte zuerst OCR-Ergebnisse erzeugen."))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_need_done_for_ai"))
         return None
     path = getattr(task, "path", "")
     if not path or not os.path.exists(path):
-        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title", "Warnung"), _bk_tab_tr(window, "warn_project_file_missing", "Datei nicht gefunden: {}").format(path))
+        QMessageBox.warning(window, _bk_tab_tr(window, "warn_title"), _bk_tab_tr(window, "warn_project_file_missing").format(path))
         return None
     task_zones = _bk_get_task_export_zones(task)
     initial_zones = task_zones or _bk_export_load_global_zones(window)
@@ -5708,10 +4402,6 @@ except Exception:
 # echte Tabelle erzeugen. Sonst fiel der Export bei zuletzt gewähltem
 # räumlichen Layout wieder auf den Positions-/Original-Renderer zurück.
 # ---------------------------------------------------------------------------
-try:
-    _BK_PREV_RENDER_FILE_AI_TEXT_TABLE = MainWindow._render_file
-except Exception:
-    _BK_PREV_RENDER_FILE_AI_TEXT_TABLE = None
 
 
 def _bk_zone_ai_text_export_should_be_table(window, item, use_zones: bool) -> bool:
@@ -5757,15 +4447,10 @@ def _bk_zone_tabular_render_file_ai_text_table(self, path: str, fmt: str, item: 
                 return _bk_write_table_docx(path, rows, column_keys, self)
             if fmt_l == "odt":
                 return _bk_write_table_odt(path, rows, column_keys, self)
-    if callable(_BK_PREV_RENDER_FILE_AI_TEXT_TABLE):
-        return _BK_PREV_RENDER_FILE_AI_TEXT_TABLE(self, path, fmt, item)
-    return None
+    return RENDER_NOT_HANDLED
 
 
-try:
-    MainWindow._render_file = _bk_zone_tabular_render_file_ai_text_table
-except Exception:
-    pass
+register_render_handler(_bk_zone_tabular_render_file_ai_text_table)
 
 try:
     __all__.extend([
@@ -5806,42 +4491,6 @@ def _bk_ai_zone_column_keys(zones):
             keys.append(key)
     return keys
 
-
-def _bk_ai_zone_column_guide_for_record(record, zones):
-    """Ordnet eine OCR-Box einer gesetzten Spaltenzone zu.
-
-    Wichtig: Die sensiblen Bereiche dienen bei KI-Unterstützung als Spalten- und
-    Datentyp-Schablone. Deshalb wird hier nicht nur die vertikale Überlappung
-    beachtet. Wenn ein Bereich oben als Beispielspalte gezogen wurde, zählt sein
-    X-Bereich für die ganze Seite.
-    """
-    try:
-        rx0 = float(record.get("x0", 0.0) or 0.0)
-        rx1 = float(record.get("x1", rx0 + float(record.get("w", 0.0) or 0.0)) or 0.0)
-        rcx = float(record.get("cx", (rx0 + rx1) / 2.0) or 0.0)
-    except Exception:
-        return ""
-    best = (0.0, "")
-    for zone in zones or []:
-        ztype = str(zone.get("type", "") or "")
-        if not ztype or ztype == "ignore" or ztype not in _BK_TABULAR_COLUMN_BY_KEY:
-            continue
-        try:
-            zx0 = float(zone.get("x0", 0.0) or 0.0)
-            zx1 = float(zone.get("x1", 0.0) or 0.0)
-        except Exception:
-            continue
-        if zx1 < zx0:
-            zx0, zx1 = zx1, zx0
-        zw = max(1.0, zx1 - zx0)
-        rw = max(1.0, rx1 - rx0)
-        overlap = max(0.0, min(rx1, zx1) - max(rx0, zx0))
-        overlap_ratio = overlap / min(rw, zw)
-        inside_center = zx0 <= rcx <= zx1
-        score = overlap_ratio + (0.45 if inside_center else 0.0)
-        if score > best[0]:
-            best = (score, ztype)
-    return best[1] if best[0] >= 0.18 else ""
 
 
 def _bk_ai_group_page_records(raw_records):
@@ -5887,55 +4536,6 @@ def _bk_ai_group_page_records(raw_records):
     return out
 
 
-def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
-    """Erzeugt KI-Kandidaten aus der gesamten Seite, nicht nur aus den gezogenen Bereichen.
-
-    Die gezogenen Bereiche werden als Spalten-/Datentyp-Schablone verwendet. Dadurch
-    kann die lokale KI auch Zeilen unterhalb der markierten Beispielbereiche füllen.
-    """
-    if not raw_records or not zones or not column_keys:
-        return []
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [z for z in zones if z and z.get("type") != "ignore"]
-    if not zones:
-        return []
-
-    out = []
-    for group in _bk_ai_group_page_records(raw_records):
-        fragments = []
-        cells = {}
-        all_text_parts = []
-        y_values = []
-        for rec in group:
-            text = _bk_tab_clean(rec.get("text", ""))
-            if not text or _bk_tab_is_separator(text):
-                continue
-            x0 = int(round(float(rec.get("x0", 0.0) or 0.0)))
-            y0 = int(round(float(rec.get("y0", 0.0) or 0.0)))
-            y_values.append(float(rec.get("cy", rec.get("y0", 0.0)) or 0.0))
-            zone_key = _bk_ai_zone_column_guide_for_record(rec, zones)
-            fragments.append({"x": x0, "y": y0, "type_hint": zone_key, "text": _bk_ai_short_text(text, 110)})
-            all_text_parts.append(text)
-            if zone_key and zone_key in column_keys:
-                value = _bk_zone_value_for_column(zone_key, text) or text
-                if value:
-                    current = cells.get(zone_key, "")
-                    cells[zone_key] = _bk_tab_join_text_fragments([current, _bk_ai_short_text(value, 140)]) if current else _bk_ai_short_text(value, 140)
-        if not fragments:
-            continue
-        original_line = _bk_tab_join_text_fragments(all_text_parts)
-        if "original_line" in column_keys and original_line:
-            cells["original_line"] = _bk_ai_short_text(original_line, 240)
-        # Seitenkopf, Trennzeilen und reine Überschriften werden als Kontext mitgegeben,
-        # aber die KI soll sie nach Prompt-Regeln nicht als Registereintrag ausgeben.
-        out.append({
-            "n": len(out) + 1,
-            "y": int(round(sum(y_values) / max(1, len(y_values)))) if y_values else 0,
-            "fragments": fragments,
-            "cells": cells,
-            "line_text": _bk_ai_short_text(original_line, 260),
-        })
-    return out
 
 
 def _bk_ai_zone_chunk_candidates(candidates, max_chars=3600, max_rows=6):
@@ -5959,51 +4559,6 @@ def _bk_ai_zone_chunk_candidates(candidates, max_chars=3600, max_rows=6):
 
 
 
-def _bk_ai_zone_context_payload(window, raw_records, zones, image_size=None, max_boxes=520):
-    """Kompakter Zusatzkontext für die Export-KI: gesetzte Bereiche + alle Overlay-Boxen."""
-    zone_rows = []
-    for idx, zone in enumerate(zones or [], start=1):
-        clean = _bk_export_clean_zone(zone, idx - 1)
-        if not clean or clean.get("type") == "ignore":
-            continue
-        zone_rows.append({
-            "id": idx,
-            "type": str(clean.get("type", "")),
-            "label": _bk_export_zone_title(window, str(clean.get("type", ""))),
-            "rect": [
-                int(round(float(clean.get("x0", 0.0) or 0.0))),
-                int(round(float(clean.get("y0", 0.0) or 0.0))),
-                int(round(float(clean.get("x1", 0.0) or 0.0))),
-                int(round(float(clean.get("y1", 0.0) or 0.0))),
-            ],
-        })
-    overlay_rows = []
-    for idx, rec in enumerate(sorted(raw_records or [], key=lambda r: (
-        float(r.get("y0", 0.0) or 0.0),
-        float(r.get("x0", 0.0) or 0.0),
-        int(r.get("index", 0) or 0),
-    )), start=1):
-        text = _bk_ai_short_text(rec.get("text", ""), 90)
-        if not text:
-            continue
-        overlay_rows.append({
-            "i": idx,
-            "x": int(round(float(rec.get("x0", 0.0) or 0.0))),
-            "y": int(round(float(rec.get("y0", 0.0) or 0.0))),
-            "w": int(round(float(rec.get("w", (float(rec.get("x1", 0.0) or 0.0) - float(rec.get("x0", 0.0) or 0.0))) or 0.0))),
-            "h": int(round(float(rec.get("h", (float(rec.get("y1", 0.0) or 0.0) - float(rec.get("y0", 0.0) or 0.0))) or 0.0))),
-            "text": text,
-        })
-        if len(overlay_rows) >= int(max_boxes):
-            break
-    payload = {
-        "image_size": list(image_size or []) if image_size else [],
-        "zones": zone_rows,
-        "overlay_boxes": overlay_rows,
-    }
-    if len(overlay_rows) >= int(max_boxes):
-        payload["overlay_boxes_truncated"] = True
-    return payload
 
 
 def _bk_ai_zone_page_data_url(item):
@@ -6037,42 +4592,6 @@ def _bk_ai_compact_json(obj, limit=26000):
         return raw[: int(limit)]
 
 
-def _bk_ai_zone_prompt(window, column_keys, allowed_titles, candidates, context_payload=None):
-    compact_columns = {key: allowed_titles.get(key, key) for key in column_keys}
-    column_text = ", ".join(column_keys)
-    columns_json = json.dumps(compact_columns, ensure_ascii=False)
-    payload = {
-        "columns": compact_columns,
-        "zones": (context_payload or {}).get("zones", []),
-        "overlay_boxes": (context_payload or {}).get("overlay_boxes", []),
-        "overlay_boxes_truncated": bool((context_payload or {}).get("overlay_boxes_truncated", False)),
-        "candidates": candidates,
-    }
-    if (context_payload or {}).get("image_size"):
-        payload["image_size"] = (context_payload or {}).get("image_size")
-    payload_json = _bk_ai_compact_json(payload)
-    try:
-        prompt = window._tr("ai_prompt_export_zones_user", column_text, columns_json, payload_json)
-        if prompt and prompt != "ai_prompt_export_zones_user":
-            return str(prompt)
-    except Exception:
-        pass
-    return (
-        "Erzeuge aus dem Seitenbild, den Overlay-Boxen, den gesetzten Exportbereichen und den OCR-Kandidaten eine Tabelle.\n"
-        "Antworte sofort nur als JSON: {\"rows\":[{...}]}. Kein Markdown. Keine Erklärung. Keine Analyse.\n"
-        "Nutze nur diese Schlüssel: " + column_text + ".\n"
-        "Spalten: " + columns_json + "\n"
-        "Wichtige Regeln:\n"
-        "- Das Bild ist die wichtigste Quelle. Overlay-Boxen und OCR-Texte sind nur Lesehilfe.\n"
-        "- Die gesetzten Bereiche zeigen, welche Bildspalte zu welchem Exportfeld gehört.\n"
-        "- Jeder Kandidat ist höchstens eine Tabellenzeile. Ziehe niemals mehrere Kandidaten in eine Zelle zusammen.\n"
-        "- Werte gleicher visueller Zeile gehören zusammen.\n"
-        "- Seitenkopf, Überschriften, Trennlinien und reine Schmuck-/Füllzeilen nicht als Datenzeilen ausgeben.\n"
-        "- Unbekannt/unknown nur füllen, wenn in der Datenzeile ein echter Wert für diese Spalte steht; nie mit der ganzen Originalzeile füllen.\n"
-        "- Lasse unsichere Zellen leer und erfinde keine Angaben.\n"
-        "- Bewahre historische Schreibweisen.\n"
-        "Kontext:\n" + payload_json
-    )
 
 
 def _bk_ai_zone_post_json_with_events(worker, payload, window=None, dlg=None):
@@ -6167,13 +4686,12 @@ def _bk_ai_zone_message_text_from_response(worker, data: dict) -> str:
 
 
 def _bk_ai_zone_call(window, worker, model_id, prompt, max_tokens, page_data_url="", dlg=None):
-    system_text = "Du gibst ausschließlich gültiges JSON aus. Du strukturierst OCR-Tabellenzeilen aus Bild, Overlay-Boxen und festgelegten Exportbereichen."
-    try:
-        translated = window._tr("ai_prompt_export_zones_system")
-        if translated and translated != "ai_prompt_export_zones_system":
-            system_text = translated
-    except Exception:
-        pass
+    # System-Prompt ausschliesslich aus den Sprachdateien; ohne Treffer wird
+    # ein sprachneutraler Minimal-Systemtext verwendet.
+    system_text = _bk_tr_registry(window, "ai_prompt_export_zones_system")
+    if not system_text or system_text == "ai_prompt_export_zones_system":
+        system_text = 'JSON only: {"rows":[{...}]}'
+
     system_text = _bk_ai_zone_force_no_think(system_text)
     user_content_text = _bk_ai_zone_force_no_think(prompt)
     user_message = {"role": "user", "content": user_content_text}
@@ -6255,23 +4773,13 @@ def _bk_ai_zone_call(window, worker, model_id, prompt, max_tokens, page_data_url
     return []
 
 
-def _bk_export_zones_ai_max_tokens(window, default=900):
-    try:
-        return max(128, int(window._lm_token_limit("export_zones_ai")))
-    except Exception:
-        try:
-            limits = getattr(window, "lm_token_limits", {}) or {}
-            return max(128, int(limits.get("export_zones_ai", default)))
-        except Exception:
-            return int(default)
 
 
 def _bk_export_zones_ai_busy_dialog(window, chunk_count=0):
-    title = _bk_tab_tr(window, "export_zones_ai_busy_title", "KI-Unterstützung aktiv")
+    title = _bk_tab_tr(window, "export_zones_ai_busy_title")
     message = _bk_tab_tr(
         window,
         "export_zones_ai_busy_message",
-        "Die KI-Unterstützung für den Export ist aktiv. Dadurch kann der Export etwas länger dauern. Bitte warte kurz.",
     )
     dlg = BusyStatusDialog(title, message, getattr(window, "_tr", None), window)
     try:
@@ -6280,7 +4788,7 @@ def _bk_export_zones_ai_busy_dialog(window, chunk_count=0):
         pass
     if chunk_count and chunk_count > 1:
         try:
-            dlg.set_status(message + "\n\n" + _bk_tab_tr(window, "export_zones_ai_busy_chunks", "Verarbeite KI-Blöcke …"))
+            dlg.set_status(message + "\n\n" + _bk_tab_tr(window, "export_zones_ai_busy_chunks"))
         except Exception:
             pass
     return dlg
@@ -6292,10 +4800,9 @@ def _bk_export_zones_ai_set_busy_status(window, dlg, current_chunk, total_chunks
     base = _bk_tab_tr(
         window,
         "export_zones_ai_busy_message",
-        "Die KI-Unterstützung für den Export ist aktiv. Dadurch kann der Export etwas länger dauern. Bitte warte kurz.",
     )
     if total_chunks > 1:
-        suffix = _bk_tab_tr(window, "export_zones_ai_busy_progress", "Verarbeite KI-Block {}/{} …").format(int(current_chunk), int(total_chunks))
+        suffix = _bk_tab_tr(window, "export_zones_ai_busy_progress").format(int(current_chunk), int(total_chunks))
         text = base + "\n\n" + suffix
     else:
         text = base
@@ -6316,52 +4823,44 @@ def _bk_export_zones_ai_warning_text(window, reason: str, details: str = "") -> 
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_reasoning",
-            "Die lokale KI hat nur Denk-/Reasoning-Inhalt geliefert oder wurde vor der JSON-Antwort abgeschnitten. Das betrifft die Antwort-Token dieser Aufgabe, nicht automatisch die Kontextlänge des geladenen Modells. Erhöhe die Token-Anzahl für diese Aufgabe oder verwende ein nicht-thinking Modell.",
         )
     elif "context" in reason_l or "n_ctx" in details_s.lower() or "context" in details_s.lower():
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_context",
-            "Der KI-Kontext ist zu groß. Reduziere Bild-/Overlay-Kontext, nutze weniger Bereiche oder lade das Modell mit größerem Kontextfenster.",
         )
     elif "token" in reason_l or "tokens" in details_s.lower() or "length" in details_s.lower():
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_token",
-            "Die KI-Ausgabe wurde durch die Token-Grenze abgeschnitten. Erhöhe unter LM-Optionen die Token-Anzahl für „KI-Unterstützung für Exportbereiche“.",
         )
     elif "model" in reason_l:
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_model",
-            "Für die KI-Unterstützung wurde kein lokales Modell gefunden oder ausgewählt. Scanne/lade zuerst ein lokales LM oder deaktiviere die KI-Unterstützung.",
         )
     elif "too_few_rows" in reason_l:
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_too_few_rows",
-            "Die lokale KI hat zu wenige Tabellenzeilen zurückgegeben. Die Ausgabe wirkt unvollständig oder zusammengezogen. Es wird auf die regelbasierte Bereichsauswertung zurückgegriffen.",
         )
     elif "no_rows" in reason_l:
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_no_rows",
-            "Die lokale KI hat keine brauchbaren Tabellenzeilen zurückgegeben. Es wird auf die regelbasierte Bereichsauswertung zurückgegriffen.",
         )
     else:
         base = _bk_tab_tr(
             window,
             "export_zones_ai_warn_general",
-            "Bei der KI-Unterstützung für den Export ist ein Fehler aufgetreten. Es wird auf die regelbasierte Bereichsauswertung zurückgegriffen.",
         )
     fallback = _bk_tab_tr(
         window,
         "export_zones_ai_warn_fallback",
-        "Der Export wird ohne KI-Unterstützung fortgesetzt.",
     )
     if details_s:
         details_s = details_s[:1200]
-        return f"{base}\n\n{fallback}\n\nDetails:\n{details_s}"
+        return f"{base}\n\n{fallback}\n\n{details_s}"
     return f"{base}\n\n{fallback}"
 
 
@@ -6377,7 +4876,7 @@ def _bk_export_zones_ai_warn(window, reason: str, details: str = ""):
         setattr(window, "_bk_export_zones_ai_warning_seen", seen)
         QMessageBox.warning(
             window,
-            _bk_tab_tr(window, "export_zones_ai_warn_title", "KI-Unterstützung beim Export"),
+            _bk_tab_tr(window, "export_zones_ai_warn_title"),
             _bk_export_zones_ai_warning_text(window, reason, details),
         )
     except Exception:
@@ -6453,53 +4952,20 @@ def _bk_ai_zone_row_signature(row, column_keys):
     return tuple(values)
 
 
-def _bk_ai_zone_sanitize_rows_for_chunk(rows, chunk, column_keys):
-    """Begrenzt KI-Ausgaben strikt auf die Eingabe-Kandidaten des aktuellen Chunks.
-
-    Lokale Reasoning-Modelle erzeugen manchmal zusätzliche Varianten derselben
-    Einträge. Für den Export darf aber höchstens eine Tabellenzeile pro
-    Kandidat übernommen werden. Header-/unknown-only-Zeilen werden verworfen,
-    sobald normale Datenspalten ausgewählt sind.
-    """
-    max_rows = max(0, len(chunk or []))
-    cleaned = []
-    seen = set()
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        item = {key: _bk_tab_clean(row.get(key, "")) for key in _BK_TABULAR_KEYS}
-        # Labels oder reine Platzhalter entfernen.
-        for key, bad_values in {
-            "unknown": {"unbekannt", "unknown", "inconnu"},
-            "heading": {"überschrift", "heading", "titre"},
-            "subheading": {"teil-überschrift", "teilüberschrift", "subheading", "sous-titre"},
-        }.items():
-            if item.get(key, "").strip().casefold() in bad_values:
-                item[key] = ""
-        if not _bk_ai_zone_row_has_real_data(item, column_keys):
-            continue
-        sig = _bk_ai_zone_row_signature(item, column_keys)
-        if not sig or sig in seen:
-            continue
-        seen.add(sig)
-        cleaned.append(item)
-        if max_rows and len(cleaned) >= max_rows:
-            break
-    return cleaned
 
 def _bk_build_transcription_rows_with_zones_ai_compact(window, item, image_size=None, zones=None):
     if AIRevisionWorker is None:
-        _bk_export_zones_ai_warn(window, "model", "AIRevisionWorker is not available")
+        _bk_export_zones_ai_warn(window, "model")
         return []
     if not item or not getattr(item, "results", None):
-        _bk_export_zones_ai_warn(window, "no_rows", "No OCR task/results available")
+        _bk_export_zones_ai_warn(window, "no_rows")
         return []
     try:
         model_id = window._resolve_ai_model_id()
     except Exception:
         model_id = (getattr(window, "ai_model_id", "") or "").strip()
     if not model_id:
-        _bk_export_zones_ai_warn(window, "model", "No local model selected")
+        _bk_export_zones_ai_warn(window, "model")
         return []
     zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
     zones = [zone for zone in zones if zone]
@@ -6517,7 +4983,7 @@ def _bk_build_transcription_rows_with_zones_ai_compact(window, item, image_size=
         return []
     candidates = _bk_ai_zone_candidate_rows(raw_records, zones, column_keys)
     if not candidates:
-        _bk_export_zones_ai_warn(window, "no_rows", "No usable OCR row candidates for the selected export zones")
+        _bk_export_zones_ai_warn(window, "no_rows")
         return []
     allowed = {key: _bk_tabular_column_title(window, key) for key in column_keys}
     context_payload = _bk_ai_zone_context_payload(window, raw_records, zones, image_size=image_size)
@@ -6833,70 +5299,6 @@ def _bk_ai_record_zone_match(record, zones):
     return (best[1], best[0]) if best[0] >= 0.12 else ("", 0.0)
 
 
-def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
-    """KI-Kandidaten nur aus den tatsächlich markierten Auswahlbereichen.
-
-    Das reduziert Laufzeit, verhindert 17-Seiten-Exports aus einer kleinen
-    Markierung und zwingt die lokale KI, die gezeichneten Bereiche zu beachten.
-    """
-    if not raw_records or not zones or not column_keys:
-        return []
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [z for z in zones if z and z.get("type") != "ignore"]
-    if not zones:
-        return []
-
-    matched = []
-    for rec in raw_records or []:
-        text = _bk_tab_clean(rec.get("text", ""))
-        if not text or _bk_tab_is_separator(text):
-            continue
-        key, score = _bk_ai_record_zone_match(rec, zones)
-        if key and key in column_keys:
-            item = dict(rec)
-            item["_zone_key"] = key
-            item["_zone_score"] = score
-            matched.append(item)
-    if not matched:
-        return []
-
-    out = []
-    for group in _bk_ai_group_page_records(matched):
-        fragments = []
-        cells = {}
-        all_text_parts = []
-        y_values = []
-        for rec in group:
-            text = _bk_tab_clean(rec.get("text", ""))
-            if not text or _bk_tab_is_separator(text):
-                continue
-            zone_key = str(rec.get("_zone_key", "") or "")
-            if not zone_key or zone_key not in column_keys:
-                continue
-            x0 = int(round(float(rec.get("x0", 0.0) or 0.0)))
-            y0 = int(round(float(rec.get("y0", 0.0) or 0.0)))
-            y_values.append(float(rec.get("cy", rec.get("y0", 0.0)) or 0.0))
-            fragments.append({"x": x0, "y": y0, "type_hint": zone_key, "text": _bk_ai_short_text(text, 110)})
-            all_text_parts.append(text)
-            value = _bk_zone_value_for_column(zone_key, text) or text
-            if value:
-                current = cells.get(zone_key, "")
-                cells[zone_key] = _bk_tab_join_text_fragments([current, _bk_ai_short_text(value, 140)]) if current else _bk_ai_short_text(value, 140)
-        if not fragments or not cells:
-            continue
-        if not _bk_ai_zone_has_real_data(cells, column_keys):
-            continue
-        original_line = _bk_tab_join_text_fragments(all_text_parts)
-        if "original_line" in column_keys and original_line:
-            cells["original_line"] = _bk_ai_short_text(original_line, 240)
-        out.append({
-            "n": len(out) + 1,
-            "y": int(round(sum(y_values) / max(1, len(y_values)))) if y_values else 0,
-            "fragments": fragments,
-            "cells": cells,
-            "line_text": _bk_ai_short_text(original_line, 260),
-        })
-    return out
 
 
 def _bk_ai_zone_context_payload(window, raw_records, zones, image_size=None, max_boxes=220):
@@ -6969,25 +5371,51 @@ def _bk_ai_zone_prompt(window, column_keys, allowed_titles, candidates, context_
     if (context_payload or {}).get("image_size"):
         payload["image_size"] = (context_payload or {}).get("image_size")
     payload_json = _bk_ai_compact_json(payload, limit=16000)
-    return (
-        "/no_think\n"
-        "Gib sofort ausschließlich finales JSON zurück. Keine Analyse, kein Denktext, keine Erklärung.\n"
-        "Erzeuge eine Tabelle ausschließlich aus candidates_from_selected_zones_only.\n"
-        "Das Seitenbild darf nur als Lesekontext dienen. Exportiere keine Zeile, die nicht in den Kandidaten steht.\n"
-        "Nutze nur diese JSON-Schlüssel: " + column_text + ".\n"
-        "Spalten: " + json.dumps(compact_columns, ensure_ascii=False) + "\n"
-        "Regeln:\n"
-        "- Jeder Kandidat n ist höchstens eine Tabellenzeile. Kandidaten niemals zusammenziehen oder duplizieren.\n"
-        "- Werte aus cells sind bereits den gezeichneten Auswahlbereichen zugeordnet; halte dich daran.\n"
-        "- Wenn unknown/Unbekannt als Spalte existiert: schreibe nur echten Text aus cells.unknown, niemals das Wort Unbekannt als Platzhalter.\n"
-        "- heading und subheading sind normale freie Textspalten, aber keine Aufforderung, zusätzliche Datenzeilen zu erzeugen.\n"
-        "- Lasse nicht vorhandene oder unsichere Zellen leer.\n"
-        "- Antwortformat exakt: {\"rows\":[{...}]}.\n"
-        "Kontext:\n" + payload_json + "\n/no_think"
-    )
+    # Der Prompt kommt ausschliesslich aus den Sprachdateien (de/en/fr).
+    # Es gibt keinen fest einkodierten Sprachtext mehr; sollten die
+    # Sprachdateien unvollstaendig sein, wird ein sprachneutraler
+    # Datenprompt aus Schluesseln, Spalten und Kontext gebaut.
+    template = _bk_tr_registry(window, "ai_prompt_export_zones_user_compact")
+    prompt = None
+    if template and template != "ai_prompt_export_zones_user_compact":
+        try:
+            prompt = template.format(column_text, json.dumps(compact_columns, ensure_ascii=False), payload_json)
+        except Exception:
+            prompt = None
+    if prompt is None:
+        prompt = (
+            "/no_think\n"
+            "JSON: {\"rows\":[{...}]}\n"
+            "keys: " + column_text + "\n"
+            "columns: " + json.dumps(compact_columns, ensure_ascii=False) + "\n"
+            "context:\n" + payload_json + "\n/no_think"
+        )
+    return _bk_ai_zone_orientation_hint(window, prompt)
 
 
-def _bk_finish_ai_zone_rows(rows):
+def _bk_ai_zone_orientation_hint(window, prompt: str) -> str:
+    """Bei explizit gewaehltem Hoch-/Querformat einen Hinweis anfuegen.
+
+    Der Hinweistext stammt vollstaendig aus den Sprachdateien; ist der
+    Schluessel nirgends vorhanden, wird der Prompt unveraendert gelassen.
+    """
+    try:
+        orientation = bk_get_export_orientation(window)
+    except Exception:
+        orientation = "auto"
+    if orientation not in {"portrait", "landscape"}:
+        return prompt
+    key = "ai_prompt_export_orientation_portrait" if orientation == "portrait" else "ai_prompt_export_orientation_landscape"
+    hint = _bk_tr_registry(window, key)
+    if not hint or hint == key:
+        return prompt
+    if prompt.rstrip().endswith("/no_think"):
+        stripped = prompt.rstrip()
+        return stripped[: -len("/no_think")].rstrip("\n") + "\n" + hint + "\n/no_think"
+    return prompt + "\n" + hint
+
+
+def _bk_finish_ai_zone_rows_base(rows):
     out = []
     seen = set()
     for row in rows or []:
@@ -7103,162 +5531,10 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Final fix: stabiler Exportdialog + Überschrift/Teil-Überschrift als Kontext.
 # ---------------------------------------------------------------------------
-def _bk_ai_context_records_value(records, row_y, median_height=12.0):
-    records = list(records or [])
-    if not records:
-        return ""
-    try:
-        row_y = float(row_y or 0.0)
-    except Exception:
-        row_y = 0.0
-    candidates = []
-    for rec in records:
-        try:
-            cy = float(rec.get("cy", rec.get("y0", 0.0)) or 0.0)
-        except Exception:
-            cy = 0.0
-        if cy <= row_y + max(2.0, float(median_height or 12.0) * 0.35):
-            candidates.append((cy, rec))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: item[0])
-    best_y = candidates[-1][0]
-    same_line = [
-        rec for cy, rec in candidates
-        if abs(cy - best_y) <= max(3.0, float(median_height or 12.0) * 0.65)
-    ]
-    same_line.sort(key=lambda rec: float(rec.get("x0", 0.0) or 0.0))
-    return _bk_tab_join_text_fragments([
-        _bk_tab_clean(rec.get("text", "")) for rec in same_line
-        if _bk_tab_clean(rec.get("text", ""))
-    ])
 
 
-def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
-    """KI-Kandidaten nur aus Auswahlbereichen; Überschriften werden als Kontext übernommen."""
-    if not raw_records or not zones or not column_keys:
-        return []
-    zones = [_bk_export_clean_zone(zone, idx) for idx, zone in enumerate(zones or [])]
-    zones = [z for z in zones if z and z.get("type") != "ignore"]
-    if not zones:
-        return []
-
-    matched = []
-    context_records = {"heading": [], "subheading": []}
-    for rec in raw_records or []:
-        text = _bk_tab_clean(rec.get("text", ""))
-        if not text or _bk_tab_is_separator(text):
-            continue
-        key, score = _bk_ai_record_zone_match(rec, zones)
-        if not key:
-            continue
-        item = dict(rec)
-        item["_zone_key"] = key
-        item["_zone_score"] = score
-        if key in {"heading", "subheading"}:
-            context_records.setdefault(key, []).append(item)
-            continue
-        if key in column_keys:
-            matched.append(item)
-
-    if not matched:
-        return []
-
-    try:
-        median_height = _median_height(raw_records)
-    except Exception:
-        median_height = 12.0
-
-    out = []
-    for group in _bk_ai_group_page_records(matched):
-        fragments = []
-        cells = {}
-        all_text_parts = []
-        y_values = []
-        for rec in group:
-            text = _bk_tab_clean(rec.get("text", ""))
-            if not text or _bk_tab_is_separator(text):
-                continue
-            zone_key = str(rec.get("_zone_key", "") or "")
-            if not zone_key or zone_key not in column_keys:
-                continue
-            x0 = int(round(float(rec.get("x0", 0.0) or 0.0)))
-            y0 = int(round(float(rec.get("y0", 0.0) or 0.0)))
-            y_values.append(float(rec.get("cy", rec.get("y0", 0.0)) or 0.0))
-            fragments.append({"x": x0, "y": y0, "type_hint": zone_key, "text": _bk_ai_short_text(text, 110)})
-            all_text_parts.append(text)
-            value = _bk_zone_value_for_column(zone_key, text) or text
-            if value:
-                current = cells.get(zone_key, "")
-                cells[zone_key] = _bk_tab_join_text_fragments([current, _bk_ai_short_text(value, 140)]) if current else _bk_ai_short_text(value, 140)
-
-        if not fragments or not cells:
-            continue
-        if not _bk_ai_zone_has_real_data(cells, column_keys):
-            continue
-
-        row_y = int(round(sum(y_values) / max(1, len(y_values)))) if y_values else 0
-
-        # Überschrift und Teil-Überschrift sind Kontextspalten:
-        # Sie erzeugen keine eigenen Datenzeilen, sondern werden für die
-        # darunterliegenden Registereinträge übernommen.
-        for ctx_key in ("heading", "subheading"):
-            if ctx_key in column_keys and not _bk_tab_clean(cells.get(ctx_key, "")):
-                ctx_value = _bk_ai_context_records_value(context_records.get(ctx_key), row_y, median_height)
-                if ctx_value:
-                    cells[ctx_key] = _bk_ai_short_text(ctx_value, 160)
-
-        original_line = _bk_tab_join_text_fragments(all_text_parts)
-        if "original_line" in column_keys and original_line:
-            cells["original_line"] = _bk_ai_short_text(original_line, 240)
-        out.append({
-            "n": len(out) + 1,
-            "y": row_y,
-            "fragments": fragments,
-            "cells": cells,
-            "line_text": _bk_ai_short_text(original_line, 260),
-        })
-    return out
 
 
-def _bk_ai_zone_sanitize_rows_for_chunk(rows, chunk, column_keys):
-    """Begrenzt KI-Ausgaben auf Kandidaten und ergänzt Kontextspalten aus candidates."""
-    max_rows = max(0, len(chunk or []))
-    cleaned = []
-    seen = set()
-    for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        item = {key: _bk_tab_clean(row.get(key, "")) for key in _BK_TABULAR_KEYS}
-
-        # Candidate-Kontext zurückschreiben, falls das Modell Überschrift /
-        # Teil-Überschrift auslässt. Dadurch stimmen diese Spalten auch bei
-        # guter KI-Zeilenzerlegung zuverlässig.
-        cand = (chunk or [])[len(cleaned)] if len(cleaned) < len(chunk or []) else {}
-        cand_cells = cand.get("cells", {}) if isinstance(cand, dict) else {}
-        for ctx_key in ("heading", "subheading"):
-            if ctx_key in (column_keys or []) and not _bk_tab_clean(item.get(ctx_key, "")):
-                cand_value = _bk_tab_clean(cand_cells.get(ctx_key, ""))
-                if cand_value:
-                    item[ctx_key] = cand_value
-
-        for key, bad_values in {
-            "unknown": {"unbekannt", "unknown", "inconnu"},
-            "heading": {"überschrift", "heading", "titre"},
-            "subheading": {"teil-überschrift", "teilüberschrift", "subheading", "sous-titre"},
-        }.items():
-            if item.get(key, "").strip().casefold() in bad_values:
-                item[key] = ""
-        if not _bk_ai_zone_row_has_real_data(item, column_keys):
-            continue
-        sig = _bk_ai_zone_row_signature(item, column_keys)
-        if not sig or sig in seen:
-            continue
-        seen.add(sig)
-        cleaned.append(item)
-        if max_rows and len(cleaned) >= max_rows:
-            break
-    return cleaned
 
 try:
     __all__.extend([
@@ -7310,7 +5586,7 @@ def _bk_ai_context_records_value(records, row_y, median_height=12.0):
     ])
 
 
-def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
+def _bk_ai_zone_candidate_rows_base(raw_records, zones, column_keys):
     """KI-Kandidaten nur aus Auswahlbereichen; Überschriften werden als Kontext übernommen."""
     if not raw_records or not zones or not column_keys:
         return []
@@ -7397,7 +5673,7 @@ def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
     return out
 
 
-def _bk_ai_zone_sanitize_rows_for_chunk(rows, chunk, column_keys):
+def _bk_ai_zone_sanitize_rows_for_chunk_base(rows, chunk, column_keys):
     """Begrenzt KI-Ausgaben auf Kandidaten und ergänzt Kontextspalten aus candidates."""
     max_rows = max(0, len(chunk or []))
     cleaned = []
@@ -7499,25 +5775,22 @@ def _bk_ai_keep_heading_values_once_in_rows(rows):
     return out
 
 
-_BK_HEADING_ONCE_PREV_CANDIDATE_ROWS = _bk_ai_zone_candidate_rows
-_BK_HEADING_ONCE_PREV_FINISH_ROWS = _bk_finish_ai_zone_rows
-_BK_HEADING_ONCE_PREV_SANITIZE_ROWS = _bk_ai_zone_sanitize_rows_for_chunk
 
 
 def _bk_ai_zone_candidate_rows(raw_records, zones, column_keys):
-    candidates = _BK_HEADING_ONCE_PREV_CANDIDATE_ROWS(raw_records, zones, column_keys)
+    candidates = _bk_ai_zone_candidate_rows_base(raw_records, zones, column_keys)
     return _bk_ai_keep_heading_values_once_in_candidates(candidates)
 
 
 def _bk_ai_zone_sanitize_rows_for_chunk(rows, chunk, column_keys):
-    cleaned = _BK_HEADING_ONCE_PREV_SANITIZE_ROWS(rows, chunk, column_keys)
+    cleaned = _bk_ai_zone_sanitize_rows_for_chunk_base(rows, chunk, column_keys)
     # Innerhalb eines Chunks keine wiederholten Überschriften/Teil-Überschriften
     # übernehmen. Chunk-übergreifend greift zusätzlich _bk_finish_ai_zone_rows.
     return _bk_ai_keep_heading_values_once_in_rows(cleaned)
 
 
 def _bk_finish_ai_zone_rows(rows):
-    finished = _BK_HEADING_ONCE_PREV_FINISH_ROWS(rows)
+    finished = _bk_finish_ai_zone_rows_base(rows)
     return _bk_ai_keep_heading_values_once_in_rows(finished)
 
 
@@ -7727,7 +6000,6 @@ def _bk_build_transcription_rows_with_zones(record_views, image_size=None, zones
     if not raw_records:
         return []
     page_width, _page_height = _page_size(image_size, raw_records)
-    median_height = _median_height(raw_records)
 
     data_records = []
     data_seen = set()
@@ -7946,33 +6218,6 @@ def _bk_simple_group_rows(records):
     return [sorted(g.get("records", []) or [], key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("cy", 0.0) or 0.0))) for g in groups]
 
 
-def _bk_simple_column_clusters(row_groups):
-    items = []
-    widths = []
-    for row in row_groups or []:
-        for rec in row or []:
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            w = max(1.0, float(rec.get("w", 1.0) or 1.0))
-            items.append((x0, rec))
-            widths.append(w)
-    if not items:
-        return []
-    widths.sort()
-    med_w = widths[len(widths)//2] if widths else 40.0
-    tol = max(10.0, min(42.0, med_w * 0.42))
-    clusters = []
-    for x0, rec in sorted(items, key=lambda t: t[0]):
-        if not clusters:
-            clusters.append({"x": x0, "records": [rec]})
-            continue
-        nearest = min(clusters, key=lambda c: abs(float(c.get("x", 0.0)) - x0))
-        if abs(float(nearest.get("x", 0.0)) - x0) <= tol:
-            nearest["records"].append(rec)
-            nearest["x"] = sum(float(r.get("x0", 0.0) or 0.0) for r in nearest["records"]) / max(1, len(nearest["records"]))
-        else:
-            clusters.append({"x": x0, "records": [rec]})
-    clusters.sort(key=lambda c: float(c.get("x", 0.0) or 0.0))
-    return clusters
 
 
 
@@ -7992,120 +6237,9 @@ def _bk_simple_normalize_token_text(text):
     return value
 
 
-def _bk_simple_tokenize_text(text):
-    value = _bk_simple_normalize_token_text(text)
-    if not value:
-        return []
-    tokens = []
-    current = []
-    paren_depth = 0
-    for ch in value:
-        if ch == "(":
-            if paren_depth == 0 and current and "".join(current).strip():
-                tokens.append("".join(current).strip())
-                current = []
-            paren_depth += 1
-            current.append(ch)
-            continue
-        if ch == ")":
-            current.append(ch)
-            if paren_depth > 0:
-                paren_depth -= 1
-            if paren_depth == 0:
-                token = "".join(current).strip()
-                if token:
-                    tokens.append(token)
-                current = []
-            continue
-        if ch.isspace() and paren_depth == 0:
-            token = "".join(current).strip()
-            if token:
-                tokens.append(token)
-            current = []
-            continue
-        current.append(ch)
-    token = "".join(current).strip()
-    if token:
-        tokens.append(token)
-    return [tok for tok in tokens if tok]
 
 
-def _bk_simple_table_matrix_from_record_views_wordwise(record_views):
-    records = _bk_simple_table_records(record_views)
-    if not records:
-        return []
-    row_groups = _bk_simple_group_rows(records)
-    matrix = []
-    for row in row_groups:
-        row_values = []
-        for rec in sorted(row or [], key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("y0", 0.0) or 0.0))):
-            text = _bk_simple_record_text(rec)
-            if not text:
-                continue
-            tokens = _bk_simple_tokenize_text(text)
-            if tokens:
-                row_values.extend(tokens)
-        if any(_bk_tab_clean(value) for value in row_values):
-            matrix.append(row_values)
-    return matrix
 
-
-def _bk_load_saved_column_keys_for_dialog(window):
-    # Im Ausgangszustand sollen keine erweiterten Spalten vorausgewählt sein.
-    # Alte gespeicherte Werte aus früheren Versionen werden ignoriert, bis der
-    # Benutzer in dieser Version explizit "Auswahl merken" verwendet.
-    raw = None
-    user_saved = False
-    try:
-        settings = getattr(window, "settings", None)
-        if settings is not None:
-            user_saved = bool(settings.value("export/table_column_keys_user_saved", False, type=bool))
-            if user_saved:
-                raw = settings.value("export/table_column_keys", "", str)
-    except Exception:
-        raw = None
-        user_saved = False
-    if raw:
-        try:
-            parsed = json.loads(str(raw))
-            if isinstance(parsed, list):
-                return _bk_normalize_column_keys([str(x) for x in parsed])
-        except Exception:
-            return _bk_normalize_column_keys([part.strip() for part in str(raw).split(",") if part.strip()])
-    remembered = getattr(window, "_bk_export_selected_column_keys", None) if user_saved else None
-    if remembered:
-        return _bk_normalize_column_keys(remembered)
-    return []
-
-def _bk_simple_table_matrix_from_record_views(record_views):
-    records = _bk_simple_table_records(record_views)
-    if not records:
-        return []
-    row_groups = _bk_simple_group_rows(records)
-    clusters = _bk_simple_column_clusters(row_groups)
-    if not clusters:
-        return []
-    matrix = []
-    for row in row_groups:
-        values = [""] * len(clusters)
-        for rec in sorted(row, key=lambda r: float(r.get("x0", 0.0) or 0.0)):
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            idx = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0)) - x0))
-            text = _bk_simple_record_text(rec)
-            if not text:
-                continue
-            values[idx] = _bk_tab_join_text_fragments([values[idx], text])
-        # Leere Randspalten pro Zeile bleiben erhalten, damit das Layout stabil bleibt.
-        if any(_bk_tab_clean(v) for v in values):
-            matrix.append(values)
-    # Komplett leere Spalten entfernen.
-    if matrix:
-        keep = []
-        for col in range(max(len(r) for r in matrix)):
-            if any(_bk_tab_clean(row[col] if col < len(row) else "") for row in matrix):
-                keep.append(col)
-        matrix = [[row[col] if col < len(row) else "" for col in keep] for row in matrix]
-    return matrix
 
 
 def _bk_simple_col_widths(matrix):
@@ -8120,20 +6254,27 @@ def _bk_simple_col_widths(matrix):
     return widths
 
 
-def _bk_write_simple_matrix_docx(path, matrix, window=None):
+def _bk_write_simple_matrix_docx(path, matrix, window=None, layout=None):
     try:
         from docx import Document
         from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
     except Exception as exc:
-        raise RuntimeError("python-docx fehlt; DOCX kann nicht geschrieben werden.") from exc
+        raise RuntimeError(_bk_registry_lookup("err_no_docx_package_short") or "python-docx") from exc
+    spans = set((layout or {}).get("spans") or set())
+    aligns = list((layout or {}).get("aligns") or [])
     doc = Document()
     try:
         section = doc.sections[0]
-        section.orientation = 1
-        section.page_width, section.page_height = section.page_height, section.page_width
+        # Bisher war hier immer Querformat erzwungen. Jetzt entscheidet die
+        # im Export-Dialog gewaehlte Ausrichtung (Standard weiterhin quer).
+        use_landscape = bool(bk_resolve_landscape(True, window))
+        if use_landscape:
+            section.orientation = 1
+            section.page_width, section.page_height = section.page_height, section.page_width
         normal = doc.styles["Normal"]
         normal.font.name = "Arial"
-        normal.font.size = Pt(8)
+        normal.font.size = Pt(10)
     except Exception:
         pass
     if not matrix:
@@ -8146,88 +6287,182 @@ def _bk_write_simple_matrix_docx(path, matrix, window=None):
         table.autofit = True
     except Exception:
         pass
-    for row_values in matrix:
+    for r_i, row_values in enumerate(matrix):
         cells = table.add_row().cells
+        if r_i in spans and col_count > 1:
+            # Abschnittszeile: alle Zellen verbinden, fett und zentriert.
+            try:
+                merged = cells[0]
+                for extra in cells[1:]:
+                    merged = merged.merge(extra)
+                merged.text = str(row_values[0] if row_values else "")
+                for p in merged.paragraphs:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    for run in p.runs:
+                        run.bold = True
+                        run.font.size = Pt(10)
+                continue
+            except Exception:
+                pass
         for idx in range(col_count):
             cells[idx].text = str(row_values[idx] if idx < len(row_values) else "")
             try:
                 for p in cells[idx].paragraphs:
+                    if idx < len(aligns) and aligns[idx] == "right":
+                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     for run in p.runs:
-                        run.font.size = Pt(8)
+                        run.font.size = Pt(10)
             except Exception:
                 pass
     doc.save(path)
 
 
-def _bk_write_simple_matrix_xlsx(path, matrix, window=None):
-    matrix = matrix or []
-    col_count = max(1, max([len(row) for row in matrix] or [1]))
-    widths = _bk_simple_col_widths(matrix)
-    row_xml = []
-    for r_idx, row in enumerate(matrix, start=1):
-        cells = []
-        for c_idx in range(1, col_count + 1):
-            value = row[c_idx - 1] if c_idx - 1 < len(row) else ""
-            ref = f"{_bk_xlsx_col_name(c_idx)}{r_idx}"
-            cells.append(f'<c r="{ref}" s="1" t="inlineStr"><is><t xml:space="preserve">{_bk_xml(value)}</t></is></c>')
-        row_xml.append(f'<row r="{r_idx}" ht="18" customHeight="1">{"".join(cells)}</row>')
-    cols = ''.join(f'<col min="{i}" max="{i}" width="{widths[i-1] if i-1 < len(widths) else 12.0:.2f}" customWidth="1"/>' for i in range(1, col_count + 1))
-    sheet = ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
-        '<sheetFormatPr defaultRowHeight="18"/>',
-        '<cols>', cols, '</cols>',
-        '<sheetData>', ''.join(row_xml), '</sheetData>',
-        '<pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0" footer="0"/>',
-        '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>',
-        '</worksheet>',
-    ])
-    content_types = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>'
-    root_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
-    workbook = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Transkription" sheetId="1" r:id="rId1"/></sheets></workbook>'
-    workbook_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
-    styles = '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="9"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB7B7B7"/></left><right style="thin"><color rgb="FFB7B7B7"/></right><top style="thin"><color rgb="FFB7B7B7"/></top><bottom style="thin"><color rgb="FFB7B7B7"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
-    core = '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Bottled Kraken</dc:creator></cp:coreProperties>'
-    app = '<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Bottled Kraken</Application></Properties>'
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", root_rels)
-        archive.writestr("xl/workbook.xml", workbook)
-        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
-        archive.writestr("xl/worksheets/sheet1.xml", sheet)
-        archive.writestr("xl/styles.xml", styles)
-        archive.writestr("docProps/core.xml", core)
-        archive.writestr("docProps/app.xml", app)
 
-
-def _bk_write_simple_matrix_odf(path, matrix, mimetype, text_document=True):
+def _bk_write_simple_matrix_odf(path, matrix, mimetype, text_document=True, layout=None, window=None):
     matrix = matrix or []
+    layout = layout or {}
+    spans = set(layout.get("spans") or set())
+    aligns = list(layout.get("aligns") or [])
+    bold_rows = set(layout.get("bold_rows") or set())
     col_count = max(1, max([len(row) for row in matrix] or [1]))
-    widths = [max(1.4, min(5.0, w / 6.2)) for w in _bk_simple_col_widths(matrix)]
+
+    # Bei raeumlichen Exporten sind die aus den Bildkoordinaten ermittelten
+    # Breiten verbindlich. Der alte Writer berechnete sie erneut aus der
+    # Textlaenge und machte dadurch beide Namensspalten viel zu schmal.
+    source_widths = list(layout.get("widths") or _bk_simple_col_widths(matrix))
+    source_widths += [12.0] * max(0, col_count - len(source_widths))
+    widths = [max(1.15, min(7.5, float(source_widths[i]) / 6.2))
+              for i in range(col_count)]
+
+    # Breite historische Tabellen werden in Writer automatisch auf einer
+    # A4-Querformatseite angelegt. Die Spalten werden proportional skaliert,
+    # nicht einzeln hart abgeschnitten.
+    landscape_auto = bool(col_count >= 5 or sum(widths) > 18.0)
+    landscape = bool(bk_resolve_landscape(landscape_auto, window))
+    usable_cm = 28.2 if landscape else 19.5
+    total_cm = sum(widths)
+    if text_document and total_cm > usable_cm:
+        factor = usable_cm / max(0.1, total_cm)
+        widths = [max(0.95, width * factor) for width in widths]
+
+    font_pt = 8.4 if col_count >= 7 else (9.0 if col_count >= 5 else 10.0)
     column_styles = []
     columns = []
     for idx in range(1, col_count + 1):
-        width = widths[idx-1] if idx-1 < len(widths) else 2.2
-        column_styles.append('<style:style style:name="co%d" style:family="table-column"><style:table-column-properties style:column-width="%.3fcm"/></style:style>' % (idx, width))
+        width = widths[idx - 1] if idx - 1 < len(widths) else 2.2
+        column_styles.append(
+            '<style:style style:name="co%d" style:family="table-column">'
+            '<style:table-column-properties style:column-width="%.3fcm"/>'
+            '</style:style>' % (idx, width)
+        )
         columns.append('<table:table-column table:style-name="co%d"/>' % idx)
+
+    non_span_rows = [idx for idx in range(len(matrix)) if idx not in spans]
+    first_data = non_span_rows[0] if non_span_rows else -1
+    last_data = non_span_rows[-1] if non_span_rows else -1
     table_rows = []
-    for row in matrix:
+    for r_i, row in enumerate(matrix):
         cells = []
-        for c_idx in range(col_count):
-            text = row[c_idx] if c_idx < len(row) else ""
-            cells.append('<table:table-cell table:style-name="ceBody" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % _bk_ods_text(text))
+        if r_i in spans and col_count > 1:
+            text = row[0] if row else ""
+            cells.append(
+                '<table:table-cell table:style-name="ceSection" office:value-type="string" '
+                'table:number-columns-spanned="%d"><text:p>%s</text:p></table:table-cell>'
+                % (col_count, _bk_ods_text(text))
+            )
+            cells.append('<table:covered-table-cell table:number-columns-repeated="%d"/>' % (col_count - 1))
+        else:
+            edge = "Only" if r_i == first_data == last_data else (
+                "Top" if r_i == first_data else ("Bottom" if r_i == last_data else "")
+            )
+            for c_idx in range(col_count):
+                text = row[c_idx] if c_idx < len(row) else ""
+                if r_i in bold_rows:
+                    style = "ceHead"
+                else:
+                    prefix = "ceRight" if c_idx < len(aligns) and aligns[c_idx] == "right" else "ceBody"
+                    style = prefix + edge
+                cells.append(
+                    '<table:table-cell table:style-name="%s" office:value-type="string">'
+                    '<text:p>%s</text:p></table:table-cell>' % (style, _bk_ods_text(text))
+                )
         table_rows.append('<table:table-row>%s</table:table-row>' % ''.join(cells))
+
+    def _cell_style(name, align="start", top=False, bottom=False, bold=False):
+        borders = [
+            'fo:border-left="0.05pt solid #8A8A8A"',
+            'fo:border-right="0.05pt solid #8A8A8A"',
+            'fo:border-top="%s"' % ('0.5pt solid #555555' if top else 'none'),
+            'fo:border-bottom="%s"' % ('0.5pt solid #555555' if bottom else 'none'),
+        ]
+        weight = ' fo:font-weight="bold"' if bold else ''
+        return (
+            '<style:style style:name="%s" style:family="table-cell">'
+            '<style:table-cell-properties %s fo:padding="0.035cm" '
+            'style:vertical-align="middle" fo:wrap-option="wrap"/>'
+            '<style:text-properties fo:font-size="%.1fpt"%s style:font-name="Arial"/>'
+            '<style:paragraph-properties fo:text-align="%s" fo:margin-top="0cm" '
+            'fo:margin-bottom="0cm"/>'
+            '</style:style>'
+        ) % (name, ' '.join(borders), font_pt, weight, align)
+
+    cell_styles = [
+        _cell_style("ceBody"),
+        _cell_style("ceBodyTop", top=True),
+        _cell_style("ceBodyBottom", bottom=True),
+        _cell_style("ceBodyOnly", top=True, bottom=True),
+        _cell_style("ceRight", align="end"),
+        _cell_style("ceRightTop", align="end", top=True),
+        _cell_style("ceRightBottom", align="end", bottom=True),
+        _cell_style("ceRightOnly", align="end", top=True, bottom=True),
+        _cell_style("ceHead", top=True, bottom=True, bold=True),
+        '<style:style style:name="ceSection" style:family="table-cell">'
+        '<style:table-cell-properties fo:border="none" fo:padding="0.05cm" '
+        'style:vertical-align="middle" fo:wrap-option="wrap"/>'
+        '<style:text-properties fo:font-size="%.1fpt" fo:font-weight="bold" style:font-name="Arial"/>'
+        '<style:paragraph-properties fo:text-align="center" fo:margin-top="0.08cm" '
+        'fo:margin-bottom="0.03cm"/>'
+        '</style:style>' % max(font_pt, 9.0),
+    ]
+
     body_tag = 'office:text' if text_document else 'office:spreadsheet'
     content = ''.join([
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">',
+        '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+        'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">',
         '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>',
-        '<office:automatic-styles>', ''.join(column_styles),
-        '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.05cm"/><style:text-properties fo:font-size="8pt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>',
+        '<office:automatic-styles>', ''.join(column_styles), ''.join(cell_styles),
         '</office:automatic-styles>',
-        '<office:body><', body_tag, '><table:table table:name="Transkription">', ''.join(columns), ''.join(table_rows), '</table:table></', body_tag, '></office:body></office:document-content>',
+        '<office:body><', body_tag, '><table:table table:name="Transkription">',
+        ''.join(columns), ''.join(table_rows), '</table:table></', body_tag,
+        '></office:body></office:document-content>',
     ])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles></office:document-styles>'
+
+    page_w, page_h = ((29.7, 21.0) if landscape else (21.0, 29.7))
+    orientation = "landscape" if landscape else "portrait"
+    styles = ''.join([
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+        'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">',
+        '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>',
+        '<office:styles><style:default-style style:family="paragraph">'
+        '<style:text-properties fo:font-size="%.1fpt" style:font-name="Arial"/>'
+        '</style:default-style></office:styles>' % font_pt,
+        '<office:automatic-styles><style:page-layout style:name="pm1">'
+        '<style:page-layout-properties fo:page-width="%.1fcm" fo:page-height="%.1fcm" '
+        'style:print-orientation="%s" fo:margin-top="0.65cm" fo:margin-bottom="0.65cm" '
+        'fo:margin-left="0.65cm" fo:margin-right="0.65cm"/>'
+        '</style:page-layout></office:automatic-styles>' % (page_w, page_h, orientation),
+        '<office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/>'
+        '</office:master-styles></office:document-styles>',
+    ])
     meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
     settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
     manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="%s"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>' % mimetype
@@ -8236,19 +6471,20 @@ def _bk_write_simple_matrix_odf(path, matrix, mimetype, text_document=True):
         info.date_time = (2020, 1, 1, 0, 0, 0)
         info.compress_type = zipfile.ZIP_STORED
         archive.writestr(info, mimetype)
-        for name, data in (("content.xml", content), ("styles.xml", styles), ("meta.xml", meta), ("settings.xml", settings), ("META-INF/manifest.xml", manifest)):
+        for name, data in (("content.xml", content), ("styles.xml", styles), ("meta.xml", meta),
+                           ("settings.xml", settings), ("META-INF/manifest.xml", manifest)):
             zi = zipfile.ZipInfo(name)
             zi.date_time = (2020, 1, 1, 0, 0, 0)
             zi.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(zi, data.encode("utf-8"))
 
 
-def _bk_write_simple_matrix_odt(path, matrix, window=None):
-    return _bk_write_simple_matrix_odf(path, matrix, "application/vnd.oasis.opendocument.text", True)
+def _bk_write_simple_matrix_odt(path, matrix, window=None, layout=None):
+    return _bk_write_simple_matrix_odf(path, matrix, "application/vnd.oasis.opendocument.text", True, layout=layout, window=window)
 
 
-def _bk_write_simple_matrix_ods(path, matrix, window=None):
-    return _bk_write_simple_matrix_odf(path, matrix, "application/vnd.oasis.opendocument.spreadsheet", False)
+def _bk_write_simple_matrix_ods(path, matrix, window=None, layout=None):
+    return _bk_write_simple_matrix_odf(path, matrix, "application/vnd.oasis.opendocument.spreadsheet", False, layout=layout, window=window)
 
 
 try:
@@ -8266,29 +6502,29 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
         return None
 
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(16, 14, 16, 14)
     layout.setSpacing(10)
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
 
     rb_original = rb_lines = None
-    rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple", "Tabelle (einfach)"), dlg)
-    rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle (erweitert)"), dlg)
+    rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple"), dlg)
+    rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
     if QGroupBox is not None:
-        mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg)
+        mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg)
         mode_layout = QVBoxLayout(mode_box)
         mode_layout.setContentsMargins(12, 10, 12, 10)
     else:
         mode_box = None
         mode_layout = QVBoxLayout()
     if include_text_modes:
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table", "table_simple"})
         rb_lines.setChecked(mode == "lines")
@@ -8316,12 +6552,12 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
 
     selected_keys = _bk_load_saved_column_keys_for_dialog(self)
     checkboxes = {}
-    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg) if QGroupBox is not None else None
+    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg) if QGroupBox is not None else None
     columns_layout = QVBoxLayout(columns_box) if columns_box is not None else QVBoxLayout()
     if columns_box is not None:
         columns_layout.setContentsMargins(12, 10, 12, 10)
     else:
-        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg))
+        columns_layout.addWidget(QLabel(_bk_tab_tr(self, "export_table_columns_label"), dlg))
     if QGridLayout is not None:
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
@@ -8340,9 +6576,9 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
             checkboxes[key] = cb
             columns_layout.addWidget(cb)
     quick_row = QHBoxLayout()
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     quick_row.addWidget(btn_all)
     quick_row.addWidget(btn_none)
     quick_row.addWidget(btn_remember)
@@ -8353,15 +6589,15 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
     else:
         layout.addLayout(columns_layout)
 
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try:
         remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception:
         remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1)
     zone_layout.addWidget(btn_zones)
     if zone_box is not None:
@@ -8369,7 +6605,7 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
     else:
         layout.addLayout(zone_layout)
 
-    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint", "Tabelle (einfach) nimmt die vorhandenen Overlay-Boxen, trennt erkannte Zeilen wortweise und hält Text in Klammern zusammen."), dlg)
+    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint"), dlg)
     hint.setWordWrap(True)
     layout.addWidget(hint)
 
@@ -8389,7 +6625,7 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
     def remember_selection():
         keys = current_checked_keys()
         if not keys and not rb_simple.isChecked():
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
             return
         result["remembered"] = True
         if keys:
@@ -8451,8 +6687,8 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK"))
-        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok"))
+        buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception:
         pass
 
@@ -8475,7 +6711,7 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
             mode = "table"
             keys = current_checked_keys()
             if not keys:
-                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen."))
+                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none"))
                 return
         result["mode"] = mode
         result["columns"] = _bk_normalize_column_keys(keys)
@@ -8505,38 +6741,10 @@ def _bk_column_choice_dialog_simple_table(self, fmt=None, include_text_modes=Fal
     return result
 
 
-def _bk_simple_table_matrix_for_item(item):
-    try:
-        _text, _kr, _pil, record_views = item.results
-    except Exception:
-        return []
-    return _bk_simple_table_matrix_from_record_views_wordwise(record_views)
 
 
-try:
-    _BK_SIMPLE_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_SIMPLE_PREV_RENDER_FILE = None
 
 
-def _bk_render_file_simple_table(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None):
-        if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS and str(getattr(self, "_bk_export_table_mode", "table") or "table").lower() == "simple":
-            matrix = _bk_simple_table_matrix_for_item(item)
-            if fmt_l in {"xlsx", "excel"}:
-                return _bk_write_simple_matrix_xlsx(path, matrix, self)
-            if fmt_l in {"ods", "calc"}:
-                return _bk_write_simple_matrix_ods(path, matrix, self)
-        if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS and str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower() == "table_simple":
-            matrix = _bk_simple_table_matrix_for_item(item)
-            if fmt_l in {"docx", "word"}:
-                return _bk_write_simple_matrix_docx(path, matrix, self)
-            if fmt_l == "odt":
-                return _bk_write_simple_matrix_odt(path, matrix, self)
-    if callable(_BK_SIMPLE_PREV_RENDER_FILE):
-        return _BK_SIMPLE_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
 try:
@@ -8549,93 +6757,21 @@ except Exception:
     _BK_SIMPLE_PREV_EXPORT_BATCH = None
 
 
-def _bk_export_single_interactive_simple_table(self, item: TaskItem, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None or result.get("cancelled"):
-            return None
-        if result.get("mode") == "table_simple":
-            self._bk_export_table_mode = "simple"
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_table_mode = "table"
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False))
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE):
-            return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=True)
-        if result is None or result.get("cancelled"):
-            return None
-        self._bk_export_text_layout_mode = str(result.get("mode") or "original")
-        self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-        self._bk_export_use_zones = bool(result.get("use_zones", False)) if self._bk_export_text_layout_mode == "table" else False
-        if result.get("remembered"):
-            self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE):
-            return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if callable(_BK_SIMPLE_PREV_EXPORT_SINGLE):
-        return _BK_SIMPLE_PREV_EXPORT_SINGLE(self, item, fmt)
-    return None
 
 
-def _bk_export_batch_simple_table(self, items, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None or result.get("cancelled"):
-            return None
-        if result.get("mode") == "table_simple":
-            self._bk_export_table_mode = "simple"
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_table_mode = "table"
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False))
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_BATCH):
-            return _BK_TABULAR_PREV_EXPORT_BATCH(self, items, fmt)
-        return None
-    if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=True)
-        if result is None or result.get("cancelled"):
-            return None
-        self._bk_export_text_layout_mode = str(result.get("mode") or "original")
-        self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-        self._bk_export_use_zones = bool(result.get("use_zones", False)) if self._bk_export_text_layout_mode == "table" else False
-        if result.get("remembered"):
-            self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_BATCH):
-            return _BK_TABULAR_PREV_EXPORT_BATCH(self, items, fmt)
-        return None
-    if callable(_BK_SIMPLE_PREV_EXPORT_BATCH):
-        return _BK_SIMPLE_PREV_EXPORT_BATCH(self, items, fmt)
-    return None
 
 
 try:
     _bk_column_choice_dialog = _bk_column_choice_dialog_simple_table
-    MainWindow._render_file = _bk_render_file_simple_table
-    MainWindow._export_single_interactive = _bk_export_single_interactive_simple_table
-    MainWindow._export_batch = _bk_export_batch_simple_table
 except Exception:
     pass
 
 try:
     __all__.extend([
-        '_bk_simple_table_matrix_from_record_views',
         '_bk_write_simple_matrix_docx',
         '_bk_write_simple_matrix_odt',
-        '_bk_write_simple_matrix_xlsx',
         '_bk_write_simple_matrix_ods',
         '_bk_column_choice_dialog_simple_table',
-        '_bk_render_file_simple_table',
     ])
     register_globals('bk', globals(), sorted(set(__all__)))
 except Exception:
@@ -8754,20 +6890,31 @@ def _bk_simple_parse_register_text(text):
         work = (work[:age_match.start()] + " " + work[age_match.end():]).strip()
 
     # Datums-/Jahresfragmente. Römische Monatszahlen und vierstellige Jahre bleiben zusammen.
+    # Entfernung über die Original-Treffer-Spannen: Das erneute Suchen des
+    # bereinigten Fragments ("21.V.") scheiterte, wenn die Vorlage Leerzeichen
+    # enthielt ("21. V.") - dann blieben Reste wie "21 V" im Namen kleben.
     date_parts = []
+    spans = []
     for m in re.finditer(r"\b\d{1,2}\s*[.]\s*(?:[IVXLCDMivxlcdm]{1,6}|[0-9]{1,2})\s*[.]?", work):
         part = _bk_tab_clean(m.group(0)).replace(" ", "")
         if part:
             date_parts.append(part)
+            spans.append(m.span())
     for m in re.finditer(r"\b(?:1[5-9]\d{2}|20\d{2})\b", work):
         part = m.group(0)
         if part not in date_parts:
             date_parts.append(part)
+            spans.append(m.span())
     if date_parts:
         cells["date_year"] = _bk_simple_join_clean(date_parts)
-        for part in sorted(date_parts, key=len, reverse=True):
-            work = re.sub(re.escape(part).replace(r"\ ", r"\s*"), " ", work, count=1)
-            work = work.replace(part, " ")
+        merged_spans = []
+        for start, end in sorted(spans):
+            if merged_spans and start <= merged_spans[-1][1]:
+                merged_spans[-1] = (merged_spans[-1][0], max(end, merged_spans[-1][1]))
+            else:
+                merged_spans.append((start, end))
+        for start, end in reversed(merged_spans):
+            work = work[:start] + " " + work[end:]
 
     # Übrig bleiben meist Name und Ort. Kommas trennen Namensteil zuverlässiger als Punkte.
     work = re.sub(r"\s+", " ", work).strip(" ,;:.")
@@ -8780,10 +6927,23 @@ def _bk_simple_parse_register_text(text):
     segments = [_bk_simple_strip_punct(seg) for seg in re.split(r"\s{2,}|\s*[.]\s+", work) if _bk_simple_strip_punct(seg)]
     name_part = work
     if len(segments) >= 2:
-        candidate = segments[-1]
-        if re.search(r"[A-Za-zÀ-ÿÄÖÜäöüß]", candidate) and len(candidate) <= 32:
-            place = candidate
-            name_part = " ".join(segments[:-1]).strip()
+        # Von hinten den ersten plausiblen Orts-Kandidaten suchen: grossgeschrieben
+        # und mindestens 3 Zeichen. Streu-Segmente (einzelne Buchstaben aus
+        # OCR-Rauschen wie "v") werden uebersprungen und verworfen.
+        idx = len(segments) - 1
+        while idx >= 1:
+            candidate = segments[idx]
+            if (re.match(r"^[A-ZÄÖÜ]", candidate) and len(candidate) >= 3
+                    and re.search(r"[A-Za-zÀ-ÿÄÖÜäöüß]", candidate) and len(candidate) <= 32):
+                place = candidate
+                name_part = " ".join(segments[:idx]).strip()
+                break
+            if len(candidate) <= 2:
+                idx -= 1
+                continue
+            break
+        else:
+            name_part = " ".join(segments).strip()
     else:
         # Fallback: letztes alphabetisches Wort nach einem Jahr/Datum-Trenner wurde oben oft übriggelassen.
         m = re.search(r"(.+?)\s+([A-ZÄÖÜ][A-Za-zÀ-ÿÄÖÜäöüß.\-]{2,})$", work)
@@ -8793,6 +6953,14 @@ def _bk_simple_parse_register_text(text):
 
     cells["place"] = _bk_simple_strip_punct(place)
     name_part = _bk_simple_strip_punct(name_part)
+    # Komma-Variante der Vorlage ("1763,Kahlenberg."): Nach der Datums-Entfernung
+    # haengt der Ort dann per Komma am Namen. Nur abtrennen, wenn Datums-/Nummern-
+    # Kontext existiert und der Kandidat ein einzelnes grossgeschriebenes Wort ist.
+    if not cells["place"] and (cells.get("date_year") or cells.get("number")):
+        m = re.match(r"^(.*?),\s*([A-ZÄÖÜ][A-Za-zÀ-ÿÄÖÜäöüß.\-]{2,})$", name_part)
+        if m and " " not in m.group(2):
+            name_part = m.group(1).strip()
+            cells["place"] = _bk_simple_strip_punct(m.group(2))
     # Falls der Ort nicht zuverlässig abgetrennt werden konnte, stört das nicht; Originalzeile bleibt erhalten.
     if name_part:
         # erstes Wort = Familienname, Rest = Vornamen. Das ist für Registerseiten im Stil ABBYY lesbarer als wortweise Spalten.
@@ -8979,7 +7147,7 @@ class _BKSimplePreviewDialog(QDialog):
         self._items = []
         self._image_w = 0
         self._image_h = 0
-        self.setWindowTitle(_bk_tab_tr(window, "export_simple_preview_title", "Tabelle (einfach) – Vorschau bearbeiten"))
+        self.setWindowTitle(_bk_tab_tr(window, "export_simple_preview_title"))
         self.setModal(True)
         self.resize(1240, 820)
         root = QHBoxLayout(self)
@@ -9000,14 +7168,14 @@ class _BKSimplePreviewDialog(QDialog):
             self.scene.setSceneRect(QRectF(0, 0, pixmap.width(), pixmap.height()))
         root.addWidget(self.view, 3)
         side = QVBoxLayout(); side.setSpacing(8)
-        intro = QLabel(_bk_tab_tr(window, "export_simple_preview_intro", "Prüfe die Text-Boxen für Tabelle (einfach). Du kannst Boxen verschieben, an den Eckpunkten skalieren, Text ändern oder Boxen löschen."), self)
+        intro = QLabel(_bk_tab_tr(window, "export_simple_preview_intro"), self)
         intro.setWordWrap(True)
         side.addWidget(intro)
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels([
-            _bk_tab_tr(window, "export_simple_preview_col_text", "Text"), "X", "Y",
-            _bk_tab_tr(window, "export_simple_preview_col_width", "Breite"),
-            _bk_tab_tr(window, "export_simple_preview_col_height", "Höhe"),
+            _bk_tab_tr(window, "export_simple_preview_col_text"), "X", "Y",
+            _bk_tab_tr(window, "export_simple_preview_col_width"),
+            _bk_tab_tr(window, "export_simple_preview_col_height"),
         ])
         try:
             self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -9021,14 +7189,14 @@ class _BKSimplePreviewDialog(QDialog):
             pass
         side.addWidget(self.table, 1)
         btn_row = QHBoxLayout()
-        self.btn_delete = QPushButton(_bk_tab_tr(window, "export_simple_preview_delete", "Löschen"), self)
-        self.btn_reset = QPushButton(_bk_tab_tr(window, "export_simple_preview_reset", "Zurücksetzen"), self)
+        self.btn_delete = QPushButton(_bk_tab_tr(window, "export_simple_preview_delete"), self)
+        self.btn_reset = QPushButton(_bk_tab_tr(window, "export_simple_preview_reset"), self)
         btn_row.addWidget(self.btn_delete); btn_row.addWidget(self.btn_reset)
         side.addLayout(btn_row)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         try:
-            buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok", "OK"))
-            buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel", "Abbrechen"))
+            buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(window, "btn_ok"))
+            buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(window, "btn_cancel"))
         except Exception:
             pass
         side.addWidget(buttons)
@@ -9253,28 +7421,8 @@ def _bk_simple_table_matrix_for_item(item):
     return _bk_simple_table_matrix_from_records_semantic(_bk_simple_table_records(record_views), None)
 
 
-try:
-    _BK_SIMPLE_UI_PREV_RENDER_FILE = MainWindow._render_file
-except Exception:
-    _BK_SIMPLE_UI_PREV_RENDER_FILE = None
 
 
-def _bk_render_file_simple_table_semantic(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None):
-        if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS and str(getattr(self, "_bk_export_table_mode", "table") or "table").lower() == "simple":
-            globals()["_bk_simple_current_window"] = self
-            matrix = _bk_simple_table_matrix_for_item_semantic(self, item)
-            if fmt_l in {"xlsx", "excel"}: return _bk_write_simple_matrix_xlsx(path, matrix, self)
-            if fmt_l in {"ods", "calc"}: return _bk_write_simple_matrix_ods(path, matrix, self)
-        if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS and str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower() == "table_simple":
-            globals()["_bk_simple_current_window"] = self
-            matrix = _bk_simple_table_matrix_for_item_semantic(self, item)
-            if fmt_l in {"docx", "word"}: return _bk_write_simple_matrix_docx(path, matrix, self)
-            if fmt_l == "odt": return _bk_write_simple_matrix_odt(path, matrix, self)
-    if callable(_BK_SIMPLE_UI_PREV_RENDER_FILE):
-        return _BK_SIMPLE_UI_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
 def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_modes=False):
@@ -9285,24 +7433,24 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
             return _BK_SIMPLE_PREV_COLUMN_CHOICE_DIALOG(self, fmt, include_text_modes)
         return None
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 12, 14, 12)
     layout.setSpacing(8)
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung und die Spalten für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
     rb_original = rb_lines = None
-    rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple", "Tabelle (einfach)"), dlg)
-    rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle (erweitert)"), dlg)
-    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg) if QGroupBox is not None else None
+    rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple"), dlg)
+    rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
+    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg) if QGroupBox is not None else None
     mode_layout = QVBoxLayout(mode_box) if mode_box is not None else QVBoxLayout()
     mode_layout.setContentsMargins(10, 8, 10, 8)
     if include_text_modes:
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table", "table_simple"})
         rb_lines.setChecked(mode == "lines")
@@ -9324,9 +7472,11 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
     if mode_box is not None: layout.addWidget(mode_box)
     else: layout.addLayout(mode_layout)
 
+    _bk_add_export_orientation_group(self, dlg, layout)
+
     selected_keys = _bk_load_saved_column_keys_for_dialog(self)
     checkboxes = {}
-    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg) if QGroupBox is not None else None
+    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg) if QGroupBox is not None else None
     columns_layout = QVBoxLayout(columns_box) if columns_box is not None else QVBoxLayout()
     if QGridLayout is not None:
         grid = QGridLayout(); grid.setHorizontalSpacing(18); grid.setVerticalSpacing(4)
@@ -9338,25 +7488,25 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
         for key in _BK_TABULAR_KEYS:
             cb = QCheckBox(_bk_tabular_column_title(self, key), dlg); cb.setChecked(key in selected_keys); checkboxes[key]=cb; columns_layout.addWidget(cb)
     quick_row = QHBoxLayout()
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     for btn in (btn_all, btn_none, btn_remember): quick_row.addWidget(btn)
     quick_row.addStretch(1); columns_layout.addLayout(quick_row)
     if columns_box is not None: layout.addWidget(columns_box)
     else: layout.addLayout(columns_layout)
 
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try: remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception: remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1); zone_layout.addWidget(btn_zones)
     if zone_box is not None: layout.addWidget(zone_box)
     else: layout.addLayout(zone_layout)
-    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint", "Tabelle (einfach) erzeugt eine lesbare Tabelle aus den Overlay-Boxen und öffnet vorher eine bearbeitbare Vorschau."), dlg)
+    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint"), dlg)
     hint.setWordWrap(True); layout.addWidget(hint)
 
     def current_checked_keys(): return [key for key, cb in checkboxes.items() if cb.isChecked()]
@@ -9368,7 +7518,7 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
     def remember_selection():
         keys = current_checked_keys()
         if not keys and not rb_simple.isChecked():
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["remembered"] = True
         if keys: result["columns"] = _bk_save_column_keys(self, keys)
         try: self.settings.setValue("export/table_use_zones", bool(cb_zones.isChecked())); self.settings.sync()
@@ -9397,7 +7547,7 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
             except Exception: pass
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception: pass
     def cancel_dialog(): result["cancelled"] = True; dlg.done(QDialog.Rejected)
     def accept_checked():
@@ -9408,7 +7558,7 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
         else:
             mode="table"; keys=current_checked_keys()
             if not keys:
-                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["mode"] = mode; result["columns"] = _bk_normalize_column_keys(keys); result["use_zones"] = bool(cb_zones.isChecked()) if mode == "table" else False
         try: self._bk_export_use_zones = result["use_zones"]
         except Exception: pass
@@ -9421,44 +7571,10 @@ def _bk_column_choice_dialog_simple_table_compact(self, fmt=None, include_text_m
     return result
 
 
-def _bk_export_single_interactive_simple_table_preview(self, item: TaskItem, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None or result.get("cancelled"): return None
-        if result.get("mode") == "table_simple":
-            preview = _bk_open_simple_table_preview(self, item)
-            if preview is None: return None
-            self._bk_simple_preview_records = preview; self._bk_simple_preview_item_path = str(getattr(item, "path", "") or "")
-            self._bk_export_table_mode = "simple"; self._bk_export_use_zones = False
-        else:
-            self._bk_export_table_mode = "table"; self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS); self._bk_export_use_zones = bool(result.get("use_zones", False))
-            if result.get("remembered"): self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE): return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=True)
-        if result is None or result.get("cancelled"): return None
-        self._bk_export_text_layout_mode = str(result.get("mode") or "original")
-        if self._bk_export_text_layout_mode == "table_simple":
-            preview = _bk_open_simple_table_preview(self, item)
-            if preview is None: return None
-            self._bk_simple_preview_records = preview; self._bk_simple_preview_item_path = str(getattr(item, "path", "") or "")
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False)) if self._bk_export_text_layout_mode == "table" else False
-            if result.get("remembered"): self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE): return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if callable(_BK_SIMPLE_PREV_EXPORT_SINGLE): return _BK_SIMPLE_PREV_EXPORT_SINGLE(self, item, fmt)
-    return None
 
 
 try:
     _bk_column_choice_dialog = _bk_column_choice_dialog_simple_table_compact
-    MainWindow._render_file = _bk_render_file_simple_table_semantic
-    MainWindow._export_single_interactive = _bk_export_single_interactive_simple_table_preview
 except Exception:
     pass
 try:
@@ -9475,6 +7591,93 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Simple Tabellenexport: keine Vorschau, räumliche Overlay-Box-Tabelle
 # ---------------------------------------------------------------------------
+def _bk_semantic_blocks_from_item(self, item):
+    """Deterministische Variante des KI-Exports: erkannte Zeilen in derselben
+    Blockstruktur (heading / paragraph / table mit header) aufbereiten - ohne
+    KI, in garantiert originaler Reihenfolge. Registerzeilen werden ueber den
+    vorhandenen semantischen Parser in Name | Zusatz | Alter | Datum/Jahr |
+    Ort | Nr. zerlegt. Liefert None, wenn die Seite nicht registerartig genug
+    ist (dann greift das raeumliche Layout als Rueckfall)."""
+    try:
+        record_views = item.results[3] if item is not None and getattr(item, "results", None) else []
+    except Exception:
+        record_views = []
+    records = _bk_simple_table_records(record_views)
+    if not records:
+        return None
+    row_groups = _bk_simple_group_rows(records)
+    if not row_groups:
+        return None
+    header = [
+        _bk_simple_column_title(self, "family_name") or "Name",
+        _bk_simple_column_title(self, "extra") or "Zusatz",
+        _bk_simple_column_title(self, "age") or "Alter",
+        _bk_simple_column_title(self, "date_year") or "Datum/Jahr",
+        _bk_simple_column_title(self, "place") or "Ort",
+        _bk_simple_column_title(self, "number") or "Nr.",
+    ]
+    blocks = []
+    open_rows = []
+    data_rows = 0
+    register_rows = 0
+
+    def _close_table():
+        nonlocal open_rows
+        if open_rows:
+            blocks.append({"type": "table", "header": list(header), "rows": open_rows})
+            open_rows = []
+
+    for row in row_groups:
+        raw = _bk_simple_row_raw_text(row)
+        if not _bk_tab_clean(raw):
+            continue
+        cells = _bk_simple_parse_register_text(raw)
+        if cells.get("heading"):
+            _close_table()
+            blocks.append({"type": "heading", "text": cells["heading"]})
+            continue
+        if cells.get("subheading"):
+            _close_table()
+            blocks.append({"type": "paragraph", "text": cells["subheading"]})
+            continue
+        data_rows += 1
+        name = _bk_tab_clean(" ".join(p for p in (cells.get("family_name", ""), cells.get("given_names", "")) if p))
+        filled = [v for v in (name, cells.get("extra"), cells.get("age"),
+                              cells.get("date_year"), cells.get("place"), cells.get("number")) if _bk_tab_clean(v or "")]
+        if name and len(filled) >= 2:
+            register_rows += 1
+            open_rows.append([
+                name,
+                _bk_tab_clean(cells.get("extra", "")),
+                _bk_tab_clean(cells.get("age", "")),
+                _bk_tab_clean(cells.get("date_year", "")),
+                _bk_tab_clean(cells.get("place", "")),
+                _bk_tab_clean(cells.get("number", "")),
+            ])
+        else:
+            _close_table()
+            blocks.append({"type": "paragraph", "text": _bk_tab_clean(raw)})
+    _close_table()
+    if data_rows == 0 or register_rows / max(1, data_rows) < 0.6:
+        return None
+    return blocks
+
+
+def _bk_semantic_blocks_write(self, path, fmt, item):
+    """Versucht den KI-Stil deterministisch; True bei Erfolg, False -> Rueckfall."""
+    blocks = _bk_semantic_blocks_from_item(self, item)
+    if not blocks:
+        return False
+    writer = globals().get("_bk_lmx_write")
+    if not callable(writer):
+        return False
+    try:
+        writer(self, path, str(fmt).lower(), blocks)
+        return True
+    except Exception:
+        return False
+
+
 def _bk_simple_spatial_layout_from_item(item):
     try:
         _text, _kr, _pil, record_views = item.results
@@ -9484,312 +7687,19 @@ def _bk_simple_spatial_layout_from_item(item):
     return _bk_simple_spatial_layout_from_records(records)
 
 
-def _bk_simple_spatial_layout_from_records(records):
-    records = [dict(rec) for rec in (records or []) if _bk_tab_clean(rec.get("text", ""))]
-    if not records:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    row_groups = _bk_simple_group_rows(records)
-    if not row_groups:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-
-    widths = sorted(max(1.0, float(rec.get("w", 1.0) or 1.0)) for rec in records)
-    med_w = widths[len(widths) // 2] if widths else 40.0
-    # Kleine Toleranz: Nur wirklich gleich ausgerichtete Overlay-Spalten werden
-    # zusammengefasst. Zu große Werte lassen Nachbarfelder verschmelzen.
-    x_tol = max(4.0, min(12.0, med_w * 0.20))
-
-    clusters = []
-    for rec in sorted(records, key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("y0", 0.0) or 0.0))):
-        x0 = float(rec.get("x0", 0.0) or 0.0)
-        target = None
-        if clusters:
-            nearest = min(clusters, key=lambda c: abs(float(c.get("x", 0.0) or 0.0) - x0))
-            if abs(float(nearest.get("x", 0.0) or 0.0) - x0) <= x_tol:
-                target = nearest
-        if target is None:
-            target = {"x": x0, "records": []}
-            clusters.append(target)
-        target["records"].append(rec)
-        target["x"] = sum(float(r.get("x0", 0.0) or 0.0) for r in target["records"]) / max(1, len(target["records"]))
-    clusters.sort(key=lambda c: float(c.get("x", 0.0) or 0.0))
-
-    matrix = []
-    row_heights = []
-    for row in row_groups:
-        values = [""] * len(clusters)
-        for rec in sorted(row or [], key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("y0", 0.0) or 0.0))):
-            text = _bk_simple_record_text(rec)
-            if not text:
-                continue
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            idx = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0) or 0.0) - x0)) if clusters else 0
-            if idx < len(values) and _bk_tab_clean(values[idx]):
-                # Eine Overlay-Box entspricht einer Tabellenzelle. Wenn durch
-                # enge x-Cluster schon ein Wert in der Zielzelle liegt, wird der
-                # nächste freie Nachbarplatz genutzt, statt mehrere Overlay-
-                # Texte in derselben Zelle zusammenzukleben.
-                moved = False
-                for offset in range(1, max(2, min(6, len(values)))):
-                    right = idx + offset
-                    left = idx - offset
-                    if right < len(values) and not _bk_tab_clean(values[right]):
-                        idx = right
-                        moved = True
-                        break
-                    if left >= 0 and not _bk_tab_clean(values[left]):
-                        idx = left
-                        moved = True
-                        break
-                if not moved:
-                    values[idx] = _bk_tab_join_text_fragments([values[idx], text])
-                    continue
-            values[idx] = text
-        if any(_bk_tab_clean(v) for v in values):
-            matrix.append(values)
-            try:
-                max_h = max(max(1.0, float(rec.get("h", 1.0) or 1.0)) for rec in row)
-            except Exception:
-                max_h = 16.0
-            row_heights.append(max(14.0, min(36.0, max_h * 0.95 + 3.0)))
-
-    if not matrix:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-
-    keep = []
-    for c in range(len(clusters)):
-        if any(_bk_tab_clean(row[c] if c < len(row) else "") for row in matrix):
-            keep.append(c)
-    if not keep:
-        keep = list(range(len(clusters)))
-    matrix = [[row[c] if c < len(row) else "" for c in keep] for row in matrix]
-    kept_clusters = [clusters[c] for c in keep]
-
-    col_widths = []
-    for idx, cluster in enumerate(kept_clusters):
-        x = float(cluster.get("x", 0.0) or 0.0)
-        next_x = None
-        if idx + 1 < len(kept_clusters):
-            next_x = float(kept_clusters[idx + 1].get("x", x + 90.0) or x + 90.0)
-        if next_x is None or next_x <= x:
-            try:
-                next_x = x + max(max(float(r.get("w", 40.0) or 40.0) for r in cluster.get("records", []) or []), 55.0)
-            except Exception:
-                next_x = x + 80.0
-        pixel_gap = max(35.0, min(260.0, next_x - x))
-        try:
-            col_values = [str(row[idx] if idx < len(row) else "") for row in matrix]
-            longest = max([len(v) for v in col_values] or [4])
-        except Exception:
-            longest = 8
-        # Excel-Breite: Mischung aus tatsächlichem Positionsabstand und sichtbarer Textlänge.
-        width = max(5.0, min(34.0, pixel_gap / 7.3), min(34.0, longest * 0.58 + 2.0))
-        col_widths.append(width)
-
-    return {"matrix": matrix, "widths": col_widths, "heights": row_heights or [18.0] * len(matrix)}
 
 
-def _bk_write_simple_layout_xlsx(path, layout, window=None):
-    matrix = (layout or {}).get("matrix") or []
-    widths = (layout or {}).get("widths") or _bk_simple_col_widths(matrix)
-    heights = (layout or {}).get("heights") or [18.0] * max(1, len(matrix))
-    col_count = max(1, max([len(row) for row in matrix] or [1]))
-    row_xml = []
-    for r_idx, row in enumerate(matrix or [[]], start=1):
-        cells = []
-        for c_idx in range(1, col_count + 1):
-            value = row[c_idx - 1] if c_idx - 1 < len(row) else ""
-            ref = f"{_bk_xlsx_col_name(c_idx)}{r_idx}"
-            cells.append(f'<c r="{ref}" s="1" t="inlineStr"><is><t xml:space="preserve">{_bk_xml(value)}</t></is></c>')
-        height = heights[r_idx - 1] if r_idx - 1 < len(heights) else 18.0
-        row_xml.append(f'<row r="{r_idx}" ht="{float(height):.2f}" customHeight="1">{"".join(cells)}</row>')
-    cols = ''.join(f'<col min="{i}" max="{i}" width="{float(widths[i-1] if i-1 < len(widths) else 12.0):.2f}" customWidth="1"/>' for i in range(1, col_count + 1))
-    sheet = ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
-        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>',
-        '<sheetFormatPr defaultRowHeight="18"/>',
-        '<cols>', cols, '</cols>',
-        '<sheetData>', ''.join(row_xml), '</sheetData>',
-        '<pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0" footer="0"/>',
-        '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>',
-        '</worksheet>',
-    ])
-    content_types = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>'
-    root_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
-    workbook = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Transkription" sheetId="1" r:id="rId1"/></sheets></workbook>'
-    workbook_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
-    styles = '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="9"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB7B7B7"/></left><right style="thin"><color rgb="FFB7B7B7"/></right><top style="thin"><color rgb="FFB7B7B7"/></top><bottom style="thin"><color rgb="FFB7B7B7"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
-    core = '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Bottled Kraken</dc:creator></cp:coreProperties>'
-    app = '<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Bottled Kraken</Application></Properties>'
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", root_rels)
-        archive.writestr("xl/workbook.xml", workbook)
-        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
-        archive.writestr("xl/worksheets/sheet1.xml", sheet)
-        archive.writestr("xl/styles.xml", styles)
-        archive.writestr("docProps/core.xml", core)
-        archive.writestr("docProps/app.xml", app)
 
 
-def _bk_write_simple_layout_ods(path, layout, window=None):
-    matrix = (layout or {}).get("matrix") or []
-    widths = (layout or {}).get("widths") or _bk_simple_col_widths(matrix)
-    heights = (layout or {}).get("heights") or [18.0] * max(1, len(matrix))
-    col_count = max(1, max([len(row) for row in matrix] or [1]))
-    column_styles = []
-    row_styles = []
-    columns = []
-    for idx in range(1, col_count + 1):
-        width = max(0.85, min(6.0, float(widths[idx-1] if idx-1 < len(widths) else 12.0) / 5.4))
-        column_styles.append('<style:style style:name="co%d" style:family="table-column"><style:table-column-properties style:column-width="%.3fcm"/></style:style>' % (idx, width))
-        columns.append('<table:table-column table:style-name="co%d"/>' % idx)
-    for idx, height in enumerate(heights or [18.0], start=1):
-        cm = max(0.42, min(1.35, float(height) / 28.0))
-        row_styles.append('<style:style style:name="ro%d" style:family="table-row"><style:table-row-properties style:row-height="%.3fcm" fo:break-before="auto"/></style:style>' % (idx, cm))
-    table_rows = []
-    for r_idx, row in enumerate(matrix or [[]], start=1):
-        cells = []
-        for c_idx in range(col_count):
-            text = row[c_idx] if c_idx < len(row) else ""
-            cells.append('<table:table-cell table:style-name="ceBody" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % _bk_ods_text(text))
-        style_name = f"ro{min(r_idx, len(row_styles) or 1)}"
-        table_rows.append('<table:table-row table:style-name="%s">%s</table:table-row>' % (style_name, ''.join(cells)))
-    mimetype = "application/vnd.oasis.opendocument.spreadsheet"
-    content = ''.join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">',
-        '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>',
-        '<office:automatic-styles>', ''.join(column_styles), ''.join(row_styles),
-        '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.03cm"/><style:text-properties fo:font-size="8pt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>',
-        '</office:automatic-styles>',
-        '<office:body><office:spreadsheet><table:table table:name="Transkription">', ''.join(columns), ''.join(table_rows), '</table:table></office:spreadsheet></office:body></office:document-content>',
-    ])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles></office:document-styles>'
-    meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
-    settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
-    manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="%s"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>' % mimetype
-    with zipfile.ZipFile(path, "w") as archive:
-        info = zipfile.ZipInfo("mimetype")
-        info.date_time = (2020, 1, 1, 0, 0, 0)
-        info.compress_type = zipfile.ZIP_STORED
-        archive.writestr(info, mimetype)
-        for name, data in (("content.xml", content), ("styles.xml", styles), ("meta.xml", meta), ("settings.xml", settings), ("META-INF/manifest.xml", manifest)):
-            zi = zipfile.ZipInfo(name)
-            zi.date_time = (2020, 1, 1, 0, 0, 0)
-            zi.compress_type = zipfile.ZIP_DEFLATED
-            archive.writestr(zi, data.encode("utf-8"))
 
 
-def _bk_render_file_simple_table_no_preview_spatial(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None):
-        if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS and str(getattr(self, "_bk_export_table_mode", "table") or "table").lower() == "simple":
-            layout = _bk_simple_spatial_layout_from_item(item)
-            if fmt_l in {"xlsx", "excel"}:
-                return _bk_write_simple_layout_xlsx(path, layout, self)
-            if fmt_l in {"ods", "calc"}:
-                return _bk_write_simple_layout_ods(path, layout, self)
-        if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS and str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower() == "table_simple":
-            layout = _bk_simple_spatial_layout_from_item(item)
-            matrix = layout.get("matrix") or []
-            if fmt_l in {"docx", "word"}:
-                return _bk_write_simple_matrix_docx(path, matrix, self)
-            if fmt_l == "odt":
-                return _bk_write_simple_matrix_odt(path, matrix, self)
-    if callable(_BK_SIMPLE_UI_PREV_RENDER_FILE):
-        return _BK_SIMPLE_UI_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
-def _bk_export_single_interactive_simple_table_no_preview(self, item: TaskItem, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None or result.get("cancelled"):
-            return None
-        if result.get("mode") == "table_simple":
-            self._bk_simple_preview_records = None
-            self._bk_simple_preview_item_path = ""
-            self._bk_export_table_mode = "simple"
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_table_mode = "table"
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False))
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE):
-            return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=True)
-        if result is None or result.get("cancelled"):
-            return None
-        self._bk_export_text_layout_mode = str(result.get("mode") or "original")
-        self._bk_simple_preview_records = None
-        self._bk_simple_preview_item_path = ""
-        if self._bk_export_text_layout_mode == "table_simple":
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False)) if self._bk_export_text_layout_mode == "table" else False
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_SINGLE):
-            return _BK_TABULAR_PREV_EXPORT_SINGLE(self, item, fmt)
-        return None
-    if callable(_BK_SIMPLE_PREV_EXPORT_SINGLE):
-        return _BK_SIMPLE_PREV_EXPORT_SINGLE(self, item, fmt)
-    return None
 
 
-def _bk_export_batch_simple_table_no_preview(self, items, fmt: str):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=False)
-        if result is None or result.get("cancelled"):
-            return None
-        if result.get("mode") == "table_simple":
-            self._bk_export_table_mode = "simple"
-            self._bk_export_use_zones = False
-            self._bk_simple_preview_records = None
-            self._bk_simple_preview_item_path = ""
-        else:
-            self._bk_export_table_mode = "table"
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False))
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_BATCH):
-            return _BK_TABULAR_PREV_EXPORT_BATCH(self, items, fmt)
-        return None
-    if fmt_l in _BK_SIMPLE_TABLE_TEXT_FMTS:
-        result = _bk_column_choice_dialog(self, fmt_l, include_text_modes=True)
-        if result is None or result.get("cancelled"):
-            return None
-        self._bk_export_text_layout_mode = str(result.get("mode") or "original")
-        self._bk_simple_preview_records = None
-        self._bk_simple_preview_item_path = ""
-        if self._bk_export_text_layout_mode == "table_simple":
-            self._bk_export_use_zones = False
-        else:
-            self._bk_export_current_column_keys = result.get("columns") or list(_BK_TABULAR_DEFAULT_KEYS)
-            self._bk_export_use_zones = bool(result.get("use_zones", False)) if self._bk_export_text_layout_mode == "table" else False
-            if result.get("remembered"):
-                self._bk_export_selected_column_keys = self._bk_export_current_column_keys
-        if callable(_BK_TABULAR_PREV_EXPORT_BATCH):
-            return _BK_TABULAR_PREV_EXPORT_BATCH(self, items, fmt)
-        return None
-    if callable(_BK_SIMPLE_PREV_EXPORT_BATCH):
-        return _BK_SIMPLE_PREV_EXPORT_BATCH(self, items, fmt)
-    return None
 
 
 try:
-    MainWindow._render_file = _bk_render_file_simple_table_no_preview_spatial
-    MainWindow._export_single_interactive = _bk_export_single_interactive_simple_table_no_preview
-    MainWindow._export_batch = _bk_export_batch_simple_table_no_preview
     register_globals('bk', globals(), sorted(set(__all__)))
 except Exception:
     pass
@@ -9797,107 +7707,6 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Tabelle (einfach): ABBYY-ähnliches festes Spaltengitter für XLSX/ODS
 # ---------------------------------------------------------------------------
-def _bk_simple_spatial_layout_from_records(records):
-    records = [dict(rec) for rec in (records or []) if _bk_tab_clean(rec.get("text", ""))]
-    if not records:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-
-    row_groups = _bk_simple_group_rows(records)
-    if not row_groups:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-
-    heights = sorted(max(1.0, float(rec.get("h", 1.0) or 1.0)) for rec in records)
-    widths_px = sorted(max(1.0, float(rec.get("w", 1.0) or 1.0)) for rec in records)
-    med_h = heights[len(heights) // 2] if heights else 12.0
-    med_w = widths_px[len(widths_px) // 2] if widths_px else 45.0
-
-    # ABBYY-artig: Ein festes Spaltengitter aus wiederkehrenden x-Positionen.
-    # Nicht jeder kleine Positionsunterschied erzeugt eine neue Spreadsheet-
-    # Spalte, sonst entstehen breite Lücken und unlesbare Tabellen.
-    x_tol = max(14.0, min(34.0, med_w * 0.55))
-    clusters = []
-    for rec in sorted(records, key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("cy", 0.0) or 0.0))):
-        x0 = float(rec.get("x0", 0.0) or 0.0)
-        target = None
-        if clusters:
-            nearest = min(clusters, key=lambda c: abs(float(c.get("x", 0.0) or 0.0) - x0))
-            if abs(float(nearest.get("x", 0.0) or 0.0) - x0) <= x_tol:
-                target = nearest
-        if target is None:
-            target = {"x": x0, "records": []}
-            clusters.append(target)
-        target["records"].append(rec)
-        # Robuster Schwerpunkt: Median statt fortlaufender Mittelwert, damit
-        # einzelne breite oder schiefe Boxen eine Spalte nicht verschieben.
-        xs = sorted(float(r.get("x0", 0.0) or 0.0) for r in target["records"])
-        target["x"] = xs[len(xs) // 2]
-    clusters.sort(key=lambda c: float(c.get("x", 0.0) or 0.0))
-
-    # Sehr nahe Cluster nachträglich zusammenführen. Das ergibt wenige,
-    # durchgehende Spreadsheet-Spalten statt leerer Zwischenkolonnen.
-    merged = []
-    merge_tol = max(12.0, min(28.0, med_w * 0.45))
-    for cluster in clusters:
-        if merged and abs(float(cluster.get("x", 0.0) or 0.0) - float(merged[-1].get("x", 0.0) or 0.0)) <= merge_tol:
-            merged[-1]["records"].extend(cluster.get("records", []) or [])
-            xs = sorted(float(r.get("x0", 0.0) or 0.0) for r in merged[-1]["records"])
-            merged[-1]["x"] = xs[len(xs) // 2]
-        else:
-            merged.append(cluster)
-    clusters = merged
-
-    matrix = []
-    row_heights = []
-    for row in row_groups:
-        values = [""] * len(clusters)
-        for rec in sorted(row or [], key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("cy", 0.0) or 0.0))):
-            text = _bk_simple_record_text(rec)
-            if not text:
-                continue
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            cx = float(rec.get("cx", x0) or x0)
-            # Bei langen Boxen ist der linke Rand zuverlässiger als die Mitte,
-            # aber die Mitte hilft bei leicht verrutschten kurzen Zahlenboxen.
-            idx_left = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0) or 0.0) - x0)) if clusters else 0
-            idx_center = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0) or 0.0) - cx)) if clusters else idx_left
-            idx = idx_left
-            if abs(float(clusters[idx_center].get("x", 0.0) or 0.0) - cx) + 8.0 < abs(float(clusters[idx_left].get("x", 0.0) or 0.0) - x0):
-                idx = idx_center
-            if values[idx]:
-                # Mehrere Overlay-Boxen in derselben visuellen Spalte und Zeile
-                # bleiben in derselben Tabellenzelle. Das ist näher an ABBYY als
-                # künstliche Nachbarzellen zu erzeugen.
-                values[idx] = _bk_tab_join_text_fragments([values[idx], text])
-            else:
-                values[idx] = text
-        if any(_bk_tab_clean(v) for v in values):
-            matrix.append(values)
-            try:
-                max_h = max(max(1.0, float(rec.get("h", 1.0) or 1.0)) for rec in row)
-            except Exception:
-                max_h = med_h
-            row_heights.append(max(14.0, min(30.0, max_h * 0.90 + 3.0)))
-
-    if not matrix:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-
-    keep = [c for c in range(len(clusters)) if any(_bk_tab_clean(row[c] if c < len(row) else "") for row in matrix)]
-    if not keep:
-        keep = list(range(len(clusters)))
-    matrix = [[row[c] if c < len(row) else "" for c in keep] for row in matrix]
-
-    col_widths = []
-    for idx in range(len(keep)):
-        col_values = [str(row[idx] if idx < len(row) else "") for row in matrix]
-        longest = max([len(v) for v in col_values if v] or [4])
-        non_empty = [v for v in col_values if v]
-        avg_len = (sum(len(v) for v in non_empty) / len(non_empty)) if non_empty else 4.0
-        # Keine positionsbedingten Riesenspalten mehr. Jede logische Spalte hat
-        # eine konstante, lesbare Breite wie beim ABBYY/Excel-Export.
-        width = max(7.0, min(28.0, max(avg_len * 0.72 + 2.0, longest * 0.42 + 2.0)))
-        col_widths.append(width)
-
-    return {"matrix": matrix, "widths": col_widths, "heights": row_heights or [18.0] * len(matrix)}
 
 
 # ---------------------------------------------------------------------------
@@ -10049,7 +7858,7 @@ def _bk_export_zone_title(window, zone_type: str) -> str:
     _bk_ensure_custom_columns(window)
     zone_type = _BK_ZONE_LEGACY_TYPES.get(str(zone_type or "full_name"), str(zone_type or "full_name"))
     if zone_type == "ignore":
-        return _bk_tab_tr(window, "export_zone_type_ignore", "Ignorieren")
+        return _bk_tab_tr(window, "export_zone_type_ignore")
     if zone_type in _BK_TABULAR_COLUMN_BY_KEY:
         return _bk_tabular_column_title(window, zone_type)
     return str(zone_type or "")
@@ -10105,106 +7914,7 @@ def _bk_export_zones_ai_max_tokens(window, default=300):
             return 300
 
 
-def _bk_simple_spatial_layout_from_records(records):
-    """ABBYY-artige, kompakte Overlay-Tabelle: stabile Zeilen, wenige logische Spalten."""
-    records = [dict(rec) for rec in (records or []) if _bk_tab_clean(rec.get("text", ""))]
-    if not records:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    row_groups = _bk_simple_group_rows(records)
-    if not row_groups:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    widths_px = sorted(max(1.0, float(rec.get("w", 1.0) or 1.0)) for rec in records)
-    heights_px = sorted(max(1.0, float(rec.get("h", 1.0) or 1.0)) for rec in records)
-    med_w = widths_px[len(widths_px)//2] if widths_px else 45.0
-    med_h = heights_px[len(heights_px)//2] if heights_px else 12.0
-    # Gröbere Spaltenanker: OCR-Boxen schwanken horizontal stark, sollen aber
-    # in denselben Tabellenreiter fallen. Das erzeugt ABBYY-ähnliche Gleichspalten.
-    x_tol = max(38.0, min(78.0, med_w * 1.15))
-    clusters = []
-    for rec in sorted(records, key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("cy", 0.0) or 0.0))):
-        x0 = float(rec.get("x0", 0.0) or 0.0)
-        target = None
-        if clusters:
-            nearest = min(clusters, key=lambda c: abs(float(c.get("x", 0.0) or 0.0) - x0))
-            if abs(float(nearest.get("x", 0.0) or 0.0) - x0) <= x_tol:
-                target = nearest
-        if target is None:
-            target = {"x": x0, "records": []}
-            clusters.append(target)
-        target["records"].append(rec)
-        xs = sorted(float(r.get("x0", 0.0) or 0.0) for r in target["records"])
-        target["x"] = xs[len(xs)//2]
-    clusters.sort(key=lambda c: float(c.get("x", 0.0) or 0.0))
-    # Nachmerge für Restsplitter, aber nicht über offensichtliche Spalten hinweg.
-    merged = []
-    for c in clusters:
-        if merged and abs(float(c.get("x", 0.0)) - float(merged[-1].get("x", 0.0))) <= max(28.0, min(52.0, med_w * 0.85)):
-            merged[-1]["records"].extend(c.get("records", []) or [])
-            xs = sorted(float(r.get("x0", 0.0) or 0.0) for r in merged[-1]["records"])
-            merged[-1]["x"] = xs[len(xs)//2]
-        else:
-            merged.append(c)
-    clusters = merged
-    matrix = []
-    row_heights = []
-    for row in row_groups:
-        values = [""] * len(clusters)
-        for rec in sorted(row or [], key=lambda r: float(r.get("x0", 0.0) or 0.0)):
-            text = _bk_simple_record_text(rec)
-            if not text:
-                continue
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            idx = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0) or 0.0) - x0)) if clusters else 0
-            values[idx] = _bk_tab_join_text_fragments([values[idx], text]) if values[idx] else text
-        if any(_bk_tab_clean(v) for v in values):
-            matrix.append(values)
-            try:
-                row_heights.append(max(15.0, min(26.0, max(float(r.get("h", med_h) or med_h) for r in row) * 0.85 + 3.0)))
-            except Exception:
-                row_heights.append(18.0)
-    if not matrix:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    keep = [c for c in range(len(clusters)) if any(_bk_tab_clean(row[c] if c < len(row) else "") for row in matrix)]
-    matrix = [[row[c] if c < len(row) else "" for c in keep] for row in matrix]
-    col_widths = []
-    for c in range(max(len(r) for r in matrix)):
-        vals = [str(row[c] if c < len(row) else "") for row in matrix]
-        non_empty = [v for v in vals if _bk_tab_clean(v)]
-        longest = max([len(v) for v in non_empty] or [5])
-        avg = (sum(len(v) for v in non_empty) / len(non_empty)) if non_empty else 5.0
-        # Kompakte, konstante Spaltenbreite; keine Pixel-Lücken als Spaltenbreite.
-        col_widths.append(max(7.0, min(24.0, max(avg * 0.85 + 2.0, longest * 0.48 + 2.0))))
-    return {"matrix": matrix, "widths": col_widths, "heights": row_heights or [18.0] * len(matrix)}
 
-
-def _bk_write_simple_matrix_csv(path, matrix, window=None):
-    with open(path, "w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.writer(handle, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
-        for row in matrix or []:
-            writer.writerow(row)
-
-
-def _bk_render_file_simple_table_final(self, path: str, fmt: str, item: TaskItem):
-    fmt_l = str(fmt or "").lower().lstrip(".")
-    if item and getattr(item, "results", None):
-        if fmt_l in _BK_SIMPLE_TABLE_SPREADSHEET_FMTS and str(getattr(self, "_bk_export_table_mode", "table") or "table").lower() == "simple":
-            layout = _bk_simple_spatial_layout_from_item(item)
-            if fmt_l in {"xlsx", "excel"}:
-                return _bk_write_simple_layout_xlsx(path, layout, self)
-            if fmt_l in {"ods", "calc"}:
-                return _bk_write_simple_layout_ods(path, layout, self)
-            if fmt_l == "csv":
-                return _bk_write_simple_matrix_csv(path, layout.get("matrix") or [], self)
-        if fmt_l in {"docx", "word", "odt"} and str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower() == "table_simple":
-            layout = _bk_simple_spatial_layout_from_item(item)
-            matrix = layout.get("matrix") or []
-            if fmt_l in {"docx", "word"}:
-                return _bk_write_simple_matrix_docx(path, matrix, self)
-            if fmt_l == "odt":
-                return _bk_write_simple_matrix_odt(path, matrix, self)
-    if callable(_BK_SIMPLE_UI_PREV_RENDER_FILE):
-        return _BK_SIMPLE_UI_PREV_RENDER_FILE(self, path, fmt, item)
-    return None
 
 
 def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
@@ -10218,31 +7928,31 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
             return _BK_SIMPLE_PREV_COLUMN_CHOICE_DIALOG(self, fmt, include_text_modes)
         return None
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 12, 14, 12)
     layout.setSpacing(8)
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung für den Export."), dlg)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg)
     label.setWordWrap(True)
     layout.addWidget(label)
     rb_original = rb_lines = rb_layout_tables = rb_simple = rb_table = None
-    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg) if QGroupBox is not None else None
+    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg) if QGroupBox is not None else None
     mode_layout = QVBoxLayout(mode_box) if mode_box is not None else QVBoxLayout()
     mode_layout.setContentsMargins(10, 8, 10, 8)
     if include_text_modes:
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table", "table_simple", "layout_tables"} or txt_only)
         rb_lines.setChecked(mode == "lines")
         mode_layout.addWidget(rb_original); mode_layout.addWidget(rb_lines)
     if supports_simple:
-        rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple", "Tabelle (einfach)"), dlg)
+        rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple"), dlg)
         mode_layout.addWidget(rb_simple)
     if supports_extended:
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle (erweitert)"), dlg)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg)
         mode_layout.addWidget(rb_table)
     if not include_text_modes and rb_simple is not None:
         rb_simple.setChecked(True)
@@ -10256,9 +7966,11 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
     if mode_box is not None: layout.addWidget(mode_box)
     else: layout.addLayout(mode_layout)
 
+    _bk_add_export_orientation_group(self, dlg, layout)
+
     selected_keys = _bk_load_saved_column_keys_for_dialog(self)
     checkboxes = {}
-    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg) if QGroupBox is not None else None
+    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg) if QGroupBox is not None else None
     columns_layout = QVBoxLayout(columns_box) if columns_box is not None else QVBoxLayout()
     if QGridLayout is not None:
         grid = QGridLayout(); grid.setHorizontalSpacing(18); grid.setVerticalSpacing(4)
@@ -10271,35 +7983,35 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
             cb = QCheckBox(_bk_tabular_column_title(self, key), dlg); cb.setChecked(key in selected_keys); checkboxes[key] = cb; columns_layout.addWidget(cb)
     if _BK_QLineEdit is not None:
         custom_row = QHBoxLayout()
-        custom_label = QLabel(_bk_tab_tr(self, "export_table_custom_column_label", "Eigener Reiter / Datentyp:"), dlg)
+        custom_label = QLabel(_bk_tab_tr(self, "export_table_custom_column_label"), dlg)
         custom_edit = _BK_QLineEdit(dlg)
-        custom_edit.setPlaceholderText(_bk_tab_tr(self, "export_table_custom_column_placeholder", "Name eingeben"))
-        btn_add_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_add", "Hinzufügen"), dlg)
+        custom_edit.setPlaceholderText(_bk_tab_tr(self, "export_table_custom_column_placeholder"))
+        btn_add_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_add"), dlg)
         custom_row.addWidget(custom_label); custom_row.addWidget(custom_edit, 1); custom_row.addWidget(btn_add_custom)
         columns_layout.addLayout(custom_row)
     else:
         custom_edit = None; btn_add_custom = None
     quick_row = QHBoxLayout()
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     for btn in (btn_all, btn_none, btn_remember): quick_row.addWidget(btn)
     quick_row.addStretch(1); columns_layout.addLayout(quick_row)
     if columns_box is not None: layout.addWidget(columns_box)
     else: layout.addLayout(columns_layout)
 
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try: remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception: remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1); zone_layout.addWidget(btn_zones)
     if zone_box is not None: layout.addWidget(zone_box)
     else: layout.addLayout(zone_layout)
 
-    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint", "Tabelle (einfach) nutzt die vorhandenen Overlay-Boxen direkt und bildet daraus eine kompakte Tabelle."), dlg)
+    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint"), dlg)
     hint.setWordWrap(True); layout.addWidget(hint)
 
     def current_checked_keys(): return [key for key, cb in checkboxes.items() if cb.isChecked()]
@@ -10313,7 +8025,7 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
         if not title: return
         existing_titles = {_bk_tabular_column_title(self, key).casefold() for key in _BK_TABULAR_KEYS}
         if title.casefold() in existing_titles:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_custom_column_exists", "Dieser Reiter/Datentyp existiert bereits.")); return
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_custom_column_exists")); return
         base = _bk_custom_column_slug(title)
         key = "custom_" + base
         used = set(_BK_TABULAR_KEYS)
@@ -10337,7 +8049,7 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["remembered"] = True; result["columns"] = _bk_save_column_keys(self, keys)
         try: self.settings.setValue("export/table_use_zones", bool(cb_zones.isChecked())); self.settings.sync()
         except Exception: pass
@@ -10364,7 +8076,7 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
     sync_enabled()
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception: pass
     def cancel_dialog(): result["cancelled"] = True; dlg.done(QDialog.Rejected)
     def accept_checked():
@@ -10376,7 +8088,7 @@ def _bk_column_choice_dialog_final(self, fmt=None, include_text_modes=False):
         else:
             mode = "table"; keys = current_checked_keys()
             if not keys:
-                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["mode"] = mode; result["columns"] = _bk_normalize_column_keys(keys); result["use_zones"] = bool(cb_zones.isChecked()) if mode == "table" else False
         try: self._bk_export_use_zones = result["use_zones"]
         except Exception: pass
@@ -10444,7 +8156,6 @@ def _bk_export_batch_final(self, items, fmt: str):
 
 try:
     _bk_column_choice_dialog = _bk_column_choice_dialog_final
-    MainWindow._render_file = _bk_render_file_simple_table_final
     MainWindow._export_single_interactive = _bk_export_single_interactive_final
     MainWindow._export_batch = _bk_export_batch_final
     register_globals('bk', globals(), sorted(set(__all__)))
@@ -10455,10 +8166,6 @@ except Exception:
 # Finaler Export-Feinschliff: kompakte Dialoge, CSV ohne Varianten,
 # einfache Tabelle mit lesbaren Zellbreiten, Custom-Datentypen löschen/resetten.
 # ---------------------------------------------------------------------------
-try:
-    _BK_FINAL_PREV_RENDER_FILE_2 = MainWindow._render_file
-except Exception:
-    _BK_FINAL_PREV_RENDER_FILE_2 = None
 try:
     _BK_FINAL_PREV_EXPORT_SINGLE_2 = MainWindow._export_single_interactive
 except Exception:
@@ -10483,53 +8190,122 @@ def _bk_write_plain_overlay_csv_final(path, item):
             writer.writerow([_bk_tab_clean(cell) for cell in (row or [])])
 
 
+def _bk_simple_layout_cell_is_numeric(value):
+    v = _bk_tab_clean(value)
+    if not v or not re.search(r"\d", v):
+        return False
+    return bool(re.fullmatch(r"[\d IVXLCDMivxlcdm.,;:/\-]+", v))
+
+
+def _bk_simple_layout_row_is_section(row):
+    """Abschnitts-/Kopfzeilen wie 'Seite - 52 -' oder 'unter F. weitersuchen!'
+    erkennen: eine einzelne Box, deren Text wie eine Überschrift aussieht."""
+    if not row or len(row) != 1:
+        return False
+    text = _bk_tab_clean(row[0].get("text", ""))
+    if not text:
+        return False
+    try:
+        if _bk_simple_is_page_heading(text) or _bk_simple_is_subheading(text):
+            return True
+    except Exception:
+        pass
+    if text.endswith("!"):
+        return True
+    if re.fullmatch(r"[-–—\s]*Seite\s*[-–—]?\s*\d+\s*[-–—]?\s*", text, re.I):
+        return True
+    return False
+
+
 def _bk_simple_spatial_layout_from_records(records):
-    """Einfache Tabelle: Overlay-Boxen in ein kompaktes, lesbares Calc/Excel-Gitter."""
+    """Einfache Tabelle: Overlay-Boxen in ein sauberes, menschlich wirkendes
+    Calc/Excel-Gitter.
+
+    Prinzip statt Naechster-Cluster-Zuordnung: Die linken Kanten aller Boxen
+    werden sortiert und an natuerlichen LUECKEN getrennt - so entstehen genau
+    die Spalten, die ein Mensch beim Blick auf die Seite ziehen wuerde. Kaum
+    besetzte Streuspalten werden in den Nachbarn eingegliedert, Abschnitts-
+    zeilen (Seitenkopf, Zwischenueberschriften) werden als verbundene, fett
+    zentrierte Zeilen markiert und Zahlen-/Datumsspalten rechtsbuendig gesetzt.
+    """
     records = [dict(rec) for rec in (records or []) if _bk_tab_clean(rec.get("text", ""))]
     if not records:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
+        return {"matrix": [], "widths": [12.0], "heights": [18.0], "spans": set(), "aligns": []}
     row_groups = _bk_simple_group_rows(records)
     if not row_groups:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    widths_px = sorted(max(1.0, float(rec.get("w", 1.0) or 1.0)) for rec in records)
+        return {"matrix": [], "widths": [12.0], "heights": [18.0], "spans": set(), "aligns": []}
     heights_px = sorted(max(1.0, float(rec.get("h", 1.0) or 1.0)) for rec in records)
-    med_w = widths_px[len(widths_px) // 2] if widths_px else 45.0
     med_h = heights_px[len(heights_px) // 2] if heights_px else 12.0
 
-    # ABBYY-ähnlich: wiederkehrende linke X-Positionen bilden feste Spalten.
-    # Der Wert ist bewusst moderat: keine Pixel-Lücken, aber auch kein Zusammenziehen
-    # von eindeutig getrennten logischen Spalten.
-    x_tol = max(22.0, min(55.0, med_w * 0.75))
-    clusters = []
-    for rec in sorted(records, key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("cy", 0.0) or 0.0))):
-        x0 = float(rec.get("x0", 0.0) or 0.0)
-        target = None
-        if clusters:
-            nearest = min(clusters, key=lambda c: abs(float(c.get("x", 0.0) or 0.0) - x0))
-            if abs(float(nearest.get("x", 0.0) or 0.0) - x0) <= x_tol:
-                target = nearest
-        if target is None:
-            target = {"x": x0, "records": []}
-            clusters.append(target)
-        target["records"].append(rec)
-        xs = sorted(float(r.get("x0", 0.0) or 0.0) for r in target["records"])
-        target["x"] = xs[len(xs) // 2]
-    clusters.sort(key=lambda c: float(c.get("x", 0.0) or 0.0))
+    # Abschnittszeilen aus der Spaltenermittlung heraushalten, damit ein
+    # zentrierter Seitenkopf keine eigene Geisterspalte erzeugt.
+    section_flags = [_bk_simple_layout_row_is_section(row) for row in row_groups]
+    data_records = [rec for row, is_sec in zip(row_groups, section_flags)
+                    if not is_sec for rec in row]
+    if not data_records:
+        data_records = [rec for row in row_groups for rec in row]
 
-    matrix = []
-    row_heights = []
-    for row in row_groups:
-        values = [""] * len(clusters)
+    # 1) Spalten an natuerlichen Luecken der linken Kanten trennen.
+    xs = sorted(float(rec.get("x0", 0.0) or 0.0) for rec in data_records)
+    char_w = max(4.0, med_h * 0.55)          # grobe Zeichenbreite der Vorlage
+    gap_threshold = max(3.0 * char_w, 26.0)  # Luecke, die eine neue Spalte beginnt
+    boundaries = [xs[0]]
+    for prev, cur in zip(xs, xs[1:]):
+        if cur - prev > gap_threshold:
+            boundaries.append(cur)
+    columns = [{"x": b, "count": 0} for b in boundaries]
+
+    def _column_index(x0):
+        idx = 0
+        for i, col in enumerate(columns):
+            if x0 >= col["x"] - gap_threshold * 0.5:
+                idx = i
+        return idx
+
+    for rec in data_records:
+        columns[_column_index(float(rec.get("x0", 0.0) or 0.0))]["count"] += 1
+
+    # 2) Streuspalten (kaum besetzt) mit dem Nachbarn verschmelzen.
+    total_rows = max(1, sum(1 for f in section_flags if not f))
+    min_fill = max(2, int(round(total_rows * 0.06)))
+    keep_cols = []
+    for i, col in enumerate(columns):
+        if col["count"] >= min_fill or len(columns) == 1:
+            keep_cols.append(col)
+        elif keep_cols:
+            keep_cols[-1]["count"] += col["count"]
+        else:
+            col_next = columns[i + 1] if i + 1 < len(columns) else None
+            if col_next is not None:
+                col_next["count"] += col["count"]
+                col_next["x"] = col["x"]
+            else:
+                keep_cols.append(col)
+    columns = keep_cols or columns
+
+    def _final_column_index(x0):
+        best, best_i = None, 0
+        for i, col in enumerate(columns):
+            if x0 >= col["x"] - gap_threshold * 0.5:
+                best, best_i = col, i
+        return best_i if best is not None else 0
+
+    # 3) Matrix aufbauen; Abschnittszeilen als Span-Zeilen (Zelle 0, Rest leer).
+    matrix, row_heights, spans = [], [], set()
+    for row, is_sec in zip(row_groups, section_flags):
+        if is_sec:
+            text = _bk_tab_clean(row[0].get("text", ""))
+            matrix.append([text] + [""] * (len(columns) - 1))
+            spans.add(len(matrix) - 1)
+            row_heights.append(max(17.0, min(30.0, med_h * 1.05 + 5.0)))
+            continue
+        values = [""] * len(columns)
         for rec in sorted(row or [], key=lambda r: (float(r.get("x0", 0.0) or 0.0), float(r.get("y0", 0.0) or 0.0))):
             text = _bk_simple_record_text(rec)
             if not text:
                 continue
-            x0 = float(rec.get("x0", 0.0) or 0.0)
-            idx = min(range(len(clusters)), key=lambda i: abs(float(clusters[i].get("x", 0.0) or 0.0) - x0)) if clusters else 0
-            if values[idx]:
-                values[idx] = _bk_tab_join_text_fragments([values[idx], text])
-            else:
-                values[idx] = text
+            idx = _final_column_index(float(rec.get("x0", 0.0) or 0.0))
+            values[idx] = _bk_tab_join_text_fragments([values[idx], text]) if values[idx] else text
         if any(_bk_tab_clean(v) for v in values):
             matrix.append(values)
             try:
@@ -10539,40 +8315,90 @@ def _bk_simple_spatial_layout_from_records(records):
             row_heights.append(max(15.0, min(28.0, max_h * 0.9 + 3.0)))
 
     if not matrix:
-        return {"matrix": [], "widths": [12.0], "heights": [18.0]}
-    keep = [c for c in range(len(clusters)) if any(_bk_tab_clean(row[c] if c < len(row) else "") for row in matrix)]
-    if not keep:
-        keep = list(range(len(clusters)))
-    matrix = [[row[c] if c < len(row) else "" for c in keep] for row in matrix]
+        return {"matrix": [], "widths": [12.0], "heights": [18.0], "spans": set(), "aligns": []}
 
+    # 4) Komplett leere Spalten entfernen (Span-Zeilen zaehlen nicht mit).
+    col_count = max(len(r) for r in matrix)
+    keep = [c for c in range(col_count)
+            if any(_bk_tab_clean(row[c] if c < len(row) else "")
+                   for r_i, row in enumerate(matrix) if r_i not in spans or c == 0)]
+    if not keep:
+        keep = list(range(col_count))
+    if 0 not in keep:
+        keep = [0] + keep
+    matrix = [[row[c] if c < len(row) else "" for c in keep] for row in matrix]
+    kept_anchors = [float(columns[c].get("x", c) or c) for c in keep]
+    matrix, kept_anchors = _bk_layout_normalize_sparse_text_columns(matrix, kept_anchors)
+    matrix = _bk_layout_repair_matrix(matrix)
+
+    # 5) Ausrichtung je Spalte: ueberwiegend Zahlen/Daten -> rechtsbuendig.
+    aligns = []
+    final_col_count = max([len(row) for row in matrix] or [1])
+    for c in range(final_col_count):
+        vals = [_bk_tab_clean(row[c]) for r_i, row in enumerate(matrix)
+                if r_i not in spans and c < len(row) and _bk_tab_clean(row[c])]
+        numeric = sum(1 for v in vals if _bk_simple_layout_cell_is_numeric(v))
+        aligns.append("right" if vals and numeric / len(vals) >= 0.6 else "left")
+
+    # Breiten zuerst aus der tatsächlichen Bildgeometrie ableiten. Dadurch
+    # bleiben die beiden breiten Namensfelder und die schmalen Zahlenspalten
+    # proportional wie in der Vorlage; reine Textlängen machten bisher alle
+    # Spalten ähnlich breit und verursachten extreme Umbrüche.
+    min_record_x = min(float(rec.get("x0", 0.0) or 0.0) for rec in data_records)
+    max_record_x = max(float(rec.get("x1", rec.get("x0", 0.0)) or 0.0) for rec in data_records)
     col_widths = []
-    for idx in range(max(len(r) for r in matrix)):
-        vals = [str(row[idx] if idx < len(row) else "") for row in matrix]
+    for idx in range(final_col_count):
+        if len(kept_anchors) == final_col_count:
+            left = min_record_x if idx == 0 else (kept_anchors[idx - 1] + kept_anchors[idx]) / 2.0
+            right = max_record_x if idx == final_col_count - 1 else (kept_anchors[idx] + kept_anchors[idx + 1]) / 2.0
+            geometry_width = max(8.0, min(64.0, (right - left) / max(3.5, char_w) * 1.05))
+        else:
+            geometry_width = 12.0
+        vals = [str(row[idx] if idx < len(row) else "")
+                for r_i, row in enumerate(matrix) if r_i not in spans]
         non_empty = [v for v in vals if _bk_tab_clean(v)]
         longest = max([len(v) for v in non_empty] or [5])
-        avg = (sum(len(v) for v in non_empty) / len(non_empty)) if non_empty else 5.0
-        # Breiter als vorher: Namen/Zusätze sollen nicht sofort umbrechen. Trotzdem
-        # kein positionsbedingtes Aufblasen wie bei einer reinen Pixel-Abbildung.
-        width = max(10.0, min(60.0, max(longest * 1.15 + 3.0, avg * 1.25 + 3.0)))
-        col_widths.append(width)
-    return {"matrix": matrix, "widths": col_widths, "heights": row_heights or [18.0] * len(matrix)}
+        content_floor = max(8.0, min(42.0, longest * 0.55 + 3.0))
+        col_widths.append(max(geometry_width, content_floor))
+    return {"matrix": matrix, "widths": col_widths,
+            "heights": row_heights or [18.0] * len(matrix),
+            "spans": spans, "aligns": aligns}
 
 
 def _bk_write_simple_layout_xlsx(path, layout, window=None):
     matrix = (layout or {}).get("matrix") or []
     widths = (layout or {}).get("widths") or _bk_simple_col_widths(matrix)
     heights = (layout or {}).get("heights") or [18.0] * max(1, len(matrix))
+    spans = set((layout or {}).get("spans") or set())
+    aligns = list((layout or {}).get("aligns") or [])
+    bold_rows = set((layout or {}).get("bold_rows") or set())
     col_count = max(1, max([len(row) for row in matrix] or [1]))
+    # Stil-Indizes: 1=links, 2=rechts, 3=Abschnittszeile (fett, zentriert),
+    # 4=Kopfzeile (fett, links) - fuer Tabellenkoepfe des KI-Exports.
     row_xml = []
+    merges = []
     for r_idx, row in enumerate(matrix or [[]], start=1):
         cells = []
+        is_span = (r_idx - 1) in spans
+        is_bold = (r_idx - 1) in bold_rows
         for c_idx in range(1, col_count + 1):
             value = row[c_idx - 1] if c_idx - 1 < len(row) else ""
             ref = f"{_bk_xlsx_col_name(c_idx)}{r_idx}"
-            cells.append(f'<c r="{ref}" s="1" t="inlineStr"><is><t xml:space="preserve">{_bk_xml(value)}</t></is></c>')
+            if is_span:
+                style = 3
+            elif is_bold:
+                style = 4
+            elif c_idx - 1 < len(aligns) and aligns[c_idx - 1] == "right":
+                style = 2
+            else:
+                style = 1
+            cells.append(f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{_bk_xml(value)}</t></is></c>')
+        if is_span and col_count > 1:
+            merges.append(f'<mergeCell ref="A{r_idx}:{_bk_xlsx_col_name(col_count)}{r_idx}"/>')
         height = heights[r_idx - 1] if r_idx - 1 < len(heights) else 18.0
         row_xml.append(f'<row r="{r_idx}" ht="{float(height):.2f}" customHeight="1">{"".join(cells)}</row>')
     cols = ''.join(f'<col min="{i}" max="{i}" width="{max(8.0, min(64.0, float(widths[i-1] if i-1 < len(widths) else 14.0))):.2f}" customWidth="1"/>' for i in range(1, col_count + 1))
+    merge_xml = f'<mergeCells count="{len(merges)}">{"".join(merges)}</mergeCells>' if merges else ''
     sheet = ''.join([
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
@@ -10580,16 +8406,31 @@ def _bk_write_simple_layout_xlsx(path, layout, window=None):
         '<sheetFormatPr defaultRowHeight="18"/>',
         '<cols>', cols, '</cols>',
         '<sheetData>', ''.join(row_xml), '</sheetData>',
+        merge_xml,
         '<pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0" footer="0"/>',
-        '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>',
+        bk_xlsx_page_setup_xml(True, window),
         '</worksheet>',
     ])
     content_types = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>'
     root_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
     workbook = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Transkription" sheetId="1" r:id="rId1"/></sheets></workbook>'
     workbook_rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
-    # Kein wrapText: Excel/Calc zeigt die Zelle wie ABBYY breiter/normal an, statt sofort mehrzeilig umzubrechen.
-    styles = '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="9"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB7B7B7"/></left><right style="thin"><color rgb="FFB7B7B7"/></right><top style="thin"><color rgb="FFB7B7B7"/></top><bottom style="thin"><color rgb="FFB7B7B7"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="top" wrapText="0"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+    # Font 0 = normal, Font 1 = fett (Abschnittszeilen). Kein wrapText, damit
+    # Zellen wie handgesetzt breit bleiben statt sofort mehrzeilig umzubrechen.
+    styles = ('<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+              '<fonts count="2"><font><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="10"/><name val="Calibri"/></font></fonts>'
+              '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+              '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
+              '<border><left style="thin"><color rgb="FFB7B7B7"/></left><right style="thin"><color rgb="FFB7B7B7"/></right><top style="thin"><color rgb="FFB7B7B7"/></top><bottom style="thin"><color rgb="FFB7B7B7"/></bottom><diagonal/></border></borders>'
+              '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+              '<cellXfs count="5">'
+              '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+              '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="0"/></xf>'
+              '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center" wrapText="0"/></xf>'
+              '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyBorder="1" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>'
+              '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyBorder="1" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="0"/></xf>'
+              '</cellXfs>'
+              '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
     core = '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Bottled Kraken</dc:creator></cp:coreProperties>'
     app = '<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Bottled Kraken</Application></Properties>'
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -10603,27 +8444,76 @@ def _bk_write_simple_layout_ods(path, layout, window=None):
     matrix = (layout or {}).get("matrix") or []
     widths = (layout or {}).get("widths") or _bk_simple_col_widths(matrix)
     heights = (layout or {}).get("heights") or [18.0] * max(1, len(matrix))
+    spans = set((layout or {}).get("spans") or set())
+    aligns = list((layout or {}).get("aligns") or [])
+    bold_rows = set((layout or {}).get("bold_rows") or set())
     col_count = max(1, max([len(row) for row in matrix] or [1]))
     column_styles = []
     row_styles = []
     columns = []
+    # Spaltenbreiten auf die tatsaechliche Druckausrichtung normieren. Breite
+    # historische Tabellen erhalten in Calc A4-Querformat; die frueher stets
+    # verwendeten 19 cm entsprachen Hochformat und quetschten sieben Spalten
+    # trotz vorhandener Seitenbreite unnoetig zusammen.
+    desired = []
     for idx in range(1, col_count + 1):
-        width = max(2.0, min(14.0, float(widths[idx-1] if idx-1 < len(widths) else 14.0) / 3.2))
+        desired.append(max(1.2, min(14.0, float(widths[idx-1] if idx-1 < len(widths) else 14.0) / 3.2)))
+    total = sum(desired)
+    landscape = bool(col_count >= 5)
+    max_page_cm = 27.5 if landscape else 19.0
+    if total > max_page_cm:
+        factor = max_page_cm / total
+        desired = [max(1.0, w * factor) for w in desired]
+    font_pt = 8.5 if col_count >= 7 else (9.0 if col_count >= 5 else 10.0)
+    for idx, width in enumerate(desired, start=1):
         column_styles.append('<style:style style:name="co%d" style:family="table-column"><style:table-column-properties style:column-width="%.3fcm"/></style:style>' % (idx, width))
         columns.append('<table:table-column table:style-name="co%d"/>' % idx)
     for idx, height in enumerate(heights or [18.0], start=1):
         cm = max(0.42, min(1.1, float(height) / 30.0))
-        row_styles.append('<style:style style:name="ro%d" style:family="table-row"><style:table-row-properties style:row-height="%.3fcm" fo:break-before="auto"/></style:style>' % (idx, cm))
+        # use-optimal-row-height: umgebrochene Zellen duerfen wachsen statt zu clippen.
+        row_styles.append('<style:style style:name="ro%d" style:family="table-row"><style:table-row-properties style:min-row-height="%.3fcm" style:use-optimal-row-height="true" fo:break-before="auto"/></style:style>' % (idx, cm))
     table_rows = []
     for r_idx, row in enumerate(matrix or [[]], start=1):
         cells = []
-        for c_idx in range(col_count):
-            text = row[c_idx] if c_idx < len(row) else ""
-            cells.append('<table:table-cell table:style-name="ceBody" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % _bk_ods_text(text))
+        if (r_idx - 1) in spans and col_count > 1:
+            # Abschnittszeile: eine verbundene, fett zentrierte Zelle ueber alle Spalten.
+            text = row[0] if row else ""
+            cells.append('<table:table-cell table:style-name="ceSection" office:value-type="string" table:number-columns-spanned="%d"><text:p>%s</text:p></table:table-cell>' % (col_count, _bk_ods_text(text)))
+            cells.append('<table:covered-table-cell table:number-columns-repeated="%d"/>' % (col_count - 1))
+        else:
+            for c_idx in range(col_count):
+                text = row[c_idx] if c_idx < len(row) else ""
+                if (r_idx - 1) in bold_rows:
+                    style = "ceHead"
+                elif c_idx < len(aligns) and aligns[c_idx] == "right":
+                    style = "ceRight"
+                else:
+                    style = "ceBody"
+                cells.append('<table:table-cell table:style-name="%s" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % (style, _bk_ods_text(text)))
         table_rows.append('<table:table-row table:style-name="ro%d">%s</table:table-row>' % (min(r_idx, len(row_styles) or 1), ''.join(cells)))
     mimetype = "application/vnd.oasis.opendocument.spreadsheet"
-    content = ''.join(['<?xml version="1.0" encoding="UTF-8"?>', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">', '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>', '<office:automatic-styles>', ''.join(column_styles), ''.join(row_styles), '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.03cm"/><style:text-properties fo:font-size="8pt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>', '</office:automatic-styles>', '<office:body><office:spreadsheet><table:table table:name="Transkription">', ''.join(columns), ''.join(table_rows), '</table:table></office:spreadsheet></office:body></office:document-content>'])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles></office:document-styles>'
+    content = ''.join(['<?xml version="1.0" encoding="UTF-8"?>', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">', '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>', '<office:automatic-styles>', ''.join(column_styles), ''.join(row_styles),
+        '<style:style style:name="ta1" style:family="table" style:master-page-name="mp1"><style:table-properties table:display="true" style:writing-mode="lr-tb"/></style:style>',
+        '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.04cm" style:vertical-align="middle" fo:wrap-option="wrap"/><style:text-properties fo:font-size="%.1fpt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>' % font_pt,
+        '<style:style style:name="ceRight" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.04cm" style:vertical-align="middle" fo:wrap-option="wrap"/><style:text-properties fo:font-size="%.1fpt" style:font-name="Arial"/><style:paragraph-properties fo:text-align="end" fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>' % font_pt,
+        '<style:style style:name="ceSection" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.05cm" style:vertical-align="middle" fo:wrap-option="wrap"/><style:text-properties fo:font-size="%.1fpt" fo:font-weight="bold" style:font-name="Arial"/><style:paragraph-properties fo:text-align="center" fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>' % max(font_pt, 9.0),
+        '<style:style style:name="ceHead" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #808080" fo:padding="0.05cm" style:vertical-align="middle" fo:wrap-option="wrap"/><style:text-properties fo:font-size="%.1fpt" fo:font-weight="bold" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>' % font_pt,
+        '</office:automatic-styles>', '<office:body><office:spreadsheet><table:table table:name="Transkription" table:style-name="ta1">', ''.join(columns), ''.join(table_rows), '</table:table></office:spreadsheet></office:body></office:document-content>'])
+    page_w, page_h = ((29.7, 21.0) if landscape else (21.0, 29.7))
+    orientation = "landscape" if landscape else "portrait"
+    styles = ('<?xml version="1.0" encoding="UTF-8"?><office:document-styles '
+              'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+              'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+              'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+              'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+              'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">'
+              '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>'
+              '<office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="%.1fpt" style:font-name="Arial"/></style:default-style></office:styles>'
+              '<office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties '
+              'fo:page-width="%.1fcm" fo:page-height="%.1fcm" style:print-orientation="%s" '
+              'fo:margin-top="0.7cm" fo:margin-bottom="0.7cm" fo:margin-left="0.7cm" fo:margin-right="0.7cm"/>'
+              '</style:page-layout></office:automatic-styles><office:master-styles><style:master-page '
+              'style:name="mp1" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>') % (font_pt, page_w, page_h, orientation)
     meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
     settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
     manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="%s"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/></manifest:manifest>' % mimetype
@@ -10658,7 +8548,8 @@ def _bk_write_table_odt(path, rows, column_keys=None, window=None):
             cells.append('<table:table-cell table:style-name="%s" office:value-type="string"><text:p>%s</text:p></table:table-cell>' % (style, _bk_ods_text(text)))
         table_rows.append('<table:table-row>%s</table:table-row>' % ''.join(cells))
     content = ''.join(['<?xml version="1.0" encoding="UTF-8"?>', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2">', '<office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls>', '<office:automatic-styles>', ''.join(column_styles), '<style:style style:name="ceHeader" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #808080" fo:background-color="#E9EEF6" fo:padding="0.05cm"/><style:text-properties fo:font-size="8pt" fo:font-weight="bold" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>', '<style:style style:name="ceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #B7B7B7" fo:padding="0.05cm"/><style:text-properties fo:font-size="8pt" style:font-name="Arial"/><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm"/></style:style>', '</office:automatic-styles>', '<office:body><office:text><table:table table:name="Transkription">', ''.join(columns), ''.join(table_rows), '</table:table></office:text></office:body></office:document-content>'])
-    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="29.7cm" fo:page-height="21cm" fo:margin-top="1.2cm" fo:margin-bottom="1.2cm" fo:margin-left="1.2cm" fo:margin-right="1.2cm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>'
+    _ods_page_w, _ods_page_h = bk_page_size_cm(True, window)
+    styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.2"><office:font-face-decls><style:font-face style:name="Arial" svg:font-family="Arial"/></office:font-face-decls><office:styles><style:default-style style:family="paragraph"><style:text-properties fo:font-size="8pt" style:font-name="Arial"/></style:default-style></office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="%.1fcm" fo:page-height="%.1fcm" style:print-orientation="%s" fo:margin-top="1.2cm" fo:margin-bottom="1.2cm" fo:margin-left="1.2cm" fo:margin-right="1.2cm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>' % (_ods_page_w, _ods_page_h, bk_odf_orientation_name(True, window))
     meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2"><office:meta><meta:generator>Bottled Kraken</meta:generator></office:meta></office:document-meta>'
     settings = '<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"><office:settings/></office:document-settings>'
     mimetype = "application/vnd.oasis.opendocument.text"
@@ -10774,9 +8665,253 @@ def _bk_layout_column_anchors(table_rows):
     return anchors
 
 
-def _bk_layout_table_matrix(table_rows, anchors):
+def _bk_layout_column_is_numeric(values):
+    values = [_bk_tab_clean(value) for value in (values or []) if _bk_tab_clean(value)]
+    if not values:
+        return False
+    numeric = sum(1 for value in values if _bk_simple_layout_cell_is_numeric(value))
+    return numeric / max(1, len(values)) >= 0.55
+
+
+def _bk_layout_normalize_sparse_text_columns(matrix, anchors=None):
+    """Entfernt Geisterspalten, die durch eingerückte Abschnittsüberschriften
+    entstehen.
+
+    Historische Doppeltabellen enthalten häufig normale Datenzeilen am linken
+    Rand, während Abschnittstitel etwas eingerückt beginnen. Eine reine
+    x-Anker-Erkennung deutet diese Einrückung als zusätzliche Spalte. Dasselbe
+    passiert bei kurzen Fortsetzungen wie ``von`` auf der rechten Tabellen-
+    hälfte. Solche Spalten sind dünn besetzt, textuell und überschneiden sich
+    praktisch nie mit der benachbarten eigentlichen Namensspalte. Sie werden
+    deshalb in diese Nachbarspalte zurückgeführt. Zahlen-/Datenspalten werden
+    ausdrücklich nicht zusammengelegt.
+    """
+    rows = [list(row or []) for row in (matrix or [])]
+    if not rows:
+        return [], list(anchors or [])
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+    xs = list(anchors or [])
+    if len(xs) != width:
+        xs = [float(i) for i in range(width)]
+
+    # Vollständig leere Spalten zuerst entfernen.
+    keep = [c for c in range(width)
+            if any(_bk_tab_clean(row[c]) for row in rows)]
+    if not keep:
+        return rows, xs
+    rows = [[row[c] for c in keep] for row in rows]
+    xs = [xs[c] for c in keep]
+
+    def stats(col):
+        vals = [_bk_tab_clean(row[col]) for row in rows if _bk_tab_clean(row[col])]
+        return {
+            "count": len(vals),
+            "numeric": _bk_layout_column_is_numeric(vals),
+        }
+
+    # Mehrfach laufen, weil nach dem Entfernen einer Geisterspalte eine zweite
+    # kurze Fortsetzung direkt an ihre Zielspalte rücken kann.
+    while len(xs) > 2:
+        row_count = max(1, len(rows))
+        table_span = max(1.0, float(xs[-1]) - float(xs[0]))
+        merge_choice = None
+        for c in range(len(xs)):
+            current = stats(c)
+            if current["count"] == 0 or current["numeric"]:
+                continue
+            # Abschnittsspalten sind im Verhältnis zur Zahl der Tabellenzeilen
+            # klar dünn besetzt. Bei sehr kleinen Tabellen mindestens eine
+            # einzelne Zeile zulassen.
+            sparse_limit = max(1, int(round(row_count * 0.30)))
+            if current["count"] > sparse_limit:
+                continue
+            for neighbor in (c - 1, c + 1):
+                if neighbor < 0 or neighbor >= len(xs):
+                    continue
+                target = stats(neighbor)
+                if target["numeric"] or target["count"] < max(3, current["count"] * 2):
+                    continue
+                overlap = sum(1 for row in rows
+                              if _bk_tab_clean(row[c]) and _bk_tab_clean(row[neighbor]))
+                if overlap > max(1, int(round(current["count"] * 0.15))):
+                    continue
+                gap = abs(float(xs[c]) - float(xs[neighbor]))
+                if gap > max(45.0, table_span * 0.18):
+                    continue
+                score = (gap, -target["count"])
+                if merge_choice is None or score < merge_choice[0]:
+                    merge_choice = (score, c, neighbor)
+        if merge_choice is None:
+            break
+        _score, source, target = merge_choice
+        source_left = float(xs[source]) < float(xs[target])
+        for row in rows:
+            a = _bk_tab_clean(row[source])
+            b = _bk_tab_clean(row[target])
+            if a and b:
+                row[target] = _bk_tab_join_text_fragments([a, b] if source_left else [b, a])
+            elif a:
+                row[target] = a
+            del row[source]
+        del xs[source]
+    return rows, xs
+
+
+def _bk_layout_digit_groups(value):
+    """Liefert die Zahlengruppen einer historischen Tabellenzelle.
+
+    Gedruckte Werte wie ``199 575`` oder ``16 029 349`` werden von OCR
+    gelegentlich als eine gemeinsame Box gelesen. Die Gruppen werden nur fuer
+    die strukturelle Reparatur ausgewertet; der eigentliche Text bleibt
+    ansonsten unveraendert.
+    """
+    return re.findall(r"\d+", _bk_tab_clean(value))
+
+
+def _bk_layout_typical_digit_group_count(matrix, column):
+    counts = []
+    for row in matrix or []:
+        if column >= len(row):
+            continue
+        value = _bk_tab_clean(row[column])
+        if not value or not _bk_simple_layout_cell_is_numeric(value):
+            continue
+        groups = _bk_layout_digit_groups(value)
+        if groups and len(groups) <= 4:
+            counts.append(len(groups))
+    if not counts:
+        return 0
+    frequency = {}
+    for count in counts:
+        frequency[count] = frequency.get(count, 0) + 1
+    return max(sorted(frequency), key=lambda count: (frequency[count], -count))
+
+
+def _bk_layout_split_merged_numeric_cells(matrix):
+    """Teilt versehentlich zusammengezogene Nachbarzahlen wieder auf.
+
+    Bei historischen Statistiktafeln liest Kraken beispielsweise
+    ``199 575 16 029 349`` gelegentlich als eine Box, obwohl die Werte in den
+    Spalten ``qkm`` und ``Einw.`` stehen. Eine Teilung erfolgt ausschliesslich,
+    wenn rechts unmittelbar eine ueberwiegend numerische, aber in dieser Zeile
+    leere Spalte folgt und das uebrige Tabellenmaterial eine stabile
+    Gruppenzahl erkennen laesst.
+    """
+    rows = [list(row) for row in (matrix or [])]
+    if not rows:
+        return rows
+    width = max(len(row) for row in rows)
+    for row in rows:
+        row.extend([""] * (width - len(row)))
+    numeric_columns = []
+    for column in range(width):
+        values = [_bk_tab_clean(row[column]) for row in rows if _bk_tab_clean(row[column])]
+        numeric_columns.append(_bk_layout_column_is_numeric(values))
+    typical = [_bk_layout_typical_digit_group_count(rows, column) for column in range(width)]
+
+    for row in rows:
+        for column in range(width - 1):
+            if not numeric_columns[column] or not numeric_columns[column + 1]:
+                continue
+            value = _bk_tab_clean(row[column])
+            if not value or _bk_tab_clean(row[column + 1]):
+                continue
+            groups = _bk_layout_digit_groups(value)
+            if len(groups) < 4:
+                continue
+            right_count = typical[column + 1]
+            left_count = typical[column]
+            split_at = 0
+            # Die rechte Spalte ist bei Einwohnerzahlen meist stabiler als die
+            # Flaechenspalte (zwei oder drei Dreiergruppen). Deshalb von rechts
+            # teilen, sobald die verbleibende linke Zahl plausibel ist.
+            if 1 <= right_count <= 4 and 1 <= len(groups) - right_count <= 4:
+                split_at = len(groups) - right_count
+            elif 1 <= left_count <= 4 and 1 <= len(groups) - left_count <= 4:
+                split_at = left_count
+            if not split_at:
+                continue
+            left_groups = groups[:split_at]
+            right_groups = groups[split_at:]
+            if not left_groups or not right_groups:
+                continue
+            row[column] = " ".join(left_groups)
+            row[column + 1] = " ".join(right_groups)
+    return rows
+
+
+def _bk_layout_merge_heading_continuations(matrix):
+    """Fuegt kurze, in die Folgezeile gerutschte Ueberschriftsreste an.
+
+    Typisches Beispiel der Vorlage: ``B. Unter der Provinzialregierung`` und
+    das allein in der naechsten Zeile erkannte Wort ``von``. Datenzellen werden
+    nicht verschoben; die Reparatur gilt nur fuer Textspalten ohne Zahlen auf
+    derselben Tabellenseite.
+    """
+    rows = [list(row) for row in (matrix or [])]
+    if len(rows) < 2:
+        return rows
+    width = max(len(row) for row in rows)
+    for row in rows:
+        row.extend([""] * (width - len(row)))
+    numeric_columns = []
+    for column in range(width):
+        values = [_bk_tab_clean(row[column]) for row in rows if _bk_tab_clean(row[column])]
+        numeric_columns.append(_bk_layout_column_is_numeric(values))
+    text_columns = [column for column in range(width) if not numeric_columns[column]]
+    connectors = re.compile(r"(?:\b(?:dem|der|des|den|von|unter|de|du|of|the)\b)[ .,:;\-–—]*$", re.IGNORECASE)
+    connector_word = re.compile(r"^(?:von|de|du|of|the)[ .,:;\-–—]*$", re.IGNORECASE)
+    for column in text_columns:
+        next_text_column = min([c for c in text_columns if c > column] or [width])
+        side_numeric = [c for c in range(column + 1, next_text_column) if numeric_columns[c]]
+        if not side_numeric:
+            side_numeric = [c for c in range(column + 1, width) if numeric_columns[c]][:3]
+        for index in range(len(rows) - 1):
+            current = _bk_tab_clean(rows[index][column])
+            continuation = _bk_tab_clean(rows[index + 1][column])
+            if not current or not continuation or re.search(r"\d", continuation):
+                continue
+            if len(continuation) > 24:
+                continue
+            if not connectors.search(current) and not connector_word.fullmatch(continuation):
+                continue
+            current_has_values = any(_bk_tab_clean(rows[index][c]) for c in side_numeric)
+            next_has_values = any(_bk_tab_clean(rows[index + 1][c]) for c in side_numeric)
+            if current_has_values or next_has_values:
+                continue
+            rows[index][column] = _bk_tab_join_text_fragments([current, continuation])
+            rows[index + 1][column] = ""
+    return rows
+
+
+def _bk_layout_repair_matrix(matrix):
+    rows = _bk_layout_split_merged_numeric_cells(matrix)
+    rows = _bk_layout_merge_heading_continuations(rows)
+    return rows
+
+
+def _bk_layout_table_header_rows(matrix):
+    """Markiert nur echte textuelle Kopfzeilen.
+
+    Die fruehere Annahme, die erste erkannte Tabellenzeile sei immer ein
+    Tabellenkopf, machte bei historischen Vorlagen die erste Datenzeile fett.
+    """
+    if not matrix:
+        return set()
+    first = [_bk_tab_clean(value) for value in matrix[0] if _bk_tab_clean(value)]
+    if len(first) < 2:
+        return set()
+    joined = " ".join(first)
+    numeric_cells = sum(1 for value in first if _bk_simple_layout_cell_is_numeric(value))
+    if not re.search(r"\d", joined) and numeric_cells == 0:
+        return {0}
+    return set()
+
+
+def _bk_layout_table_matrix(table_rows, anchors, return_anchors=False):
     if not anchors:
-        return []
+        return ([], []) if return_anchors else []
     matrix = []
     for row in table_rows or []:
         values = [""] * len(anchors)
@@ -10790,12 +8925,64 @@ def _bk_layout_table_matrix(table_rows, anchors):
         if any(_bk_tab_clean(v) for v in values):
             matrix.append(values)
     if not matrix:
-        return []
-    keep = [idx for idx in range(len(anchors)) if any(_bk_tab_clean(row[idx] if idx < len(row) else "") for row in matrix)]
-    if keep and len(keep) < len(anchors):
-        matrix = [[row[idx] if idx < len(row) else "" for idx in keep] for row in matrix]
-        anchors = [anchors[idx] for idx in keep]
+        return ([], []) if return_anchors else []
+    matrix, normalized_anchors = _bk_layout_normalize_sparse_text_columns(matrix, anchors)
+    matrix = _bk_layout_repair_matrix(matrix)
+    if return_anchors:
+        return matrix, normalized_anchors
     return matrix
+
+
+def _bk_layout_repair_block_heading_fragments(blocks):
+    """Zieht einen am Tabellenanfang gelandeten Ueberschriftsrest zurueck.
+
+    Mehrzeilige Gegenueberschriften wie ``A. Unmittelbar unter dem /
+    Vicekoenig.`` werden von OCR mitunter so getrennt, dass die letzte Zeile in
+    der ersten Datenzeile steht. Nur ein kurzer Text ohne Ziffern wird bewegt,
+    und nur wenn die unmittelbar vorhergehende Textzeile mit einem klaren
+    Bindewort endet.
+    """
+    repaired = list(blocks or [])
+    connector = re.compile(r"(?:\b(?:dem|der|des|den|von|unter|de|du|of|the)\b)[ .,:;\-–—]*$", re.IGNORECASE)
+    for index in range(len(repaired) - 1):
+        text_block = repaired[index]
+        table_block = repaired[index + 1]
+        if text_block.get("type") != "text" or table_block.get("type") != "table":
+            continue
+        text_rows = text_block.get("rows") or []
+        matrix = table_block.get("matrix") or []
+        if not text_rows or not matrix:
+            continue
+        items = [item for item in (text_rows[-1].get("items") or []) if _bk_tab_clean(item.get("text", ""))]
+        if not items:
+            continue
+        items.sort(key=lambda item: float(item.get("x0", 0.0) or 0.0))
+        tail_item = items[-1]
+        tail = _bk_tab_clean(tail_item.get("text", ""))
+        if not connector.search(tail):
+            continue
+        first = list(matrix[0])
+        width = len(first)
+        values_by_column = [[_bk_tab_clean(row[c]) for row in matrix if c < len(row) and _bk_tab_clean(row[c])]
+                            for c in range(width)]
+        numeric_columns = [_bk_layout_column_is_numeric(values) for values in values_by_column]
+        text_columns = [c for c in range(width) if not numeric_columns[c]]
+        if len(text_columns) < 2:
+            continue
+        # Bei einer Doppeltabelle ist die zweite Textspalte die rechte
+        # Bezeichnungsspalte. Eine etwaige Kopfspalte ganz links bleibt unberuehrt.
+        column = text_columns[1]
+        fragment = _bk_tab_clean(first[column])
+        if not fragment or len(fragment) > 36 or re.search(r"\d", fragment):
+            continue
+        right_numeric = [c for c in range(column + 1, width) if numeric_columns[c]]
+        if any(_bk_tab_clean(first[c]) for c in right_numeric):
+            continue
+        tail_item["text"] = _bk_tab_join_text_fragments([tail, fragment])
+        first[column] = ""
+        matrix[0] = first
+        table_block["matrix"] = matrix
+    return repaired
 
 
 def _bk_layout_blocks_with_tables(record_views, image_size=None):
@@ -10815,21 +9002,42 @@ def _bk_layout_blocks_with_tables(record_views, image_size=None):
             idx += 1
             continue
         end = idx
-        while end < len(rows) and _bk_layout_row_is_table_like(rows[end]):
-            # Nur nahe beieinanderliegende table-like Zeilen zu einer Tabelle verbinden.
-            if end > idx:
+        while end < len(rows):
+            if _bk_layout_row_is_table_like(rows[end]):
+                if end > idx:
+                    prev_bb = rows[end - 1].get("bbox")
+                    cur_bb = rows[end].get("bbox")
+                    if prev_bb and cur_bb and (float(cur_bb[1]) - float(prev_bb[3])) > median_height * 1.65:
+                        break
+                end += 1
+                continue
+            # Ueberbruecken: Eine EINZELNE nicht-tabellenartige Zeile mitten im
+            # Register (z. B. von Kraken als eine lange Box gelesen) soll die
+            # Tabelle nicht zerreissen. Sie wird in den Cluster aufgenommen,
+            # wenn direkt danach wieder tabellenartige Zeilen folgen und die
+            # vertikalen Abstaende klein sind.
+            if (end > idx and end + 1 < len(rows)
+                    and _bk_layout_row_is_table_like(rows[end + 1])):
                 prev_bb = rows[end - 1].get("bbox")
                 cur_bb = rows[end].get("bbox")
-                if prev_bb and cur_bb and (float(cur_bb[1]) - float(prev_bb[3])) > median_height * 1.65:
-                    break
-            end += 1
+                next_bb = rows[end + 1].get("bbox")
+                close_above = (prev_bb and cur_bb
+                               and (float(cur_bb[1]) - float(prev_bb[3])) <= median_height * 1.2)
+                close_below = (cur_bb and next_bb
+                               and (float(next_bb[1]) - float(cur_bb[3])) <= median_height * 1.2)
+                if close_above and close_below:
+                    end += 1
+                    continue
+            break
         cluster = rows[idx:end]
         max_cols = max((len(r.get("items", [])) for r in cluster), default=0)
         if len(cluster) >= 3 and max_cols >= 3:
             anchors = _bk_layout_column_anchors(cluster)
-            matrix = _bk_layout_table_matrix(cluster, anchors)
+            matrix, anchors = _bk_layout_table_matrix(cluster, anchors, return_anchors=True)
             if matrix and max((len(r) for r in matrix), default=0) >= 3:
-                blocks.append({"type": "table", "rows": cluster, "matrix": matrix, "anchors": anchors, "bbox": _bk_layout_bbox_for_rows(cluster)})
+                blocks.append({"type": "table", "rows": cluster, "matrix": matrix, "anchors": anchors,
+                               "header_rows": _bk_layout_table_header_rows(matrix),
+                               "bbox": _bk_layout_bbox_for_rows(cluster)})
             else:
                 for r in cluster:
                     blocks.append({"type": "text", "rows": [r], "bbox": r.get("bbox")})
@@ -10837,6 +9045,7 @@ def _bk_layout_blocks_with_tables(record_views, image_size=None):
             for r in cluster:
                 blocks.append({"type": "text", "rows": [r], "bbox": r.get("bbox")})
         idx = end
+    blocks = _bk_layout_repair_block_heading_fragments(blocks)
     return {"blocks": blocks, "records": records, "bounds": (min_x, min_y, max_x, max_y), "page_size": (page_w, page_h), "median_height": median_height, "char_px": _bk_layout_median_char_px(records)}
 
 
@@ -10910,11 +9119,6 @@ def _bk_layout_row_style(row, content_bounds=None, median_height=12.0):
     return style
 
 
-def _bk_layout_image_style(export_image, rec, median_height=12.0):
-    # Compatibility wrapper for older call sites. Fragment-level styling is now
-    # intentionally conservative; row-level styling is handled by _bk_layout_row_style.
-    return {"bold": False, "italic": False, "underline": False, "size_ratio": 1.0}
-
 
 def _bk_layout_row_segments(row, min_x, char_px):
     segments = []
@@ -10980,6 +9184,42 @@ def _bk_docx_set_cell_width(cell, twips):
         pass
 
 
+def _bk_docx_set_cell_borders(cell, top=False, bottom=False):
+    """Vertikale Tabellenlinien plus optionaler oberer/unterer Abschluss.
+
+    Historische Satzspiegel besitzen meist keine horizontale Linie zwischen
+    jeder Datenzeile. Die direkte OOXML-Konfiguration ueberschreibt deshalb
+    den vollstaendigen Word-Rasterstil.
+    """
+    try:
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        tc_pr = cell._tc.get_or_add_tcPr()
+        borders = tc_pr.first_child_found_in("w:tcBorders")
+        if borders is None:
+            borders = OxmlElement("w:tcBorders")
+            tc_pr.append(borders)
+        specs = {
+            "left": ("single", "4", "777777"),
+            "right": ("single", "4", "777777"),
+            "top": (("single", "8", "555555") if top else ("nil", "0", "auto")),
+            "bottom": (("single", "8", "555555") if bottom else ("nil", "0", "auto")),
+            "insideH": ("nil", "0", "auto"),
+        }
+        for edge, (val, size, color) in specs.items():
+            tag = "w:" + edge
+            element = borders.find(qn(tag))
+            if element is None:
+                element = OxmlElement(tag)
+                borders.append(element)
+            element.set(qn("w:val"), val)
+            element.set(qn("w:sz"), size)
+            element.set(qn("w:space"), "0")
+            element.set(qn("w:color"), color)
+    except Exception:
+        pass
+
+
 def _bk_layout_table_col_widths_px(block, content_bounds):
     matrix = block.get("matrix") or []
     col_count = max([len(row) for row in matrix] or [1])
@@ -11002,7 +9242,7 @@ def _bk_write_layout_tables_docx(path, item, export_image, record_views):
         from docx.shared import Inches, Pt
         from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
     except Exception as exc:
-        raise RuntimeError("python-docx fehlt; DOCX kann nicht geschrieben werden.") from exc
+        raise RuntimeError(_bk_registry_lookup("err_no_docx_package_short") or "python-docx") from exc
     image_size = getattr(export_image, "size", None) or (0, 0)
     layout = _bk_layout_blocks_with_tables(record_views, image_size)
     blocks = layout.get("blocks") or []
@@ -11015,7 +9255,8 @@ def _bk_write_layout_tables_docx(path, item, export_image, record_views):
     content_w = max(1.0, float(max_x) - float(min_x))
     content_h = max(1.0, float(max_y) - float(min_y))
     page_w_px, page_h_px = layout.get("page_size") or image_size or (1.0, 1.0)
-    portrait = float(page_h_px or 1.0) >= float(page_w_px or 1.0)
+    portrait_auto = float(page_h_px or 1.0) >= float(page_w_px or 1.0)
+    portrait = bk_resolve_portrait(portrait_auto, None)
     page_w_in, page_h_in = (8.27, 11.69) if portrait else (11.69, 8.27)
     margin_in = 0.35
     section = doc.sections[0]
@@ -11057,6 +9298,7 @@ def _bk_write_layout_tables_docx(path, item, export_image, record_views):
                 _bk_docx_set_fixed_table(table)
                 _bk_docx_set_table_indent(table, (float(bb[0]) - float(min_x)) * scale_x * 20.0)
                 widths_px = _bk_layout_table_col_widths_px(block, (min_x, min_y, max_x, max_y))
+                header_rows = set(block.get("header_rows") or set())
                 for r_idx, row in enumerate(matrix):
                     cells = table.rows[r_idx].cells
                     for c_idx in range(col_count):
@@ -11068,8 +9310,12 @@ def _bk_write_layout_tables_docx(path, item, export_image, record_views):
                         run = p.add_run(str(value or ""))
                         run.font.name = "Arial"
                         run.font.size = Pt(max(5.0, min(8.5, base_font_pt * 0.95)))
-                        if r_idx == 0:
-                            run.bold = True
+                        run.bold = r_idx in header_rows
+                        _bk_docx_set_cell_borders(
+                            cell,
+                            top=(r_idx == 0 or r_idx in header_rows),
+                            bottom=(r_idx == len(matrix) - 1 or r_idx in header_rows),
+                        )
                         if c_idx < len(widths_px):
                             _bk_docx_set_cell_width(cell, widths_px[c_idx] * scale_x * 20.0)
                         try:
@@ -11153,7 +9399,8 @@ def _bk_write_layout_tables_odt(path, item, export_image, record_views):
     content_w = max(1.0, float(max_x) - float(min_x))
     content_h = max(1.0, float(max_y) - float(min_y))
     page_w_px, page_h_px = layout.get("page_size") or image_size or (1.0, 1.0)
-    portrait = float(page_h_px or 1.0) >= float(page_w_px or 1.0)
+    portrait_auto = float(page_h_px or 1.0) >= float(page_w_px or 1.0)
+    portrait = bk_resolve_portrait(portrait_auto, None)
     page_w_cm, page_h_cm = (21.0, 29.7) if portrait else (29.7, 21.0)
     margin_cm = 0.7
     usable_w_cm = page_w_cm - margin_cm * 2.0
@@ -11195,11 +9442,21 @@ def _bk_write_layout_tables_odt(path, item, export_image, record_views):
                 automatic_styles.extend(col_styles)
                 automatic_styles.append('<style:style style:name="%s" style:family="table"><style:table-properties table:align="left" fo:margin-left="%.3fcm" fo:margin-top="%.3fcm"/></style:style>' % (tname, max(0.0, (float(bb[0])-float(min_x))*scale_x), margin_top))
                 rows_xml = []
+                header_rows = set(block.get("header_rows") or set())
                 for r_idx, row in enumerate(matrix):
                     cells = []
                     for c_idx in range(col_count):
                         value = row[c_idx] if c_idx < len(row) else ""
-                        style = "BKLTceHead" if r_idx == 0 else "BKLTceBody"
+                        if r_idx in header_rows:
+                            style = "BKLTceHead"
+                        elif len(matrix) == 1:
+                            style = "BKLTceOnly"
+                        elif r_idx == 0:
+                            style = "BKLTceTop"
+                        elif r_idx == len(matrix) - 1:
+                            style = "BKLTceBottom"
+                        else:
+                            style = "BKLTceBody"
                         cells.append('<table:table-cell table:style-name="%s" office:value-type="string"><text:p text:style-name="BKLTCellP">%s</text:p></table:table-cell>' % (style, _bk_odt_spaces_text(value)))
                     rows_xml.append('<table:table-row>%s</table:table-row>' % ''.join(cells))
                 body_parts.append('<table:table table:name="LayoutTabelle%d" table:style-name="%s">%s%s</table:table>' % (table_idx, tname, ''.join(table_cols), ''.join(rows_xml)))
@@ -11227,8 +9484,11 @@ def _bk_write_layout_tables_odt(path, item, export_image, record_views):
     automatic_styles.extend(text_styles.values())
     automatic_styles.extend([
         '<style:style style:name="BKLTCellP" style:family="paragraph"><style:paragraph-properties fo:margin-top="0cm" fo:margin-bottom="0cm" fo:line-height="100%%"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
-        '<style:style style:name="BKLTceHead" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #777777" fo:padding="0.03cm"/><style:text-properties fo:font-weight="bold" fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
-        '<style:style style:name="BKLTceBody" style:family="table-cell"><style:table-cell-properties fo:border="0.05pt solid #AAAAAA" fo:padding="0.03cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
+        '<style:style style:name="BKLTceHead" style:family="table-cell"><style:table-cell-properties fo:border-left="0.05pt solid #777777" fo:border-right="0.05pt solid #777777" fo:border-top="0.5pt solid #555555" fo:border-bottom="0.5pt solid #555555" fo:padding="0.03cm"/><style:text-properties fo:font-weight="bold" fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
+        '<style:style style:name="BKLTceTop" style:family="table-cell"><style:table-cell-properties fo:border-left="0.05pt solid #888888" fo:border-right="0.05pt solid #888888" fo:border-top="0.5pt solid #555555" fo:border-bottom="none" fo:padding="0.03cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
+        '<style:style style:name="BKLTceBody" style:family="table-cell"><style:table-cell-properties fo:border-left="0.05pt solid #888888" fo:border-right="0.05pt solid #888888" fo:border-top="none" fo:border-bottom="none" fo:padding="0.03cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
+        '<style:style style:name="BKLTceBottom" style:family="table-cell"><style:table-cell-properties fo:border-left="0.05pt solid #888888" fo:border-right="0.05pt solid #888888" fo:border-top="none" fo:border-bottom="0.5pt solid #555555" fo:padding="0.03cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
+        '<style:style style:name="BKLTceOnly" style:family="table-cell"><style:table-cell-properties fo:border-left="0.05pt solid #888888" fo:border-right="0.05pt solid #888888" fo:border-top="0.5pt solid #555555" fo:border-bottom="0.5pt solid #555555" fo:padding="0.03cm"/><style:text-properties fo:font-size="7.2pt" style:font-name="Arial"/></style:style>',
     ])
     content = ''.join([
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -11267,28 +9527,28 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
     supports_layout_tables = include_text_modes and fmt_l in _BK_LAYOUT_TABLE_TEXT_FMTS and not txt_only
     supports_extended = fmt_l in {"xlsx", "excel", "ods", "calc", "docx", "word", "odt", "json"} and not txt_only
     dlg = QDialog(self)
-    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title", "Export-Darstellung wählen"))
+    dlg.setWindowTitle(_bk_tab_tr(self, "export_text_layout_title" if include_text_modes else "export_table_columns_title"))
     dlg.setModal(True)
     layout = QVBoxLayout(dlg); layout.setContentsMargins(14, 12, 14, 12); layout.setSpacing(8)
     intro_key = "export_text_layout_intro_extended" if include_text_modes else "export_table_columns_intro"
-    label = QLabel(_bk_tab_tr(self, intro_key, "Wähle die Darstellung für den Export."), dlg); label.setWordWrap(True); layout.addWidget(label)
+    label = QLabel(_bk_tab_tr(self, intro_key), dlg); label.setWordWrap(True); layout.addWidget(label)
 
     rb_original = rb_lines = rb_layout_tables = rb_simple = rb_table = None
-    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group", "Darstellung"), dlg) if QGroupBox is not None else None
+    mode_box = QGroupBox(_bk_tab_tr(self, "export_layout_mode_group"), dlg) if QGroupBox is not None else None
     mode_layout = QVBoxLayout(mode_box) if mode_box is not None else QVBoxLayout(); mode_layout.setContentsMargins(10, 8, 10, 8)
     if include_text_modes:
-        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original", "Wie Originalvorlage / räumliches Layout"), dlg)
-        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines", "Einfache Zeilenform"), dlg)
+        rb_original = QRadioButton(_bk_tab_tr(self, "export_text_layout_original"), dlg)
+        rb_lines = QRadioButton(_bk_tab_tr(self, "export_text_layout_lines"), dlg)
         mode = str(getattr(self, "_bk_export_text_layout_mode", "original") or "original").lower()
         rb_original.setChecked(mode not in {"lines", "table", "table_simple", "layout_tables"} or txt_only)
         rb_lines.setChecked(mode == "lines")
         mode_layout.addWidget(rb_original); mode_layout.addWidget(rb_lines)
     if supports_layout_tables:
-        rb_layout_tables = QRadioButton(_bk_tab_tr(self, "export_text_layout_with_tables", "Layout mit Tabellen"), dlg); mode_layout.addWidget(rb_layout_tables)
+        rb_layout_tables = QRadioButton(_bk_tab_tr(self, "export_text_layout_with_tables"), dlg); mode_layout.addWidget(rb_layout_tables)
     if supports_simple:
-        rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple", "Tabelle (einfach)"), dlg); mode_layout.addWidget(rb_simple)
+        rb_simple = QRadioButton(_bk_tab_tr(self, "export_text_layout_table_simple"), dlg); mode_layout.addWidget(rb_simple)
     if supports_extended:
-        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table", "Tabelle (erweitert)"), dlg); mode_layout.addWidget(rb_table)
+        rb_table = QRadioButton(_bk_tab_tr(self, "export_text_layout_table"), dlg); mode_layout.addWidget(rb_table)
     if not include_text_modes and rb_simple is not None:
         rb_simple.setChecked(True)
     elif not include_text_modes and rb_table is not None:
@@ -11301,9 +9561,11 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
     if mode_box is not None: layout.addWidget(mode_box)
     else: layout.addLayout(mode_layout)
 
+    _bk_add_export_orientation_group(self, dlg, layout)
+
     selected_keys = _bk_load_saved_column_keys_for_dialog(self)
     checkboxes = {}
-    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label", "Tabellen-Spalten:"), dlg) if QGroupBox is not None else None
+    columns_box = QGroupBox(_bk_tab_tr(self, "export_table_columns_label"), dlg) if QGroupBox is not None else None
     columns_layout = QVBoxLayout(columns_box) if columns_box is not None else QVBoxLayout()
     grid = QGridLayout() if QGridLayout is not None else None
     if grid is not None:
@@ -11321,37 +9583,37 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
     custom_edit = None
     if _BK_QLineEdit is not None:
         custom_row = QHBoxLayout()
-        custom_label = QLabel(_bk_tab_tr(self, "export_table_custom_column_label", "Eigener Reiter / Datentyp:"), dlg)
-        custom_edit = _BK_QLineEdit(dlg); custom_edit.setPlaceholderText(_bk_tab_tr(self, "export_table_custom_column_placeholder", "Name eingeben"))
-        btn_add_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_add", "Hinzufügen"), dlg)
-        btn_delete_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_delete", "Eigene löschen"), dlg)
-        btn_reset_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_reset", "Standard wiederherstellen"), dlg)
+        custom_label = QLabel(_bk_tab_tr(self, "export_table_custom_column_label"), dlg)
+        custom_edit = _BK_QLineEdit(dlg); custom_edit.setPlaceholderText(_bk_tab_tr(self, "export_table_custom_column_placeholder"))
+        btn_add_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_add"), dlg)
+        btn_delete_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_delete"), dlg)
+        btn_reset_custom = QPushButton(_bk_tab_tr(self, "export_table_custom_column_reset"), dlg)
         custom_row.addWidget(custom_label); custom_row.addWidget(custom_edit, 1); custom_row.addWidget(btn_add_custom); custom_row.addWidget(btn_delete_custom); custom_row.addWidget(btn_reset_custom)
         columns_layout.addLayout(custom_row)
     else:
         btn_add_custom = btn_delete_custom = btn_reset_custom = None
 
     quick_row = QHBoxLayout()
-    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all", "Alle auswählen"), dlg)
-    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button", "Nichts auswählen"), dlg)
-    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember", "Auswahl merken"), dlg)
+    btn_all = QPushButton(_bk_tab_tr(self, "export_table_columns_all"), dlg)
+    btn_none = QPushButton(_bk_tab_tr(self, "export_table_columns_none_button"), dlg)
+    btn_remember = QPushButton(_bk_tab_tr(self, "export_table_columns_remember"), dlg)
     for btn in (btn_all, btn_none, btn_remember): quick_row.addWidget(btn)
     quick_row.addStretch(1); columns_layout.addLayout(quick_row)
     if columns_box is not None: layout.addWidget(columns_box)
     else: layout.addLayout(columns_layout)
 
-    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group", "Bildbereiche"), dlg) if QGroupBox is not None else None
+    zone_box = QGroupBox(_bk_tab_tr(self, "export_zones_group"), dlg) if QGroupBox is not None else None
     zone_layout = QHBoxLayout(zone_box) if zone_box is not None else QHBoxLayout()
-    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones", "Bildbereiche / Spaltenzonen berücksichtigen"), dlg)
+    cb_zones = QCheckBox(_bk_tab_tr(self, "export_table_use_zones"), dlg)
     try: remembered_zones = self.settings.value("export/table_use_zones", bool(getattr(self, "_bk_export_use_zones", False)), type=bool)
     except Exception: remembered_zones = bool(getattr(self, "_bk_export_use_zones", False))
     cb_zones.setChecked(bool(remembered_zones))
-    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones", "Bereiche festlegen..."), dlg)
+    btn_zones = QPushButton(_bk_tab_tr(self, "export_table_define_zones"), dlg)
     zone_layout.addWidget(cb_zones, 1); zone_layout.addWidget(btn_zones)
     if zone_box is not None: layout.addWidget(zone_box)
     else: layout.addLayout(zone_layout)
 
-    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint", "Tabelle (einfach) nutzt die vorhandenen Overlay-Boxen direkt und bildet daraus eine räumlich formatierte Tabelle."), dlg)
+    hint = QLabel(_bk_tab_tr(self, "export_table_simple_hint"), dlg)
     hint.setWordWrap(True); layout.addWidget(hint)
 
     def current_checked_keys(): return [key for key, cb in checkboxes.items() if cb.isChecked() and key in _BK_TABULAR_COLUMN_BY_KEY]
@@ -11365,7 +9627,7 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
         if not title: return
         existing_titles = {_bk_tabular_column_title(self, key).casefold() for key in _BK_TABULAR_KEYS}
         if title.casefold() in existing_titles:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_custom_column_exists", "Dieser Reiter/Datentyp existiert bereits.")); return
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_custom_column_exists")); return
         base = _bk_custom_column_slug(title); key = "custom_" + base; used = set(_BK_TABULAR_KEYS); i = 2
         while key in used:
             key = f"custom_{base}_{i}"; i += 1
@@ -11405,7 +9667,7 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
     def remember_selection():
         keys = current_checked_keys()
         if not keys:
-            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+            QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["remembered"] = True; result["columns"] = _bk_save_column_keys(self, keys)
         try: self.settings.setValue("export/table_use_zones", bool(cb_zones.isChecked())); self.settings.sync()
         except Exception: pass
@@ -11422,10 +9684,10 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
         if zone_box is not None: zone_box.setVisible(detailed); zone_box.setEnabled(detailed)
         cb_zones.setEnabled(detailed); btn_zones.setEnabled(detailed)
         if rb_layout_tables is not None and rb_layout_tables.isChecked():
-            hint.setText(_bk_tab_tr(self, "export_layout_with_tables_hint", "Layout mit Tabellen erzeugt normalen Fließtext mit Leerzeichen-Positionierung und ersetzt erkannte Tabellenbereiche durch echte Office-Tabellen."))
+            hint.setText(_bk_tab_tr(self, "export_layout_with_tables_hint"))
             hint.setVisible(True)
         else:
-            hint.setText(_bk_tab_tr(self, "export_table_simple_hint", "Tabelle (einfach) nutzt die vorhandenen Overlay-Boxen direkt und bildet daraus eine räumlich formatierte Tabelle."))
+            hint.setText(_bk_tab_tr(self, "export_table_simple_hint"))
             hint.setVisible(bool(rb_simple is not None and rb_simple.isChecked()))
         try:
             _bk_resize_export_dialog_for_mode(dlg, detailed=detailed, txt_only=txt_only)
@@ -11438,7 +9700,7 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
     sync_enabled()
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
     try:
-        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok", "OK")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel", "Abbrechen"))
+        buttons.button(QDialogButtonBox.Ok).setText(_bk_tab_tr(self, "btn_ok")); buttons.button(QDialogButtonBox.Cancel).setText(_bk_tab_tr(self, "btn_cancel"))
     except Exception: pass
     def cancel_dialog(): result["cancelled"] = True; dlg.done(QDialog.Rejected)
     def accept_checked():
@@ -11450,7 +9712,7 @@ def _bk_column_choice_dialog_final2(self, fmt=None, include_text_modes=False):
         else:
             mode = "table"; keys = current_checked_keys()
             if not keys:
-                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title", "Warnung"), _bk_tab_tr(self, "export_table_columns_none", "Bitte mindestens eine Spalte auswählen.")); return
+                QMessageBox.warning(dlg, _bk_tab_tr(self, "warn_title"), _bk_tab_tr(self, "export_table_columns_none")); return
         result["mode"] = mode; result["columns"] = _bk_normalize_column_keys(keys); result["use_zones"] = bool(cb_zones.isChecked()) if mode == "table" else False
         try: self._bk_export_use_zones = result["use_zones"]
         except Exception: pass
@@ -11474,6 +9736,11 @@ def _bk_render_file_final3(self, path: str, fmt: str, item: TaskItem):
         if fmt_l == "csv":
             return _bk_write_plain_overlay_csv_final(path, item)
         if fmt_l in {"xlsx", "excel", "ods", "calc"} and str(getattr(self, "_bk_export_table_mode", "simple") or "simple").lower() == "simple":
+            # "Tabelle (einfach)" ist strikt raeumlich. Der fruehere Versuch,
+            # beliebige Seiten automatisch als Personenregister zu deuten,
+            # erzeugte bei historischen Sach- und Statistiktabellen erfundene
+            # Spalten wie Familienname/Zusatz/Alter. Semantische Benutzer-
+            # spalten bleiben ausschliesslich im Modus "Tabelle (erweitert)".
             layout = _bk_simple_spatial_layout_from_item(item)
             if fmt_l in {"xlsx", "excel"}: return _bk_write_simple_layout_xlsx(path, layout, self)
             if fmt_l in {"ods", "calc"}: return _bk_write_simple_layout_ods(path, layout, self)
@@ -11487,12 +9754,13 @@ def _bk_render_file_final3(self, path: str, fmt: str, item: TaskItem):
             if fmt_l in {"docx", "word"}: return _bk_write_layout_tables_docx(path, item, export_image, record_views)
             if fmt_l == "odt": return _bk_write_layout_tables_odt(path, item, export_image, record_views)
         if fmt_l in {"docx", "word", "odt"} and text_layout_mode == "table_simple":
+            # Auch bei Writer/Word muss "Tabelle (einfach)" die vorhandenen
+            # Overlay-Positionen abbilden und darf keine genealogische
+            # Registerstruktur hineininterpretieren.
             layout = _bk_simple_spatial_layout_from_item(item); matrix = layout.get("matrix") or []
-            if fmt_l in {"docx", "word"}: return _bk_write_simple_matrix_docx(path, matrix, self)
-            if fmt_l == "odt": return _bk_write_simple_matrix_odt(path, matrix, self)
-    if callable(_BK_FINAL_PREV_RENDER_FILE_2):
-        return _BK_FINAL_PREV_RENDER_FILE_2(self, path, fmt, item)
-    return None
+            if fmt_l in {"docx", "word"}: return _bk_write_simple_matrix_docx(path, matrix, self, layout=layout)
+            if fmt_l == "odt": return _bk_write_simple_matrix_odt(path, matrix, self, layout=layout)
+    return RENDER_NOT_HANDLED
 
 
 def _bk_export_single_interactive_final3(self, item: TaskItem, fmt: str):
@@ -11554,10 +9822,36 @@ def _bk_export_batch_final3(self, items, fmt: str):
     return None
 
 try:
+    __all__ = sorted(set(list(__all__) + [
+        '_bk_semantic_blocks_from_item', '_bk_semantic_blocks_write',
+        '_bk_simple_table_records', '_bk_simple_group_rows',
+        # Gemeinsame Layoutanalyse und Writer fuer den normalen und den
+        # lokalen-LM-Export. Ohne Registrierung faellt lm_structured_export
+        # still auf die alte ungeordnete Zeilenliste zurueck.
+        '_bk_layout_blocks_with_tables', '_bk_layout_row_text',
+        '_bk_simple_spatial_layout_from_item', '_bk_simple_col_widths',
+        '_bk_write_simple_layout_xlsx',
+        '_bk_add_export_orientation_group', '_bk_orientation_from_radios',
+        '_bk_registry_lookup', '_bk_tr_registry', '_bk_dialog_content_min_size',
+        '_bk_ai_zone_orientation_hint',
+        '_bk_write_simple_layout_ods', '_bk_write_simple_matrix_odt',
+    ]))
     _bk_column_choice_dialog = _bk_column_choice_dialog_final2
-    MainWindow._render_file = _bk_render_file_final3
+    register_render_handler(_bk_render_file_final3)
     MainWindow._export_single_interactive = _bk_export_single_interactive_final3
     MainWindow._export_batch = _bk_export_batch_final3
     register_globals('bk', globals(), sorted(set(__all__)))
 except Exception:
-    pass
+    # Diese Registrierung entscheidet, ob die Exportfunktionen der letzten
+    # Generation ueberhaupt aktiv sind. Ein stilles pass liess das Programm
+    # frueher scheinbar normal starten - nur eben mit alten/fehlenden
+    # Exportpfaden und ohne jede Fehlermeldung. Der Fehler wird deshalb
+    # jetzt sichtbar gemacht (App startet weiter, aber diagnostizierbar).
+    try:
+        import sys as _sys
+        import traceback as _traceback
+        print("[bottled_kraken] FEHLER: Finale Export-Registrierung fehlgeschlagen - "
+              "Exportfunktionen sind moeglicherweise unvollstaendig!", file=_sys.stderr)
+        _traceback.print_exc(file=_sys.stderr)
+    except Exception:
+        pass

@@ -370,11 +370,16 @@ def _bk_lm_generate_gedcom(self):
     self._bk_gedcom_worker.finished_gedcom.connect(lambda path, text: _bk_lm_on_gedcom_done(self, path, text))
     self._bk_gedcom_worker.failed_gedcom.connect(lambda path, msg: _bk_lm_on_gedcom_failed(self, path, msg))
     self._bk_gedcom_worker.start()
+_BK_GEDCOM_VISION_PREV_UPDATE_DROPDOWN_STATE = (
+    _bk_lm_update_dropdown_state if "_bk_lm_update_dropdown_state" in globals() else None
+)
+
 def _bk_lm_update_dropdown_state(self):
-    try:
-        _BK_GEDCOM_PREV_UPDATE_DROPDOWN_STATE(self)
-    except Exception:
-        pass
+    if callable(_BK_GEDCOM_VISION_PREV_UPDATE_DROPDOWN_STATE):
+        try:
+            _BK_GEDCOM_VISION_PREV_UPDATE_DROPDOWN_STATE(self)
+        except Exception:
+            pass
     if hasattr(self, "act_ai_menu_gedcom"):
         busy = _bk_lm_any_job_running(self)
         task = _bk_gedcom_current_task(self)
@@ -382,6 +387,7 @@ def _bk_lm_update_dropdown_state(self):
 _bk_gedcom_apply_vision_translations()
 MainWindow._bk_lm_generate_gedcom = _bk_lm_generate_gedcom
 __all__ = [
+    '_BK_GEDCOM_VISION_PREV_UPDATE_DROPDOWN_STATE',
     'BKLocalGedcomWorker',
     '_BK_GEDCOM_PROMPT_DEFAULTS',
     '_BK_GEDCOM_REVIEW_TEXTS',

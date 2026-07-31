@@ -1,5 +1,6 @@
 from bottled_kraken.module_registry import register_globals, seed_globals
 seed_globals('bk', globals())
+from bottled_kraken.common import _crop_overlay_box_to_data_url_strict
 class BKFullPageLMOCRWithBoxesWorker(BKFullPageLMOCRWorker):
     def _safe_page_line_for_idx(self, page_lines: List[str], idx: int) -> str:
         if 0 <= int(idx) < len(page_lines):
@@ -61,18 +62,23 @@ class BKFullPageLMOCRWithBoxesWorker(BKFullPageLMOCRWorker):
             box_text = ""
             if getattr(rv, "bbox", None):
                 try:
-                    line_data_url = _crop_single_line_to_data_url(
+                    line_data_url = _crop_overlay_box_to_data_url_strict(
                         self.path,
                         rv,
                         pad_x=crop_profile.get("single_pad_x", 20),
                         pad_y=crop_profile.get("single_pad_y", 8),
                         extra_context_y=crop_profile.get("single_extra_context_y", 0),
                     )
-                    box_text = self._request_single_line_reread(
-                        line_data_url=line_data_url,
-                        idx=getattr(rv, "idx", i),
-                        current_text=getattr(rv, "text", "") or "",
-                    )
+                    self._bk_strict_overlay_transcription_active = True
+                    self._bk_active_overlay_crop_data_url = line_data_url
+                    try:
+                        box_text = self._request_single_line_reread(
+                            line_data_url=line_data_url,
+                            idx=getattr(rv, "idx", i),
+                            current_text=getattr(rv, "text", "") or "",
+                        )
+                    finally:
+                        self._bk_active_overlay_crop_data_url = None
                 except Exception as exc:
                     try:
                         print(f"LM PAGE+BOXES BOX OCR ERROR idx={getattr(rv, 'idx', i)}: {exc}")
@@ -219,9 +225,16 @@ class BKFullPageLMOCRWithBoxesWorker(BKFullPageLMOCRWorker):
                 raise ValueError(self._tr("warn_need_overlay_boxes_for_lm_ocr_boxes"))
             self.status_changed.emit(self._tr("ai_status_page_boxes_scan", os.path.basename(self.path)))
             self.progress_changed.emit(3)
+            self._bk_strict_overlay_transcription_active = True
+            self._bk_active_overlay_crop_data_url = None
             page_data_url = _page_to_data_url(self.path)
+            self._bk_full_page_context_image_url = page_data_url
             self.progress_changed.emit(10)
-            page_lines = self._request_full_page_ocr(page_data_url)
+            self._bk_full_page_context_request_active = True
+            try:
+                page_lines = self._request_full_page_ocr(page_data_url)
+            finally:
+                self._bk_full_page_context_request_active = False
             page_lines = [_clean_ocr_text(x) for x in (page_lines or []) if _clean_ocr_text(x)]
             if not page_lines:
                 raise ValueError(self._tr("ai_err_page_no_usable_lines", 0, 0))

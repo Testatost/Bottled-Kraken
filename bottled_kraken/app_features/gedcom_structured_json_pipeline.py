@@ -47,16 +47,8 @@ def _bk_gedcom_structured_install_translations():
     except Exception:
         pass
 def _bk_gedcom_structured_tr(worker, key: str, *args) -> str:
-    try:
-        return worker._tr(key, *args)
-    except Exception:
-        lang = "de"
-        data = _BK_GEDCOM_STRUCTURED_TEXTS.get(lang) or _BK_GEDCOM_STRUCTURED_TEXTS["de"]
-        text = data.get(key, _BK_GEDCOM_STRUCTURED_TEXTS["de"].get(key, key))
-        try:
-            return text.format(*args) if args else text
-        except Exception:
-            return text
+    lang = getattr(worker, "current_lang", translation.DEFAULT_LANGUAGE)
+    return translation.translate(lang, key, *args)
 def _bk_gedcom_safe_text(value) -> str:
     txt = str(value or "")
     txt = txt.replace("\r\n", "\n").replace("\r", "\n")
@@ -269,34 +261,6 @@ def _bk_gedcom_build_from_structured(worker, data: dict) -> str:
     if not re.search(r"(?m)^0\s+@I\d+@\s+INDI\b", text):
         raise RuntimeError(self._tr("err_structured_data_no_indi"))
     return text
-def _bk_gedcom_response_format_structured() -> dict:
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "gedcom_extraction",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "record_type": {"type": "string"},
-                    "registry_place": {"type": "string"},
-                    "record_number": {"type": "string"},
-                    "entry_date": {"type": "string"},
-                    "event_date": {"type": "string"},
-                    "event_time": {"type": "string"},
-                    "event_place": {"type": "string"},
-                    "child": {"type": "object"},
-                    "father": {"type": "object"},
-                    "mother": {"type": "object"},
-                    "informant": {"type": "object"},
-                    "source_title": {"type": "string"},
-                    "transcription_or_notes": {"type": "string"},
-                    "uncertainty": {"type": "boolean"},
-                },
-                "required": ["record_type", "child", "father", "mother", "informant", "uncertainty"],
-                "additionalProperties": True,
-            },
-        },
-    }
 def _bk_gedcom_build_structured_payload(worker, image_data_url: str = "") -> dict:
     ocr_text = getattr(worker, "source_text", "") or "[Kein OCR-Text vorhanden. Bitte primär das Seitenbild auswerten.]"
     system_prompt = worker._tr("ai_prompt_gedcom_extract_system")
@@ -379,7 +343,6 @@ __all__ = [
     '_bk_gedcom_note_lines',
     '_bk_gedcom_person_has_data',
     '_bk_gedcom_person_name',
-    '_bk_gedcom_response_format_structured',
     '_bk_gedcom_safe_text',
     '_bk_gedcom_setdefault_person_dict',
     '_bk_gedcom_structured_install_translations',
