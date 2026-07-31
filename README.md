@@ -359,39 +359,4 @@ Der originale Bottled-Kraken-Code steht unter **MIT**. Abhängigkeiten und
 optionale Downloads behalten ihre eigenen Lizenzen. Besonders wichtig:
 PyMuPDF/MuPDF ist dual unter **AGPL-3.0** oder einer kommerziellen
 Artifex-Lizenz verfügbar. Vor der Weitergabe eines gebündelten Binaries muss
-die passende Lizenzroute geklärt und vollständig eingehalten werden. Details
-stehen in `THIRD_PARTY_NOTICES.md`.
-
-## Windows 10/11: native Desktop-App und eScriptorium über WSL2
-
-Die Windows-Ausgabe wird als native PyInstaller-EXE gebaut. eScriptorium läuft
-unter Windows in einer eigenen Ubuntu-24.04-WSL2-Distribution. Eine fehlgeschlagene
-Teilinstallation kann über **eScriptorium installieren / aktualisieren** fortgesetzt
-werden. Weitere Windows-, WSL2-, Audio-, SmartScreen-, Langpfad-, icon.ico- und PyInstaller-Hinweise stehen in
-`WINDOWS_10_11_HINWEISE.txt`.
-
-## Registry- und MainWindow-Diagnose
-
-Die historische Kompatibilitätsschicht kann bei Bedarf nach einem echten
-Anwendungsstart protokolliert werden. Dazu Bottled Kraken einmal mit folgender
-Umgebungsvariable starten:
-
-```bash
-BOTTLED_KRAKEN_WRITE_REGISTRY_DIAGNOSTICS=1 python main.py
-```
-
-Der Lauf erzeugt anschließend unter dem Bottled-Kraken-Benutzerdatenordner die
-Datei `logs/registry_diagnostics.json`. Sie enthält die tatsächlich während
-dieses Prozesses aufgetretenen Registry-Kollisionen sowie alle mehrfachen
-`MainWindow.<Attribut> = ...`-Bindungen. Für jede Bindung wird markiert, welche
-Fassung am Ende tatsächlich aktiv ist.
-
-Für neue Änderungen gilt:
-
-- keine neuen Funktionsnamen mit `_vN`, `_vNc`, `_final` oder `_finalN`
-- bestehende Implementierung ersetzen, statt eine weitere Variante anzuhängen
-- gewollte Erweiterungsketten müssen ihren unmittelbaren Vorgänger in einer
-  eindeutig benannten `_PREV_...`-Variable festhalten und aufrufen
-- neue `MainWindow`-Attribute dürfen nicht von mehr als zwei Modulen geschrieben
-  werden; bestehende Ausnahmen sind in der Testsuite eingefroren und dürfen nur
-  abgebaut, nicht erweitert werden
+die passende Lizenzroute geklärt und vollständig eingehalten werden.
