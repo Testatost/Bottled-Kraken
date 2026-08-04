@@ -2,8 +2,8 @@
 # Target Python: Python 3.13 x64; Python 3.12 x64 remains accepted by the build script.
 #
 # Release builds use requirements-lock-windows.txt for reproducibility. The build
-# script installs kraken==7.0.3 separately with --no-deps because Kraken's CoreML
-# dependency is not part of the Windows OCR target.
+# script installs kraken==7.0.3 separately with --no-deps. coremltools bleibt
+# ausdrücklich enthalten, weil Kraken .mlmodel-Dateien darüber einliest.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
@@ -21,6 +21,7 @@ Pillow>=9.2.0
 regex
 scipy~=1.15.3
 protobuf>=3.0.0
+coremltools>=9.0,<10
 jinja2~=3.1.6
 scikit-learn~=1.7.2
 scikit-image~=0.25.2

@@ -134,6 +134,11 @@ class BKDictionaryStore:
         with self._build_lock:
             if self.is_ready():
                 return True
+            # is_ready() may have opened a read-only SQLite connection to an
+            # outdated database. On Windows an open connection can block
+            # os.replace(tmp, self.db_path), so close it before rebuilding.
+            self.close()
+            self._lookup_cache.clear()
             sources = self.existing_sources()
             if not sources:
                 self.build_error = "keine Quelldateien"

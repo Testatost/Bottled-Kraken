@@ -114,12 +114,13 @@ def _short_postgres_socket_dir(
     candidates = []
     if runtime_value:
         candidates.append(Path(runtime_value) / "bottled-kraken" / selected / "pg")
-    candidates.extend(
-        (
-            temp_base / f"bk-pg-{user_id}" / selected,
-            Path("/tmp") / f"bkpg-{user_id}" / selected,
-        )
-    )
+    candidates.append(temp_base / f"bk-pg-{user_id}" / selected)
+    if temp_dir is None and os.name != "nt":
+        # On Linux tempfile.gettempdir() is normally /tmp already, but keep an
+        # explicit ultra-short fallback for unusual runtime environments. Do
+        # not add it when a caller supplied temp_dir explicitly; tests and
+        # callers then expect that base to be honored.
+        candidates.append(Path("/tmp") / f"bkpg-{user_id}" / selected)
     for candidate in candidates:
         if _postgres_socket_path_length(candidate) <= POSTGRES_UNIX_SOCKET_MAX_BYTES:
             return candidate
@@ -330,7 +331,7 @@ def open_local_path(path: str | os.PathLike[str]) -> bool:
         except OSError:
             return False
     try:
-        if os.name == "nt" or sys.platform.startswith("win"):
+        if sys.platform.startswith("win"):
             os.startfile(str(target))  # type: ignore[attr-defined]
             return True
     except Exception:

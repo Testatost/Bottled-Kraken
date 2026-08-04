@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """Windows-only CoreML import shim for Kraken.
 
-Kraken 7 imports ``coremltools.proto.NeuralNetwork_pb2`` while loading its VGSL
-layers. Bottled Kraken does not use CoreML export or CoreML inference on
-Windows, and coremltools is not a normal Windows runtime dependency for this
-build. The shim only satisfies Kraken's import-time protobuf references; if a
-real CoreML operation is reached it fails with an explicit RuntimeError.
+Kraken 7 imports ``coremltools`` while loading VGSL layers. The normal
+Windows build must include the real coremltools package because Kraken uses it
+to parse legacy ``.mlmodel`` files. This shim is only a last-resort import
+fallback for development environments where coremltools is absent; real model
+loading/saving fails early with an explicit RuntimeError instead of producing
+misleading protobuf placeholder values.
 """
 
 import importlib.util
@@ -49,6 +50,31 @@ class _CoreMLStubMessage:
 
 class _CoreMLStubClass(_CoreMLStubMessage):
     pass
+
+
+class _UnavailableMLModel:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise _CoreMLUnavailable(
+            "coremltools is required to load Kraken .mlmodel files on Windows. "
+            "Install/include coremltools in the Windows build instead of using "
+            "the Bottled Kraken fallback shim."
+        )
+
+
+class _UnavailableNeuralNetworkBuilder:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise _CoreMLUnavailable(
+            "coremltools is required to save Kraken .mlmodel files. "
+            "The fallback shim cannot serialize CoreML/VGSL models."
+        )
+
+
+class _UnavailableDatatypes:
+    @staticmethod
+    def Array(*args: Any, **kwargs: Any) -> None:
+        raise _CoreMLUnavailable(
+            "coremltools datatypes are unavailable because the fallback shim is active."
+        )
 
 
 def _make_message_class(name: str) -> type[_CoreMLStubMessage]:
@@ -122,8 +148,13 @@ def install_windows_coremltools_stub() -> bool:
     proto.NeuralNetwork_pb2 = nn  # type: ignore[attr-defined]
     proto.Model_pb2 = model_pb2  # type: ignore[attr-defined]
     proto.FeatureTypes_pb2 = feature_pb2  # type: ignore[attr-defined]
+    builder.NeuralNetworkBuilder = _UnavailableNeuralNetworkBuilder  # type: ignore[attr-defined]
+    datatypes.Array = _UnavailableDatatypes.Array  # type: ignore[attr-defined]
+    neural_network.NeuralNetworkBuilder = _UnavailableNeuralNetworkBuilder  # type: ignore[attr-defined]
     neural_network.builder = builder  # type: ignore[attr-defined]
     neural_network.datatypes = datatypes  # type: ignore[attr-defined]
+    models.MLModel = _UnavailableMLModel  # type: ignore[attr-defined]
+    models.datatypes = datatypes  # type: ignore[attr-defined]
     models.neural_network = neural_network  # type: ignore[attr-defined]
     coreml.proto = proto  # type: ignore[attr-defined]
     coreml.models = models  # type: ignore[attr-defined]

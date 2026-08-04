@@ -2,14 +2,14 @@
 # Target Python: 3.13 x64; Python 3.12 x64 is accepted for local builds.
 # Install Kraken itself afterwards with:
 #   python -m pip install --no-deps kraken==7.0.3
-# The build script then runs pip check with only the known kraken/coremltools
-# Windows exception filtered, plus Windows-safe import checks for Kraken and Whisper.
+# The build script verifies Kraken, coremltools, and Whisper with Windows-safe import checks.
 # setuptools is pinned below 81 because ctranslate2 4.6.0 still imports pkg_resources.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Core OCR / HTR runtime used by kraken
 # kraken==7.0.3 is installed separately with --no-deps by build_windows_10_11.ps1.
+# coremltools is required to parse legacy Kraken .mlmodel files.
 torch==2.10.0+cpu
 torchvision==0.25.0+cpu
 jsonschema==4.26.0
@@ -20,6 +20,13 @@ Pillow==12.2.0
 regex==2026.7.19
 scipy==1.15.3
 protobuf==7.35.1
+coremltools==9.0
+sympy==1.14.0
+tqdm==4.67.1
+attrs==25.4.0
+cattrs==25.3.0
+pyaml==25.7.0
+PyYAML==6.0.3
 jinja2==3.1.6
 scikit-learn==1.7.2
 scikit-image==0.25.2

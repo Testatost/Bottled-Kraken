@@ -50,24 +50,24 @@ Für eine bestehende PyCharm-venv:
     python -m pip install --no-deps kraken==7.0.3
     python -m pip check
     python -c "import kraken; print('kraken OK')"
+    python -c "import coremltools; from coremltools.models import MLModel; print('coremltools OK')"
     python -c "import pkg_resources, backports.tarfile, faster_whisper; print('runtime OK')"
     python -m pip install pyinstaller pytest
 
-Hinweis: Im automatischen Build wird die bekannte Kraken/coremltools-Meldung aus
-`pip check` unter Windows gezielt ignoriert. Jede andere fehlende oder
-widersprüchliche Abhängigkeit bricht den Build ab.
+Hinweis: Im automatischen Build muss `pip check` sauber durchlaufen.
+coremltools ist in der Windows-Ausgabe jetzt wieder ausdrücklich enthalten,
+weil Kraken klassische `.mlmodel`-Dateien über coremltools einliest.
 
 Warum wird Kraken mit --no-deps installiert?
 --------------------------------------------
-Kraken 7.x deklariert coremltools als Abhängigkeit. coremltools 9.0 liefert
-keine normalen Windows-Wheels. Für Bottled Krakens OCR-Pfad wird CoreML nicht
-benötigt; die Windows-Ausgabe installiert daher die konkret benötigten Kraken-
-Laufzeitabhängigkeiten explizit und Kraken selbst anschließend ohne automatische
-Abhängigkeitsauflösung. macOS-/CoreML-Konvertierung ist in dieser Windows-Ausgabe
-nicht Bestandteil des Zielumfangs. Bottled Kraken installiert beim Start unter
-Windows einen kleinen CoreML-Import-Shim, damit Krakens VGSL-Module trotz
-fehlendem coremltools importierbar bleiben. Dieser Shim ist kein CoreML-Ersatz
-für Konvertierung oder CoreML-Inferenz.
+Kraken 7.x wird weiterhin ohne automatische Abhängigkeitsauflösung installiert,
+damit die Windows-Laufzeitabhängigkeiten kontrolliert und reproduzierbar bleiben.
+coremltools wird aber nicht mehr ausgelassen: Kraken braucht coremltools nicht
+für Apple-CoreML-Inferenz, wohl aber zum Parsen der klassischen Kraken-
+`.mlmodel`-Dateien. Der kleine Bottled-Kraken-CoreML-Shim bleibt nur als
+Notfall-Importfallback für Entwicklungsumgebungen ohne coremltools erhalten.
+In der normalen Windows-Release-EXE darf dieser Fallback nicht zum Laden echter
+`.mlmodel`-Dateien verwendet werden.
 
 PyInstaller
 -----------

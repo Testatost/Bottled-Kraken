@@ -51,32 +51,21 @@ function Invoke-Checked {
 function Test-KrakenRuntimeDependencies {
     $failureMessage = "Kraken-Abhaengigkeiten unvollstaendig - requirements.txt gegen kraken==7.0.3 abgleichen."
 
-    # Kraken wird unter Windows absichtlich ohne automatische Abhaengigkeiten installiert,
-    # weil coremltools fuer den Windows-OCR-Zielpfad nicht benoetigt wird und keine normale
-    # Windows-Wheel-Verfuegbarkeit hat. pip check bleibt trotzdem hart: akzeptiert wird nur
-    # diese bekannte coremltools-Meldung, jede andere fehlende oder widerspruechliche
-    # Abhaengigkeit bricht den Build ab.
+    # Kraken wird unter Windows weiterhin ohne automatische Abhaengigkeiten installiert,
+    # aber coremltools ist im Lockfile explizit enthalten. Kraken braucht coremltools
+    # nicht fuer Apple-CoreML-Inferenz, aber zum Lesen klassischer .mlmodel-Dateien.
     $pipCheckOutput = & $VenvPython -m pip check 2>&1
     $pipCheckExit = $LASTEXITCODE
-    $unexpected = @()
-    foreach ($line in $pipCheckOutput) {
-        $text = [string]$line
-        if ($text.Trim().Length -eq 0) { continue }
-        if ($text -match '^(?i:kraken)\s+[^\s]+\s+requires\s+coremltools[,\s]') {
-            Write-Host "pip check: erwartete Windows-Ausnahme ignoriert: $text"
-            continue
-        }
-        $unexpected += $text
-    }
-    if ($pipCheckExit -ne 0 -and $unexpected.Count -gt 0) {
-        $unexpected | ForEach-Object { Write-Error $_ }
+    if ($pipCheckExit -ne 0) {
+        $pipCheckOutput | ForEach-Object { Write-Error $_ }
         throw $failureMessage
     }
-    if ($pipCheckExit -eq 0 -and $pipCheckOutput) {
+    if ($pipCheckOutput) {
         $pipCheckOutput | ForEach-Object { Write-Host $_ }
     }
 
     Invoke-Checked $VenvPython @("-c", "import kraken; print('kraken OK')") $failureMessage
+    Invoke-Checked $VenvPython @("-c", "import coremltools; from coremltools.models import MLModel; from coremltools.proto import NeuralNetwork_pb2; print('coremltools OK')") $failureMessage
     Invoke-Checked $VenvPython @("-c", "import pkg_resources, backports.tarfile, faster_whisper; print('windows runtime imports OK')") $failureMessage
 }
 
