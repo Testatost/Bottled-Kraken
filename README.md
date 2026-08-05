@@ -5,9 +5,8 @@
 <h1 align="center">Bottled Kraken</h1>
 
 <p align="center">
-  A desktop OCR workbench for Windows 10/11, Linux Fedora and Mint that treats recognition as an
-  <strong>editable workflow</strong> — <br>
-  not a one-click black box.
+  A desktop OCR workbench for Windows 10/11, Linux Fedora and Linux Mint that treats recognition as an
+  <strong>editable workflow</strong> — not a one-click black box.
 </p>
 
 <p align="center">
