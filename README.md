@@ -5,15 +5,16 @@
 <h1 align="center">Bottled Kraken</h1>
 
 <p align="center">
-  A desktop OCR workbench for Windows 10/11 that treats recognition as an
-  <strong>editable workflow</strong> — not a one-click black box.
+  A desktop OCR workbench for Windows 10/11, Linux Fedora and Mint that treats recognition as an
+  <strong>editable workflow</strong> — <br>
+  not a one-click black box.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-2D6A9F" alt="MIT License">
   <img src="https://img.shields.io/badge/Python-3.13%20x64-2D6A9F" alt="Python 3.13">
   <img src="https://img.shields.io/badge/Kraken-7.0.3-2D6A9F" alt="Kraken 7.0.3">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2D6A9F" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20Fedora%20%7C%20Mint-2D6A9F" alt="Windows 10/11, Fedora, and Mint">
   <img src="https://img.shields.io/badge/UI-16%20languages-2D6A9F" alt="16 languages">
 </p>
 
